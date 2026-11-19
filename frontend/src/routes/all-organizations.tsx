@@ -4,16 +4,40 @@ import { useTranslation } from "react-i18next";
 import {
   useDeleteOrganizationMutation,
   useOrganizationsQuery,
+  useSetTestModeMutation,
 } from "../api/organization.queries";
-import { Avatar, Button, Card, Input, Table, TopBar } from "../ui";
+import type { Organization } from "../api/organization";
+import {
+  useProofingPausesQuery,
+  useSetPlatformPauseMutation,
+} from "../api/identity-proofing.queries";
+import type { ProofingPause } from "../api/identity-proofing";
+import {
+  Avatar,
+  Button,
+  Card,
+  ConfirmDialog,
+  Input,
+  Table,
+  Tag,
+  TopBar,
+} from "../ui";
 import * as React from "react";
+
+const COLUMNS = 6;
 
 export default function AllOrganizations(): React.JSX.Element {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { data, isPending, isError, error } = useOrganizationsQuery();
   const del = useDeleteOrganizationMutation();
+  const pauses = useProofingPausesQuery();
+  const pauseOf = useMemo(
+    () => new Map((pauses.data ?? []).map((p) => [p.organizationId, p])),
+    [pauses.data],
+  );
   const [query, setQuery] = useState("");
+  const [switching, setSwitching] = useState<Organization | null>(null);
 
   function handleDelete(
     event: React.MouseEvent,
@@ -60,7 +84,7 @@ export default function AllOrganizations(): React.JSX.Element {
         }
       />
 
-      <div className="p-8">
+      <div className="p-4 sm:p-8">
         {isError ? (
           <Card className="p-6">
             <p className="text-error text-[14px]">
@@ -78,15 +102,21 @@ export default function AllOrganizations(): React.JSX.Element {
                   {t("allOrganizations.columnKvk")}
                 </Table.HeaderCell>
                 <Table.HeaderCell>{t("common.slug")}</Table.HeaderCell>
+                <Table.HeaderCell>
+                  {t("identityProofing.pause.platformColumn")}
+                </Table.HeaderCell>
+                <Table.HeaderCell>{t("testMode.column")}</Table.HeaderCell>
                 <Table.HeaderCell className="text-right">
                   {t("allOrganizations.columnActions")}
                 </Table.HeaderCell>
               </Table.Head>
               <Table.Body>
                 {isPending ? (
-                  <Table.State colSpan={4}>{t("common.loading")}</Table.State>
+                  <Table.State colSpan={COLUMNS}>
+                    {t("common.loading")}
+                  </Table.State>
                 ) : filtered.length === 0 ? (
-                  <Table.State colSpan={4}>
+                  <Table.State colSpan={COLUMNS}>
                     {data && data.length > 0
                       ? t("allOrganizations.noMatch")
                       : t("allOrganizations.none")}
@@ -120,6 +150,21 @@ export default function AllOrganizations(): React.JSX.Element {
                       <Table.Cell className="text-ink-soft font-mono text-[12px]">
                         {org.slug}
                       </Table.Cell>
+                      <Table.Cell>
+                        <ProofingPauseCell
+                          orgId={org.id}
+                          orgName={org.name}
+                          pause={pauseOf.get(org.id)}
+                          loaded={pauses.isSuccess}
+                          failed={pauses.isError}
+                        />
+                      </Table.Cell>
+                      <Table.Cell>
+                        <TestModeCell
+                          org={org}
+                          onSwitch={() => setSwitching(org)}
+                        />
+                      </Table.Cell>
                       <Table.Cell className="text-right">
                         <Button
                           variant="dangerGhost"
@@ -137,7 +182,159 @@ export default function AllOrganizations(): React.JSX.Element {
             </Table>
           </Card>
         )}
+        {switching && (
+          <TestModeDialog org={switching} onClose={() => setSwitching(null)} />
+        )}
       </div>
     </>
+  );
+}
+
+// An org's identity proofing as the platform admin sees it, with their pause.
+// The org's own switch shows but is theirs to lift.
+function ProofingPauseCell({
+  orgId,
+  orgName,
+  pause,
+  loaded,
+  failed,
+}: Readonly<{
+  orgId: string;
+  orgName: string;
+  pause: ProofingPause | undefined;
+  // An org without a pause row is active only once the list has loaded:
+  // while it loads, or when it failed, its state is not known.
+  loaded: boolean;
+  failed: boolean;
+}>): React.JSX.Element {
+  const { t } = useTranslation();
+  const set = useSetPlatformPauseMutation();
+  // Pausing stops a whole organisation's proofing, so it is confirmed first.
+  const [confirmingPause, setConfirmingPause] = useState(false);
+  if (!loaded) {
+    return failed ? (
+      <Tag tone="default">{t("identityProofing.pause.unknown")}</Tag>
+    ) : (
+      <span className="text-ink-soft text-[12.5px]">{t("common.loading")}</span>
+    );
+  }
+  const byPlatform = pause?.platformPausedAt !== undefined;
+
+  return (
+    <div
+      className="flex flex-wrap items-center gap-2"
+      // The row opens the org; this cell's button must not.
+      onClick={(event) => event.stopPropagation()}
+    >
+      {byPlatform ? (
+        <Tag tone="amber">
+          {pause?.platformPausedBy
+            ? t("identityProofing.pause.pausedByPlatform", {
+                name: pause.platformPausedBy.name,
+              })
+            : t("identityProofing.pause.pausedByPlatformAdmin")}
+        </Tag>
+      ) : (
+        <Tag tone="green">{t("identityProofing.pause.active")}</Tag>
+      )}
+      <Button
+        size="sm"
+        variant="secondary"
+        loading={set.isPending}
+        onClick={() =>
+          byPlatform
+            ? set.mutate({ orgId, paused: false })
+            : setConfirmingPause(true)
+        }
+      >
+        {byPlatform
+          ? t("identityProofing.pause.platformResume")
+          : t("identityProofing.pause.platformPause")}
+      </Button>
+      {confirmingPause && (
+        <ConfirmDialog
+          title={t("identityProofing.pause.platformConfirmTitle", {
+            name: orgName,
+          })}
+          message={t("identityProofing.pause.whatStops")}
+          confirmLabel={t("identityProofing.pause.platformPause")}
+          busy={set.isPending}
+          onConfirm={() =>
+            set.mutate(
+              { orgId, paused: true },
+              { onSuccess: () => setConfirmingPause(false) },
+            )
+          }
+          onClose={() => {
+            set.reset();
+            setConfirmingPause(false);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+// Whether an org runs in test mode, and the platform admin's switch for it.
+function TestModeCell({
+  org,
+  onSwitch,
+}: Readonly<{ org: Organization; onSwitch: () => void }>): React.JSX.Element {
+  const { t } = useTranslation();
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      {org.testMode ? (
+        <Tag tone="amber">{t("testMode.label")}</Tag>
+      ) : (
+        <Tag tone="green">{t("testMode.live")}</Tag>
+      )}
+      <Button
+        size="sm"
+        variant="secondary"
+        onClick={(event) => {
+          // The row opens the org; this button must not.
+          event.stopPropagation();
+          onSwitch();
+        }}
+      >
+        {org.testMode ? t("testMode.switchToLive") : t("testMode.switchToTest")}
+      </Button>
+    </div>
+  );
+}
+
+// Confirms switching org's mode: its proofing lists change with it. Rendered
+// outside the table, so a click in it does not open the org's row.
+function TestModeDialog({
+  org,
+  onClose,
+}: Readonly<{ org: Organization; onClose: () => void }>): React.JSX.Element {
+  const { t } = useTranslation();
+  const set = useSetTestModeMutation();
+  const next = !org.testMode;
+  return (
+    <ConfirmDialog
+      title={
+        next
+          ? t("testMode.confirmTestTitle", { name: org.name })
+          : t("testMode.confirmLiveTitle", { name: org.name })
+      }
+      message={
+        next
+          ? t("testMode.confirmTestMessage")
+          : t("testMode.confirmLiveMessage")
+      }
+      confirmLabel={
+        next ? t("testMode.switchToTest") : t("testMode.switchToLive")
+      }
+      busy={set.isPending}
+      onConfirm={() =>
+        set.mutate({ id: org.id, testMode: next }, { onSuccess: onClose })
+      }
+      onClose={() => {
+        set.reset();
+        onClose();
+      }}
+    />
   );
 }

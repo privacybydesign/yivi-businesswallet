@@ -2,11 +2,12 @@ package provisioning
 
 import (
 	"context"
-	"errors"
 	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/database"
 )
 
 const (
@@ -41,29 +42,15 @@ func NewScheduler(orgs enabledLister, sync syncer) *Scheduler {
 	return &Scheduler{orgs: orgs, sync: sync, timeout: DefaultSyncTimeout}
 }
 
-// Start syncs every enabled organisation on each tick until ctx is cancelled. It
-// returns immediately. The first pass is one interval away rather than at boot:
-// a deploy restarts every replica at once, and a directory that was read an hour
-// ago does not need re-reading because we redeployed.
-func (s *Scheduler) Start(ctx context.Context, interval time.Duration) {
+// Start syncs every enabled organisation whenever a pass is due, an interval
+// after the last one by any replica, until ctx is cancelled. It returns
+// immediately. A deploy does not cause a pass: a directory that was read an
+// hour ago does not need re-reading because we redeployed.
+func (s *Scheduler) Start(ctx context.Context, runs database.Querier, interval time.Duration) {
 	if interval <= 0 {
 		interval = DefaultSyncInterval
 	}
-	ticker := time.NewTicker(interval)
-	go func() {
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				if err := s.SyncAll(ctx); err != nil && !errors.Is(err, context.Canceled) {
-					slog.ErrorContext(ctx, "provisioning: sync pass failed",
-						slog.String("error", err.Error()))
-				}
-			}
-		}
-	}()
+	database.Periodic{Name: "provisioning-sync", Interval: interval, Runs: runs}.Start(ctx, s.SyncAll)
 }
 
 // SyncAll runs one pass. Organisations are synced one after another: a pass is

@@ -1,12 +1,12 @@
 import { z } from "zod";
 import { ApiError, absoluteApiUrl, request, requestBlob } from "./http";
 
-// The qualified co-signing workflow: the business wallet is the RP-centric
-// Signature Creation Application. Each signer links a signing credential once (a
-// member in the "My credential" tab, an external signee behind their invitation
-// link), then a request routes a PDF to its signers; each signs via an OID4VP + CSC
-// ceremony that hands the browser off to the QTSP authorization server and returns
-// here. When all have signed, the document is delivered to the recipient over QERDS
+// The co-signing workflow: the business wallet is the RP-centric Signature
+// Creation Application. Each signer links a signing credential once (a member in
+// the "My credential" tab, an external signee behind their invitation link), then
+// a request routes a PDF to its signers; each signs via an OID4VP + CSC ceremony
+// that hands the browser off to the signing provider's authorization server (the
+// built-in service's own page, or a remote QTSP) and returns here. When all have signed, the document is delivered to the recipient over QERDS
 // or email.
 
 const NOT_FOUND_STATUS = 404;
@@ -23,6 +23,7 @@ export const SIGNING_STATUS = {
   awaitingSignatures: "awaiting_signatures",
   completed: "completed",
   failed: "failed",
+  declined: "declined",
 } as const;
 
 // Signing modes, recipient channels, per-signer and delivery statuses — all mirror
@@ -46,6 +47,7 @@ export const SIGNER_STATUS = {
   pending: "pending",
   signed: "signed",
   failed: "failed",
+  declined: "declined",
 } as const;
 
 export const DELIVERY_STATUS = {
@@ -75,6 +77,13 @@ export const PLACEMENT_KIND = {
 export type PlacementKind =
   (typeof PLACEMENT_KIND)[keyof typeof PLACEMENT_KIND];
 
+// How a request was made: by a member in the wallet, or by the organization's
+// own software over the signing API. An API request has no creator.
+export const CREATED_VIA = {
+  member: "member",
+  api: "api",
+} as const;
+
 export const placementSchema = z.object({
   kind: z.string(),
   page: z.number(),
@@ -97,6 +106,8 @@ export const signerSchema = z.object({
   status: z.string(),
   placements: z.array(placementSchema).nullable().default([]),
   signedAt: z.string().optional(),
+  declinedAt: z.string().optional(),
+  declineReason: z.string().optional(),
 });
 export type Signer = z.infer<typeof signerSchema>;
 
@@ -107,6 +118,9 @@ export const signingRequestSchema = z.object({
   mode: z.string(),
   createdBy: z.string(),
   createdByName: z.string(),
+  createdVia: z.string().default(CREATED_VIA.member),
+  // For an API request: the site its signees are sent back to when done.
+  returnUrl: z.string().optional(),
   recipientChannel: z.string(),
   recipientName: z.string().optional(),
   recipientAddress: z.string().optional(),
@@ -248,6 +262,21 @@ export function startSignRequest(
   });
 }
 
+// declineSignRequest lets a pending signer refuse to sign a request, with an
+// optional reason. It stops the request outright rather than starting a
+// ceremony, so there is no authorize URL to hand off to.
+export function declineSignRequest(
+  slug: string,
+  id: string,
+  reason: string,
+): Promise<void> {
+  return request(`${base(slug)}/requests/${encodeURIComponent(id)}/decline`, {
+    schema: z.void(),
+    method: "POST",
+    body: { reason },
+  });
+}
+
 export function getSigningRequest(
   slug: string,
   id: string,
@@ -305,8 +334,17 @@ export const externalSigningSchema = z.object({
   hasCredential: z.boolean(),
   canSign: z.boolean(),
   createdAt: z.string(),
+  // The site that sent the signee here, to offer a way back once they are
+  // done; it already carries the request id and status.
+  returnUrl: z.string().optional(),
 });
 export type ExternalSigning = z.infer<typeof externalSigningSchema>;
+
+// The stream that tells the external signee's page when its request moves: a
+// Server-Sent Events URL, for an EventSource.
+export function externalSigningEventsUrl(token: string): string {
+  return absoluteApiUrl(`${externalBase(token)}/events`);
+}
 
 export function getExternalSigning(
   token: string,
@@ -331,6 +369,18 @@ export function startExternalSign(token: string): Promise<SigningStart> {
   return request(`${externalBase(token)}/sign`, {
     schema: signingStartSchema,
     method: "POST",
+  });
+}
+
+// declineExternalSign is declineSignRequest's mirror for an external signee.
+export function declineExternalSign(
+  token: string,
+  reason: string,
+): Promise<void> {
+  return request(`${externalBase(token)}/decline`, {
+    schema: z.void(),
+    method: "POST",
+    body: { reason },
   });
 }
 

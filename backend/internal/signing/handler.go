@@ -13,18 +13,39 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/auth"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/events"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/respond"
 )
 
-// maxUploadBytes bounds an uploaded PDF (10 MiB) so a large upload cannot exhaust
-// memory; a QES demo signs ordinary documents.
-const maxUploadBytes = 10 << 20
+// maxDeclineReasonLength bounds the free-text decline reason, mirroring
+// internal/organization's mandate-revocation reason cap.
+const maxDeclineReasonLength = 500
+
+const (
+	// maxUploadMiB is the accepted size of an uploaded PDF, in MiB. It matches the
+	// documented per-file cap on a QERDS attachment (qerds.maxAttachmentBytes), the
+	// channel a signed document is delivered over. Signing only grows a document, so
+	// that is where the number comes from rather than a guarantee the signed result
+	// still fits. The error message names it and the frontend refuses a larger file
+	// before uploading it.
+	maxUploadMiB = 25
+	// maxUploadBytes bounds the document part of the upload.
+	maxUploadBytes = maxUploadMiB << 20
+	// multipartMemory is how much of the form is buffered in RAM before spilling to
+	// temp files during parsing. Deliberately below maxUploadBytes: the cap is what a
+	// document may weigh, not what one upload may hold in memory.
+	multipartMemory = 8 << 20
+	// bodySlack allows for the multipart boundaries and the other form fields on top
+	// of the document payload cap.
+	bodySlack = 1 << 20
+)
 
 type signingService interface {
 	StartLink(ctx context.Context, orgID, userID uuid.UUID, slug string) (Start, error)
 	CreateRequest(ctx context.Context, orgID, createdBy uuid.UUID, slug, filename string, pdf []byte, signers []SignerInput, mode string, rec RecipientInput) (uuid.UUID, error)
 	StartSign(ctx context.Context, orgID, userID uuid.UUID, slug string, requestID uuid.UUID) (Start, error)
+	DeclineSign(ctx context.Context, orgID, userID, requestID uuid.UUID, reason string) error
 	HandleCallback(ctx context.Context, code, state string) string
 	GetRequest(ctx context.Context, orgID, userID, id uuid.UUID, isAdmin bool) (Request, error)
 	GetSignedDocument(ctx context.Context, orgID, userID, id uuid.UUID, isAdmin bool) ([]byte, string, error)
@@ -35,8 +56,10 @@ type signingService interface {
 
 	// The external-signee flow, keyed by the invitation token alone (no session).
 	ExternalView(ctx context.Context, token string) (ExternalView, error)
+	ExternalRequestID(ctx context.Context, token string) (uuid.UUID, error)
 	StartExternalLink(ctx context.Context, token string) (Start, error)
 	StartExternalSign(ctx context.Context, token string) (Start, error)
+	DeclineExternalSign(ctx context.Context, token, reason string) error
 	ExternalDocument(ctx context.Context, token string) ([]byte, string, error)
 }
 
@@ -49,7 +72,12 @@ type Handler struct {
 	svc         signingService
 	requireUser func(http.Handler) http.Handler
 	authorize   func(http.Handler) http.Handler
+	// events tells an external signee's page when its request moves.
+	events *events.Hub
 }
+
+// SetEvents streams an external signee's request changes from hub.
+func (h *Handler) SetEvents(hub *events.Hub) { h.events = hub }
 
 func NewHandler(svc signingService, requireUser, authorize func(http.Handler) http.Handler) *Handler {
 	return &Handler{svc: svc, requireUser: requireUser, authorize: authorize}
@@ -69,6 +97,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("GET /orgs/{slug}/signing/requests", admin(respond.HandlerFunc(h.listRequests)))
 	mux.Handle("GET /orgs/{slug}/signing/requests/pending", member(respond.HandlerFunc(h.listPending)))
 	mux.Handle("POST /orgs/{slug}/signing/requests/{id}/sign", member(respond.HandlerFunc(h.signRequest)))
+	mux.Handle("POST /orgs/{slug}/signing/requests/{id}/decline", member(respond.HandlerFunc(h.declineRequest)))
 	mux.Handle("GET /orgs/{slug}/signing/requests/{id}", member(respond.HandlerFunc(h.getRequest)))
 	mux.Handle("GET /orgs/{slug}/signing/requests/{id}/document", member(respond.HandlerFunc(h.getDocument)))
 
@@ -81,9 +110,11 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	// path is their whole authorization — exactly like GET /invite/{token}. Each route
 	// resolves the token to a single signer row and reads nothing else from the caller.
 	mux.Handle("GET /signing/external/{token}", respond.HandlerFunc(h.externalView))
+	mux.Handle("GET /signing/external/{token}/events", respond.HandlerFunc(h.externalEvents))
 	mux.Handle("GET /signing/external/{token}/document", respond.HandlerFunc(h.externalDocument))
 	mux.Handle("POST /signing/external/{token}/credential/link", respond.HandlerFunc(h.externalLink))
 	mux.Handle("POST /signing/external/{token}/sign", respond.HandlerFunc(h.externalSign))
+	mux.Handle("POST /signing/external/{token}/decline", respond.HandlerFunc(h.externalDecline))
 }
 
 // getAvailability reports whether a signing provider is configured for the org.
@@ -130,25 +161,54 @@ func (h *Handler) createRequest(w http.ResponseWriter, r *http.Request) error {
 	org := organization.OrgFromContext(r.Context())
 	u := auth.UserFromContext(r.Context())
 
-	if err := r.ParseMultipartForm(maxUploadBytes); err != nil {
-		return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_upload", Message: "could not read the uploaded document"}
+	upload, err := parseUpload(w, r)
+	if err != nil {
+		return err
+	}
+	id, err := h.svc.CreateRequest(r.Context(), org.ID, u.ID, org.Slug, upload.filename, upload.pdf, upload.signers, upload.mode, upload.recipient)
+	if err := h.mapStartError(err); err != nil {
+		return err
+	}
+	respond.JSON(w, r, http.StatusCreated, map[string]string{"id": id.String()})
+	return nil
+}
+
+// upload is a new request as its multipart form carries it: the document and who
+// signs it, how, and where the result goes.
+type upload struct {
+	filename  string
+	pdf       []byte
+	signers   []SignerInput
+	mode      string
+	recipient RecipientInput
+}
+
+// parseUpload reads the multipart form a request is created from. The wallet's
+// own create and the API's take the same form.
+func parseUpload(w http.ResponseWriter, r *http.Request) (upload, error) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxUploadBytes+bodySlack)
+	if err := r.ParseMultipartForm(multipartMemory); err != nil {
+		if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
+			return upload{}, documentTooLarge()
+		}
+		return upload{}, &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_upload", Message: "could not read the uploaded document"}
 	}
 	file, header, err := r.FormFile("document")
 	if err != nil {
-		return &respond.APIError{Status: http.StatusBadRequest, Code: "missing_document", Message: "a PDF document is required in the 'document' field"}
+		return upload{}, &respond.APIError{Status: http.StatusBadRequest, Code: "missing_document", Message: "a PDF document is required in the 'document' field"}
 	}
 	defer func() { _ = file.Close() }()
 	pdf, err := io.ReadAll(io.LimitReader(file, maxUploadBytes+1))
 	if err != nil {
-		return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_upload", Message: "could not read the uploaded document"}
+		return upload{}, &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_upload", Message: "could not read the uploaded document"}
 	}
 	if len(pdf) > maxUploadBytes {
-		return &respond.APIError{Status: http.StatusRequestEntityTooLarge, Code: "document_too_large", Message: "the document is too large"}
+		return upload{}, documentTooLarge()
 	}
 
 	signers, err := parseSigners(r.Form["signers"])
 	if err != nil {
-		return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_signers", Message: "select one or more valid signers"}
+		return upload{}, &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_signers", Message: "select one or more valid signers"}
 	}
 	rec := RecipientInput{
 		Channel: strings.TrimSpace(r.FormValue("recipientChannel")),
@@ -163,13 +223,18 @@ func (h *Handler) createRequest(w http.ResponseWriter, r *http.Request) error {
 	if mode == "" {
 		mode = ModeParallel
 	}
+	return upload{filename: header.Filename, pdf: pdf, signers: signers, mode: mode, recipient: rec}, nil
+}
 
-	id, err := h.svc.CreateRequest(r.Context(), org.ID, u.ID, org.Slug, header.Filename, pdf, signers, mode, rec)
-	if err := h.mapStartError(err); err != nil {
-		return err
+// documentTooLarge is the 413 both size gates return: the body cap that stops an
+// oversized upload during parsing, and the payload cap checked after the document
+// part has been read. It names the limit so a caller knows what to send instead.
+func documentTooLarge() error {
+	return &respond.APIError{
+		Status:  http.StatusRequestEntityTooLarge,
+		Code:    "document_too_large",
+		Message: fmt.Sprintf("the document is larger than the %d MB maximum", maxUploadMiB),
 	}
-	respond.JSON(w, r, http.StatusCreated, map[string]string{"id": id.String()})
-	return nil
 }
 
 // signRequest starts the acting user's signing ceremony for a request and returns
@@ -186,6 +251,50 @@ func (h *Handler) signRequest(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	respond.JSON(w, r, http.StatusOK, start)
+	return nil
+}
+
+// declineRequestBody is a decline's optional free-text reason. Absent means no
+// reason was given, which is the common case and not an error.
+type declineRequestBody struct {
+	Reason string `json:"reason"`
+}
+
+// parseDeclineReason reads a decline's optional reason from the request body. An
+// empty body is the common case (no reason given); anything present but
+// unparseable, or over maxDeclineReasonLength, is rejected.
+func parseDeclineReason(r *http.Request) (string, error) {
+	var body declineRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil && !errors.Is(err, io.EOF) {
+		return "", &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_body", Message: "invalid request body"}
+	}
+	reason := strings.TrimSpace(body.Reason)
+	if len(reason) > maxDeclineReasonLength {
+		return "", &respond.APIError{
+			Status: http.StatusBadRequest, Code: "invalid_input",
+			Message: fmt.Sprintf("reason must be at most %d characters", maxDeclineReasonLength),
+		}
+	}
+	return reason, nil
+}
+
+// declineRequest lets a pending signer refuse to sign the request, with an
+// optional reason. It stops the request outright rather than starting a ceremony.
+func (h *Handler) declineRequest(w http.ResponseWriter, r *http.Request) error {
+	org := organization.OrgFromContext(r.Context())
+	u := auth.UserFromContext(r.Context())
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_id", Message: "invalid request id"}
+	}
+	reason, err := parseDeclineReason(r)
+	if err != nil {
+		return err
+	}
+	if err := h.svc.DeclineSign(r.Context(), org.ID, u.ID, id, reason); err != nil {
+		return h.mapStartError(err)
+	}
+	w.WriteHeader(http.StatusNoContent)
 	return nil
 }
 
@@ -251,11 +360,17 @@ func (h *Handler) getDocument(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return fmt.Errorf("getting signed document: %w", err)
 	}
+	writePDF(w, "attachment", signedName(filename), doc)
+	return nil
+}
+
+// writePDF answers with a PDF, as a download (attachment) or to read in the
+// browser (inline).
+func writePDF(w http.ResponseWriter, disposition, filename string, doc []byte) {
 	w.Header().Set("Content-Type", "application/pdf")
-	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", signedName(filename)))
+	w.Header().Set("Content-Disposition", fmt.Sprintf("%s; filename=%q", disposition, filename))
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(doc)
-	return nil
 }
 
 func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
@@ -328,6 +443,20 @@ func (h *Handler) externalView(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
+// externalEvents streams an event each time the signee's request or one of
+// its signers moves, so the page re-reads then instead of polling. The events
+// carry no data.
+func (h *Handler) externalEvents(w http.ResponseWriter, r *http.Request) error {
+	requestID, err := h.svc.ExternalRequestID(r.Context(), r.PathValue("token"))
+	if err := h.mapExternalError(err); err != nil {
+		return err
+	}
+	if h.events == nil {
+		return h.mapExternalError(ErrInvalidToken)
+	}
+	return h.events.Serve(w, r, events.Topic(events.SigningRequest, requestID))
+}
+
 // externalLink starts an external signee's credential-link ceremony.
 func (h *Handler) externalLink(w http.ResponseWriter, r *http.Request) error {
 	start, err := h.svc.StartExternalLink(r.Context(), r.PathValue("token"))
@@ -348,6 +477,19 @@ func (h *Handler) externalSign(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
+// externalDecline lets an external signee refuse to sign, with an optional reason.
+func (h *Handler) externalDecline(w http.ResponseWriter, r *http.Request) error {
+	reason, err := parseDeclineReason(r)
+	if err != nil {
+		return err
+	}
+	if err := h.svc.DeclineExternalSign(r.Context(), r.PathValue("token"), reason); err != nil {
+		return h.mapExternalError(err)
+	}
+	w.WriteHeader(http.StatusNoContent)
+	return nil
+}
+
 // externalDocument serves the document an external signee is being asked to sign, so
 // they can read it before signing. It is the current state of the document (the
 // original upload, or the accumulating PAdES once earlier signers have signed).
@@ -356,10 +498,7 @@ func (h *Handler) externalDocument(w http.ResponseWriter, r *http.Request) error
 	if err := h.mapExternalError(err); err != nil {
 		return err
 	}
-	w.Header().Set("Content-Type", "application/pdf")
-	w.Header().Set("Content-Disposition", fmt.Sprintf("inline; filename=%q", documentName(filename)))
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(doc)
+	writePDF(w, "inline", documentName(filename), doc)
 	return nil
 }
 
@@ -375,6 +514,10 @@ func (h *Handler) mapExternalError(err error) error {
 
 // mapStartError translates domain errors into API errors.
 func (h *Handler) mapStartError(err error) error {
+	return mapStartError(err)
+}
+
+func mapStartError(err error) error {
 	switch {
 	case err == nil:
 		return nil
@@ -386,6 +529,8 @@ func (h *Handler) mapStartError(err error) error {
 		return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_pdf", Message: "the uploaded file is not a valid PDF"}
 	case errors.Is(err, ErrInvalidRequest):
 		return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_request", Message: "the signing request is invalid"}
+	case errors.Is(err, ErrSignerIdentityBlocked):
+		return &respond.APIError{Status: http.StatusConflict, Code: "signer_identity_blocked", Message: "a selected signer's identity re-confirmation is overdue and must be completed before they can sign"}
 	case errors.Is(err, ErrNotFound):
 		return &respond.APIError{Status: http.StatusNotFound, Code: "not_found", Message: "signing request not found"}
 	case errors.Is(err, ErrNotSigner):

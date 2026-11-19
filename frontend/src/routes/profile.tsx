@@ -12,7 +12,7 @@ import { fullName, personInitials } from "../lib/name";
 import { Avatar, Button, Card, TopBar } from "../ui";
 
 const EYEBROW =
-  "text-muted font-mono text-[11px] font-medium tracking-[0.06em] uppercase";
+  "text-muted font-label text-[11px] font-medium tracking-[0.06em] uppercase";
 const FILE_BUTTON =
   "rounded-yivi border-line-strong bg-surface text-ink hover:bg-surface-3 focus-within:border-ink focus-within:ring-ink/10 inline-flex h-9 cursor-pointer items-center border px-3 text-[13px] font-medium transition-colors focus-within:ring-3";
 
@@ -77,7 +77,7 @@ export default function Profile(): React.JSX.Element {
     return (
       <>
         <TopBar title={t("profile.title")} subtitle={t("profile.subtitle")} />
-        <div className="p-8">
+        <div className="p-4 sm:p-8">
           <Card className="max-w-2xl p-6">
             <p className="text-ink-soft text-[14px]">{t("common.loading")}</p>
           </Card>
@@ -96,7 +96,7 @@ export default function Profile(): React.JSX.Element {
     <>
       <TopBar title={t("profile.title")} subtitle={t("profile.subtitle")} />
 
-      <div className="p-8">
+      <div className="p-4 sm:p-8">
         <Card className="max-w-2xl p-7">
           <h2 className="text-[16px] font-semibold">{t("profile.photo")}</h2>
           <p className="text-ink-soft mt-1 text-[13px]">
@@ -183,7 +183,7 @@ export default function Profile(): React.JSX.Element {
             <h2 className="text-[16px] font-semibold">
               {t("profile.account")}
             </h2>
-            <div className="mt-3.5 grid grid-cols-[180px_1fr] items-center gap-x-5 gap-y-2.5 text-[13.5px]">
+            <div className="mt-3.5 grid grid-cols-[110px_minmax(0,1fr)] items-center gap-x-5 gap-y-2.5 text-[13.5px] wrap-anywhere sm:grid-cols-[180px_1fr]">
               <span className={EYEBROW}>{t("common.name")}</span>
               <span className="text-ink">{fullName(user)}</span>
               <span className={EYEBROW}>{t("profile.email")}</span>

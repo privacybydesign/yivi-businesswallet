@@ -11,9 +11,20 @@ import (
 // the credential's own exp claim (nil when the credential does not expire); Revoked
 // reports that the last observed Token Status List bit for the credential read
 // anything other than valid.
+//
+// IssuedAt is the iat claim, Format the credential format (e.g. "dc+sd-jwt").
+// HasStatusList reports that the credential carries a Token Status List
+// reference, so it can be revoked at all; StatusCheckedAt is the last time its
+// status was read from that list (at receipt, or by RefreshStatuses), nil when
+// never. A credential's copies in one batch are revoked together, so these are
+// batch-wide.
 type HeldValidity struct {
-	ExpiresAt *time.Time
-	Revoked   bool
+	ExpiresAt       *time.Time
+	IssuedAt        *time.Time
+	Format          string
+	Revoked         bool
+	HasStatusList   bool
+	StatusCheckedAt *time.Time
 }
 
 // statusRevoked applies irmago's own revocation policy (eudi/services'

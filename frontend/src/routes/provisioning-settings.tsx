@@ -12,7 +12,7 @@ import type {
 } from "../api/provisioning";
 import { errorCode } from "../lib/api-error";
 import { useWhenFormatter } from "../lib/format-when";
-import { Button, Card, Input } from "../ui";
+import { Button, Card, Input, Select } from "../ui";
 import * as React from "react";
 
 const LABEL = "text-ink-soft text-[12px] font-semibold";
@@ -121,10 +121,10 @@ function configFingerprint(s: ProvisioningSettings): string {
 function ProvisioningForm({
   slug,
   initial,
-}: {
+}: Readonly<{
   slug: string;
   initial: ProvisioningSettings;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const save = useUpdateProvisioningSettingsMutation(slug);
 
@@ -190,9 +190,8 @@ function ProvisioningForm({
           <label htmlFor="provisioning-source" className={LABEL}>
             {t("provisioningSettings.source")}
           </label>
-          <select
+          <Select
             id="provisioning-source"
-            className={`${TEXTAREA_CLASS} h-9 py-0`}
             value={source}
             onChange={(event) => setSource(event.target.value)}
           >
@@ -201,7 +200,7 @@ function ProvisioningForm({
                 {sourceLabel(id)}
               </option>
             ))}
-          </select>
+          </Select>
         </div>
 
         <div className="flex flex-col gap-1">
@@ -340,10 +339,10 @@ function skipCounts(result: ProvisioningSyncResult): [string, number][] {
 function SyncCard({
   slug,
   settings,
-}: {
+}: Readonly<{
   slug: string;
   settings: ProvisioningSettings;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const formatWhen = useWhenFormatter();
   const sync = useRunProvisioningSyncMutation(slug);
@@ -456,9 +455,9 @@ function EntraGuidanceCard(): React.JSX.Element {
 // and gated on admin, so the panel only owns the settings query and its forms.
 export function ProvisioningSettingsPanel({
   slug,
-}: {
+}: Readonly<{
   slug: string;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const settings = useProvisioningSettingsQuery(slug, true);
 

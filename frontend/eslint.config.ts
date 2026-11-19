@@ -3,6 +3,7 @@ import globals from "globals";
 import reactHooks from "eslint-plugin-react-hooks";
 import reactRefresh from "eslint-plugin-react-refresh";
 import pluginQuery from "@tanstack/eslint-plugin-query";
+import sonarjs from "eslint-plugin-sonarjs";
 import tseslint from "typescript-eslint";
 import prettier from "eslint-config-prettier/flat";
 import { defineConfig, globalIgnores } from "eslint/config";
@@ -26,6 +27,12 @@ export default defineConfig([
         tsconfigRootDir: import.meta.dirname,
       },
     },
+  },
+  {
+    // SonarCloud S6759; only this one sonarjs rule, not its recommended set.
+    files: ["**/*.tsx"],
+    plugins: { sonarjs },
+    rules: { "sonarjs/prefer-read-only-props": "error" },
   },
   {
     files: ["*.{js,ts}"],

@@ -2,6 +2,7 @@ package seed
 
 import (
 	"context"
+	_ "embed" // Gemeente Nijmegen's logo
 	"errors"
 	"fmt"
 	"log/slog"
@@ -13,9 +14,11 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/attestation"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/attestation/rulebook"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/registryprovider"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/themesettings"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
 )
 
@@ -24,15 +27,28 @@ import (
 const fakerSeed = 1
 
 const (
-	demoOrgSlug      = "yivi"
-	fakerMemberCount = 15
-	inviteCount      = 35
-	revokeCount      = 22
-	roleChangeCount  = 8
+	demoOrgSlug = "yivi"
+	inviteCount = 22
+)
+
+// The Yivi org's two test members, each with something left to do: one is
+// asked to identify, the other, an external, to hand in a VOG.
+const (
+	identityTestEmail = "sanne.visser@example.test"
+	vogTestEmail      = "daan.smit@example.test"
+)
+
+// The orgs that run identity proofing for external people (proofing.go).
+const (
+	radboudSlug = "radboud-universiteit"
+	asrSlug     = "asr"
+	unibetSlug  = "unibet"
+	cmSlug      = "cm"
+	odixusSlug  = "odixus"
 )
 
 // demoOrganization is a seeded business wallet: an org with KVK identity, a QERDS
-// digital address and one representative. Its KVK identity and primary
+// digital address and, unless repKind is empty, one representative. Its KVK identity and primary
 // representative mirror registryprovider.DemoRegistrations (the register flow's
 // fake API), so a seeded user resolves to a real representative entry and the
 // seeded data never drifts from the register — enforced by TestDemoOrgsMatchRegister.
@@ -73,7 +89,7 @@ type demoMembership struct {
 // the dev demo seed and the only org provisioned by the staging org seed
 // (EnsureYiviOrganization), so both paths create an identical Yivi wallet.
 var yiviOrg = demoOrganization{
-	name: "Yivi B.V.", slug: demoOrgSlug, kvkNumber: "90000010", euid: "NL.KVK.90000010",
+	name: "Yivi B.V.", slug: demoOrgSlug, kvkNumber: "90000010", euid: "NLNHR.90000010",
 	addressLocal: "yivi", repGiven: "Johannes Hendrik", repFamily: "Janssen",
 	repKind: "bestuurder", repAuth: "sole", repDOB: "1979-05-14",
 }
@@ -88,6 +104,7 @@ var yiviTeam = []demoUser{
 	{email: "m.kamphuis@yivi.app", givenNames: "Martijn", lastName: "Kamphuis"},
 	{email: "r.hensen@yivi.app", givenNames: "Ruben", lastName: "Hensen"},
 	{email: "d.mulder@yivi.app", givenNames: "Dibran", lastName: "Mulder"},
+	{email: "j.lin@yivi.app", givenNames: "Jameson", lastName: "Lin"},
 }
 
 // partnerOrganization pairs a staging pilot organisation with the team
@@ -108,44 +125,45 @@ type partnerOrganization struct {
 // "@") — TestPartnerOrgFixturesAreWellFormed guards that.
 var partnerOrganizations = []partnerOrganization{
 	{
-		org: demoOrganization{name: "Anoigo Services B.V.", slug: "anoigo", kvkNumber: "84991011", euid: "NL.KVK.84991011", addressLocal: "anoigo"},
+		org: demoOrganization{name: "Anoigo Services B.V.", slug: "anoigo", kvkNumber: "84991011", euid: "NLNHR.84991011", addressLocal: "anoigo"},
 		team: []demoUser{
 			{email: "jeroen.debeer@anoigo.nl", givenNames: "Jeroen", lastName: "de Beer"},
 			{email: "cristy.meddens@anoigo.nl", givenNames: "Cristy", lastName: "Meddens"},
 		},
 	},
 	{
-		org: demoOrganization{name: "Gemeente Nijmegen", slug: "nijmegen", kvkNumber: "09220932", euid: "NL.KVK.09220932", addressLocal: "nijmegen"},
+		org: demoOrganization{name: "Gemeente Nijmegen", slug: "nijmegen", kvkNumber: "09220932", euid: "NLNHR.09220932", addressLocal: "nijmegen"},
 		team: []demoUser{
 			{email: "w.van.den.eeckhout@nijmegen.nl", givenNames: "Wendy", lastName: "van den Eeckhout"},
 			{email: "m.dessing@nijmegen.nl", givenNames: "Marnix", lastName: "Dessing"},
 		},
 	},
 	{
-		org: demoOrganization{name: "Ver.iD", slug: "ver-id", kvkNumber: "86662236", euid: "NL.KVK.86662236", addressLocal: "ver-id"},
+		org: demoOrganization{name: "Ver.iD", slug: "ver-id", kvkNumber: "86662236", euid: "NLNHR.86662236", addressLocal: "ver-id"},
 		team: []demoUser{
 			{email: "robert@ver.id", givenNames: "Robert", lastName: "van Altena"},
 			{email: "sten@ver.id", givenNames: "Sten", lastName: "Reijers"},
 			{email: "roger@ver.id", givenNames: "Roger", lastName: "Olivieira"},
 			{email: "tj@ver.id", givenNames: "Thomas Jan", lastName: "Geelen"},
+			{email: "kuldeep@ver.id", givenNames: "Kuldeep", lastName: "Kansal"},
 		},
 	},
 	{
-		org: demoOrganization{name: "PinkRoccade Local Government", slug: "pinkroccade", kvkNumber: "27322975", euid: "NL.KVK.27322975", addressLocal: "pinkroccade"},
+		org: demoOrganization{name: "PinkRoccade Local Government", slug: "pinkroccade", kvkNumber: "27322975", euid: "NLNHR.27322975", addressLocal: "pinkroccade"},
 		team: []demoUser{
 			{email: "engelbert.wijnhoven@pinkroccade.nl", givenNames: "Engelbert", lastName: "Wijnhoven"},
 			{email: "annemarie.stel@pinkroccade.nl", givenNames: "Annemarie", lastName: "Stel"},
 		},
 	},
 	{
-		org: demoOrganization{name: "Stichting Nuts", slug: "nuts", kvkNumber: "73134562", euid: "NL.KVK.73134562", addressLocal: "nuts"},
+		org: demoOrganization{name: "Stichting Nuts", slug: "nuts", kvkNumber: "73134562", euid: "NLNHR.73134562", addressLocal: "nuts"},
 		team: []demoUser{
 			{email: "sergej.van.middendorp@nuts.nl", givenNames: "Sergej", lastName: "van Middendorp"},
 			{email: "roland@headease.nl", givenNames: "Roland", lastName: "Groen"},
 		},
 	},
 	{
-		org: demoOrganization{name: "Secumail B.V.", slug: "secumail", kvkNumber: "69887594", euid: "NL.KVK.69887594", addressLocal: "secumail"},
+		org: demoOrganization{name: "Secumail B.V.", slug: "secumail", kvkNumber: "69887594", euid: "NLNHR.69887594", addressLocal: "secumail"},
 		team: []demoUser{
 			{email: "yvonne@secumailer.com", givenNames: "Yvonne", lastName: "Hoogendoorn"},
 		},
@@ -167,14 +185,32 @@ var kvkRegisterOrg = demoOrganization{
 // can log in predictably. Volume and variety are generated with the faker.
 var demoOrganizations = []demoOrganization{
 	yiviOrg,
-	{name: "Firsty.app B.V.", slug: "firsty", kvkNumber: "90000020", euid: "NL.KVK.90000020", addressLocal: "firsty", repGiven: "Thijs Adriaan", repFamily: "de Vries", repKind: "bestuurder", repAuth: "jointly", repDOB: "1985-11-22"},
-	{name: "Radboud Universiteit", slug: "radboud-universiteit", kvkNumber: "90000030", euid: "NL.KVK.90000030", addressLocal: "radboud", repGiven: "Anke", repFamily: "Bakker", repKind: "gevolmachtigde", repAuth: "beperkt", repDOB: "1990-02-17"},
-	{name: "Gemeente Nijmegen", slug: "nijmegen", kvkNumber: "09220932", euid: "NL.KVK.09220932", addressLocal: "nijmegen", repGiven: "Dibran", repFamily: "Mulder", repKind: "bestuurder", repAuth: "sole", repDOB: "1991-05-14"},
+	{name: "Firsty.app B.V.", slug: "firsty", kvkNumber: "90000020", euid: "NLNHR.90000020", addressLocal: "firsty", repGiven: "Thijs Adriaan", repFamily: "de Vries", repKind: "bestuurder", repAuth: "jointly", repDOB: "1985-11-22"},
+	{name: "Radboud Universiteit (Demo)", slug: radboudSlug, kvkNumber: "90000030", euid: "NLNHR.90000030", addressLocal: "radboud", repGiven: "Anke", repFamily: "Bakker", repKind: "gevolmachtigde", repAuth: "beperkt", repDOB: "1990-02-17"},
+	{name: "Gemeente Nijmegen", slug: "nijmegen", kvkNumber: "09220932", euid: "NLNHR.09220932", addressLocal: "nijmegen", repGiven: "Dibran", repFamily: "Mulder", repKind: "bestuurder", repAuth: "sole", repDOB: "1991-05-14"},
+	// Identity proofing use cases (demoProofingOrgs): real names marked "(Demo)",
+	// with no representative and placeholder KVK numbers outside the register.
+	{name: "a.s.r. verzekeringen (Demo)", slug: asrSlug, kvkNumber: "90000110", euid: "NLNHR.90000110", addressLocal: "asr"},
+	{name: "Unibet (Demo)", slug: unibetSlug, kvkNumber: "90000120", euid: "NLNHR.90000120", addressLocal: "unibet"},
+	{name: "CM.com (Demo)", slug: cmSlug, kvkNumber: "90000130", euid: "NLNHR.90000130", addressLocal: "cm"},
+	{name: "odixus (Demo)", slug: odixusSlug, kvkNumber: "90000140", euid: "NLNHR.90000140", addressLocal: "odixus"},
+	// The beschermingsbewind demo (bewind.go): a fictional office, whose
+	// bestuurder is the root of its mandate chain, and the court that appoints it.
+	bewindOfficeOrg,
+	{name: "Rechtbank Gelderland (Demo)", slug: bewindCourtSlug, kvkNumber: "90000160", euid: "NLNHR.90000160", addressLocal: bewindCourtSlug},
+}
+
+// bewindOfficeOrg is the bewindvoeringskantoor of the beschermingsbewind demo.
+var bewindOfficeOrg = demoOrganization{
+	name: "Waalstad Bewindvoering B.V. (Demo)", slug: bewindOfficeSlug, kvkNumber: "90000150", euid: "NLNHR.90000150",
+	addressLocal: bewindOfficeSlug, repGiven: "Dibran", repFamily: "Mulder", repKind: "bestuurder", repAuth: "sole", repDOB: "1991-05-14",
 }
 
 var demoUsers = []demoUser{
 	{email: "admin@yivi.app", givenNames: "Johannes Hendrik", preferredName: "Jan", lastName: "Janssen"},
 	{email: "user@yivi.app", givenNames: "Thijs Adriaan", lastName: "de Vries"},
+	{email: identityTestEmail, givenNames: "Sanne", lastName: "Visser"},
+	{email: vogTestEmail, givenNames: "Daan", lastName: "Smit"},
 }
 
 var demoDepartments = []demoDepartment{
@@ -187,6 +223,127 @@ var demoMemberships = []demoMembership{
 	{email: "user@yivi.app", slug: "yivi", role: "admin", jobTitle: "Chief Technology Officer", department: "Engineering"},
 	{email: "admin@yivi.app", slug: "yivi", role: "admin", jobTitle: "Chief Executive Officer", department: "Operations"},
 	{email: "user@yivi.app", slug: "firsty", role: "member", jobTitle: "Account Manager", department: "Sales"},
+	{email: identityTestEmail, slug: "yivi", role: "member", jobTitle: "Support Engineer", department: "Operations"},
+	{email: vogTestEmail, slug: "yivi", role: "member", jobTitle: "Freelance Developer", department: "Engineering"},
+}
+
+// communityOrganization is a dev-demo organisation whose point is its internal
+// structure rather than its people: an association or church that holds a
+// business wallet and models its sections (congregations, teams) as departments.
+// Like the KVK register org it carries no representative (repKind is empty) and
+// is absent from the register dataset — it is provisioned directly, so its KVK
+// number is a demo placeholder (same 900000xx range as the other demo orgs) and
+// must not collide with a register entry, or TestRegisterOnlyCompanyIsOpenable's
+// openable count would silently shrink. No members are seeded for it.
+type communityOrganization struct {
+	org         demoOrganization
+	departments []string
+}
+
+// sdvbTeamGroup is one age or senior bracket of SDV Barneveld with the number of
+// teams it fields; expandTeams turns it into "<section> <code>-1" … "-<count>"
+// department names.
+type sdvbTeamGroup struct {
+	section string // "Jeugd" or "Senioren"
+	code    string // team code prefix as the KNVB writes it: JO19, MO17, Mannen, …
+	count   int
+}
+
+const (
+	sdvbSectionYouth   = "Jeugd"
+	sdvbSectionSeniors = "Senioren"
+)
+
+// sdvbTeamGroups is the 2026-2027 team layout of SDV Barneveld (sdvb.nl): the
+// boys' (JO) and girls' (MO) youth brackets and the men's and women's senior
+// squads. Only the club structure is copied — no player, trainer or staff names.
+var sdvbTeamGroups = []sdvbTeamGroup{
+	{section: sdvbSectionYouth, code: "JO19", count: 3},
+	{section: sdvbSectionYouth, code: "JO17", count: 2},
+	{section: sdvbSectionYouth, code: "JO16", count: 3},
+	{section: sdvbSectionYouth, code: "JO15", count: 4},
+	{section: sdvbSectionYouth, code: "JO14", count: 4},
+	{section: sdvbSectionYouth, code: "JO13", count: 5},
+	{section: sdvbSectionYouth, code: "JO12", count: 6},
+	{section: sdvbSectionYouth, code: "JO11", count: 6},
+	{section: sdvbSectionYouth, code: "JO10", count: 8},
+	{section: sdvbSectionYouth, code: "JO9", count: 6},
+	{section: sdvbSectionYouth, code: "JO8", count: 4},
+	{section: sdvbSectionYouth, code: "MO17", count: 2},
+	{section: sdvbSectionYouth, code: "MO15", count: 2},
+	{section: sdvbSectionYouth, code: "MO13", count: 2},
+	{section: sdvbSectionYouth, code: "MO11", count: 3},
+	{section: sdvbSectionYouth, code: "MO8", count: 1},
+	{section: sdvbSectionSeniors, code: "Mannen", count: 13},
+	{section: sdvbSectionSeniors, code: "Vrouwen", count: 1},
+	{section: sdvbSectionSeniors, code: "MO20", count: 1},
+}
+
+// sdvbExtraTeams are the squads that don't follow the "<code>-<n>" numbering: the
+// mini's (the youngest bracket, played as T-teams) and the recreational 35+/30+
+// senior teams.
+var sdvbExtraTeams = []string{
+	sdvbSectionYouth + " Mini's",
+	sdvbSectionSeniors + " Mannen 35+",
+	sdvbSectionSeniors + " Vrouwen 30+",
+}
+
+// expandTeams lists every team of every group as a department name, e.g.
+// "Jeugd JO19-1", followed by the irregular extras. The order is the order the
+// club presents its teams in (oldest youth bracket first, then seniors).
+func expandTeams(groups []sdvbTeamGroup, extras []string) []string {
+	var names []string
+	for _, g := range groups {
+		for i := 1; i <= g.count; i++ {
+			names = append(names, fmt.Sprintf("%s %s-%d", g.section, g.code, i))
+		}
+	}
+	return append(names, extras...)
+}
+
+// communityOrganizations are the dev-demo associations. Hervormde Gemeente
+// Barneveld is one church split into four wijkgemeenten (district congregations,
+// hervormdbarneveld.nl/wijkgemeenten), each covering its own neighbourhoods and
+// run by its own kerkenraad; the wijkgemeente is the unit a member belongs to, so
+// each is a department. SDV Barneveld is the local football club with every youth
+// and senior team as a department (see sdvbTeamGroups).
+var communityOrganizations = []communityOrganization{
+	{
+		org: demoOrganization{
+			name: "Hervormde Gemeente Barneveld", slug: "hervormd-barneveld",
+			kvkNumber: "90000050", euid: "NLNHR.90000050", addressLocal: "hervormd-barneveld",
+		},
+		departments: []string{
+			"Wijkgemeente 1",
+			"Wijkgemeente 2",
+			"Wijkgemeente 3",
+			"Wijkgemeente 4",
+		},
+	},
+	{
+		org: demoOrganization{
+			name: "SDV Barneveld", slug: "sdvb",
+			kvkNumber: "90000060", euid: "NLNHR.90000060", addressLocal: "sdvb",
+		},
+		departments: expandTeams(sdvbTeamGroups, sdvbExtraTeams),
+	},
+}
+
+// ensureCommunityOrganizations seeds each community org plus its departments,
+// nobody in them.
+func ensureCommunityOrganizations(ctx context.Context, pool *pgxpool.Pool, orgs *organization.Store, addressDomain string) error {
+	for _, c := range communityOrganizations {
+		org, err := ensureOrg(ctx, pool, c.org, addressDomain)
+		if err != nil {
+			return err
+		}
+		for _, name := range c.departments {
+			if _, err := ensureDepartment(ctx, orgs, org.ID, name); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func Run(ctx context.Context, dsn, addressDomain string, adminEmails []string) error {
@@ -261,11 +418,18 @@ func Run(ctx context.Context, dsn, addressDomain string, adminEmails []string) e
 		}
 	}
 
+	if err := ensureCommunityOrganizations(ctx, pool, orgs, addressDomain); err != nil {
+		return err
+	}
+
 	demoOrg := orgsBySlug[demoOrgSlug]
 	if err := seedAttestations(ctx, pool, demoOrg.ID); err != nil {
 		return err
 	}
-	if err := seedEmailSettings(ctx, pool, demoOrg.ID); err != nil {
+	if err := seedRulebookSchemas(ctx, pool, demoOrg.ID); err != nil {
+		return err
+	}
+	if err := seedEmailSettings(ctx, pool, demoOrg.ID, yiviOrg.name, "noreply@yivi.app"); err != nil {
 		return err
 	}
 	if err := seedIssuerSettings(ctx, pool, demoOrg.ID, "yivi", "Yivi B.V."); err != nil {
@@ -274,17 +438,45 @@ func Run(ctx context.Context, dsn, addressDomain string, adminEmails []string) e
 	if err := seedHeldAttestations(ctx, pool, demoOrg.ID); err != nil {
 		return err
 	}
+	// The identity proofing use cases the proofing orgs run for external people.
+	if err := seedProofing(ctx, pool, orgsBySlug); err != nil {
+		return err
+	}
+
+	// Gemeente Nijmegen is the first tenant whose attestation catalogue is a
+	// public-sector permit rather than an HR/supplier credential (issue #245): the
+	// APV standplaatsvergunning it issues to a market-stall holder's business
+	// wallet.
+	nijmegenOrg := orgsBySlug["nijmegen"]
+	if err := seedNijmegenAttestation(ctx, pool, nijmegenOrg.ID); err != nil {
+		return err
+	}
+	if err := seedIssuerSettings(ctx, pool, nijmegenOrg.ID, "nijmegen", "Gemeente Nijmegen"); err != nil {
+		return err
+	}
+	if err := ensureDemoTheme(ctx, themesettings.NewStore(pool, audit.NewDBRecorder()), nijmegenOrg.ID, nijmegenSlug, nijmegenTheme); err != nil {
+		return err
+	}
+	if err := seedBewindDemo(ctx, pool, users, orgs, orgsBySlug); err != nil {
+		return err
+	}
+	// The demo's presenter acts for Gemeente Nijmegen too: locally, its register
+	// entry already names them, so they claim it and administer the tenant. Not
+	// in EnsureBewindDemo: on staging Nijmegen is a partner's own tenant.
+	if err := ensureBewindPresenter(ctx, users, orgs, pool, orgsBySlug[nijmegenSlug].ID); err != nil {
+		return err
+	}
+	// The office e-mails its employee credential; locally that lands in Mailpit.
+	if err := seedEmailSettings(ctx, pool, orgsBySlug[bewindOfficeSlug].ID, bewindOfficeOrg.name, "noreply@waalstad-bewind.example"); err != nil {
+		return err
+	}
 
 	demoDeptIDs := []uuid.UUID{
 		deptsByOrgName[demoOrgSlug+"/Engineering"].ID,
 		deptsByOrgName[demoOrgSlug+"/Operations"].ID,
 	}
 
-	members, admins, err := seedFakerMembers(ctx, faker, users, orgs, demoOrg.ID, demoDeptIDs)
-	if err != nil {
-		return err
-	}
-	admins = append(admins, usersByEmail["user@yivi.app"].ID, usersByEmail["admin@yivi.app"].ID)
+	admins := []uuid.UUID{usersByEmail["user@yivi.app"].ID, usersByEmail["admin@yivi.app"].ID}
 
 	// The activity is the audited history; guard on it so re-runs (which can't
 	// recreate already-revoked invitations) don't pile up duplicate events.
@@ -296,7 +488,7 @@ func Run(ctx context.Context, dsn, addressDomain string, adminEmails []string) e
 		slog.Info("activity already seeded")
 		return nil
 	}
-	if err := seedActivity(ctx, faker, orgs, demoOrg.ID, admins, members, demoDeptIDs); err != nil {
+	if err := seedActivity(ctx, faker, orgs, demoOrg.ID, admins, testMembers{identity: usersByEmail[identityTestEmail].ID, vog: usersByEmail[vogTestEmail].ID}, demoDeptIDs); err != nil {
 		return err
 	}
 	return spreadAuditTimestamps(ctx, pool, demoOrg.ID)
@@ -332,8 +524,9 @@ func ensureOrg(ctx context.Context, pool *pgxpool.Pool, o demoOrganization, addr
 		ON CONFLICT (address) DO NOTHING`, org.ID, address); err != nil {
 		return organization.Organization{}, fmt.Errorf("seed: qerds address %q: %w", o.slug, err)
 	}
-	// The KVK register org (repKind == "") is the authentic source, not a
-	// consultable company, so it has no representative of its own.
+	// Orgs without a register identity (repKind == "") get no representative:
+	// the KVK register org is the authentic source, not a consultable company,
+	// and the community organisations are provisioned directly.
 	if o.repKind != "" {
 		if _, err := pool.Exec(ctx, `
 			INSERT INTO wallet_representations (organization_id, kind, given_names, family_name, date_of_birth, authority)
@@ -437,12 +630,17 @@ func EnsureYiviOrganization(ctx context.Context, dsn, addressDomain string) (org
 }
 
 // EnsurePartnerOrganizations provisions the staging pilot partner organisations
-// (identity + default QERDS address) and their teams as admins — and nothing
-// else: no representative, no demo members, no activity. Like
-// EnsureYiviOrganization every write is ON CONFLICT / existence guarded, so it is
-// idempotent and safe to run on every staging deploy. It is deliberately NOT part
-// of the `-org` seed (which also runs in production): these are pilot orgs that
-// belong in staging only, wired into the staging deploy via `seed -partners`.
+// (identity + default QERDS address) and their teams as admins — no
+// representative, no demo members, no activity. The one exception is Gemeente
+// Nijmegen, which also gets its APV standplaatsvergunning schema + template and
+// issuer settings (issue #245): those are local DB rows only, no call to the
+// hosted issuer at seed time (same reasoning as EnsureKVKRegisterOrganization),
+// so provisioning them here does not risk the staging deploy, and staging is
+// where issue #245's end-to-end demo actually runs. Like EnsureYiviOrganization
+// every write is ON CONFLICT / existence guarded, so it is idempotent and safe
+// to run on every staging deploy. It is deliberately NOT part of the `-org` seed
+// (which also runs in production): these are pilot orgs that belong in staging
+// only, wired into the staging deploy via `seed -partners`.
 func EnsurePartnerOrganizations(ctx context.Context, dsn, addressDomain string) error {
 	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {
@@ -461,6 +659,14 @@ func EnsurePartnerOrganizations(ctx context.Context, dsn, addressDomain string) 
 		// ensureTeamMember makes each listed member an admin of the org.
 		for _, m := range p.team {
 			if err := ensureTeamMember(ctx, users, orgs, org.ID, m); err != nil {
+				return err
+			}
+		}
+		if p.org.slug == "nijmegen" {
+			if err := seedNijmegenAttestation(ctx, pool, org.ID); err != nil {
+				return err
+			}
+			if err := seedIssuerSettings(ctx, pool, org.ID, "nijmegen", "Gemeente Nijmegen"); err != nil {
 				return err
 			}
 		}
@@ -574,45 +780,17 @@ func ensureMembership(ctx context.Context, orgs *organization.Store, orgID, user
 	return nil
 }
 
-// seedFakerMembers provisions active members for the demo org and returns the
-// member and admin user ids, so the activity below can attribute actions to a
-// realistic spread of actors.
-func seedFakerMembers(ctx context.Context, faker *gofakeit.Faker, users *user.Store, orgs *organization.Store, orgID uuid.UUID, deptIDs []uuid.UUID) (members, admins []uuid.UUID, err error) {
-	for i := 0; i < fakerMemberCount; i++ {
-		first, last := faker.FirstName(), faker.LastName()
-		email := fmt.Sprintf("%s.%s%d@example.test", slugify(first), slugify(last), i)
-
-		u, err := ensureUser(ctx, users, email, first, last, "")
-		if err != nil {
-			return nil, nil, err
-		}
-
-		role := organization.RoleMember
-		if i%6 == 0 {
-			role = organization.RoleAdmin
-		}
-		// Round-robin the departments, leaving every (len+1)th unassigned.
-		var deptID *uuid.UUID
-		if slot := i % (len(deptIDs) + 1); slot < len(deptIDs) {
-			deptID = &deptIDs[slot]
-		}
-		if err := ensureMembership(ctx, orgs, orgID, u.ID, role, faker.JobTitle(), deptID); err != nil {
-			return nil, nil, err
-		}
-		if role == organization.RoleAdmin {
-			admins = append(admins, u.ID)
-		} else {
-			members = append(members, u.ID)
-		}
-	}
-	slog.Info("seeded faker members", slog.Int("count", fakerMemberCount))
-	return members, admins, nil
+// testMembers are the members seedActivity asks an identification and a VOG
+// of.
+type testMembers struct {
+	identity, vog uuid.UUID
 }
 
 // seedActivity performs real, audited operations — invitations, revocations and
-// role changes — each attributed to a random admin, so the audit log reflects
-// genuine history (every entry corresponds to real data) with varied actors.
-func seedActivity(ctx context.Context, faker *gofakeit.Faker, orgs *organization.Store, orgID uuid.UUID, admins, members, deptIDs []uuid.UUID) error {
+// the test members' identification and VOG requests, each attributed to a
+// random admin, so the audit log reflects genuine history (every entry
+// corresponds to real data) with varied actors.
+func seedActivity(ctx context.Context, faker *gofakeit.Faker, orgs *organization.Store, orgID uuid.UUID, admins []uuid.UUID, members testMembers, deptIDs []uuid.UUID) error {
 	actorCtx := func(actor uuid.UUID) context.Context {
 		return audit.ContextWithActor(ctx, audit.Actor{UserID: actor})
 	}
@@ -625,7 +803,7 @@ func seedActivity(ctx context.Context, faker *gofakeit.Faker, orgs *organization
 	}
 
 	invitationIDs := make([]uuid.UUID, 0, inviteCount)
-	for i := 0; i < inviteCount; i++ {
+	for i := range inviteCount {
 		first, last := faker.FirstName(), faker.LastName()
 		inviter := pickAdmin()
 		inv, err := orgs.CreateInvitation(actorCtx(inviter), organization.Invitation{
@@ -644,9 +822,9 @@ func seedActivity(ctx context.Context, faker *gofakeit.Faker, orgs *organization
 		invitationIDs = append(invitationIDs, inv.ID)
 	}
 
-	// Revoke a subset — these become 'gone' history, correctly absent from the list.
-	for i := 0; i < revokeCount && i < len(invitationIDs); i++ {
-		if err := orgs.RevokeInvitation(actorCtx(pickAdmin()), orgID, invitationIDs[i]); err != nil {
+	// Revoke them all: 'gone' history, correctly absent from the list.
+	for _, id := range invitationIDs {
+		if err := orgs.RevokeInvitation(actorCtx(pickAdmin()), orgID, id); err != nil {
 			return fmt.Errorf("seed: revoke: %w", err)
 		}
 	}
@@ -666,21 +844,40 @@ func seedActivity(ctx context.Context, faker *gofakeit.Faker, orgs *organization
 		return fmt.Errorf("seed: anchor invite: %w", err)
 	}
 
-	// Role changes on existing members (promote some, retitle others) — always
-	// member->admin so the last-admin guard can never trip.
-	for i := 0; i < roleChangeCount && i < len(members); i++ {
-		role := organization.RoleMember
-		if i%2 == 0 {
-			role = organization.RoleAdmin
-		}
-		dept := deptIDs[faker.Number(0, len(deptIDs)-1)]
-		if _, err := orgs.UpdateMembership(actorCtx(pickAdmin()), orgID, members[i], &role, optional(faker.JobTitle()), &dept); err != nil {
-			return fmt.Errorf("seed: role change: %w", err)
-		}
+	identityRequester := pickAdmin()
+	if _, err := orgs.RequestIdentification(actorCtx(identityRequester), orgID, []uuid.UUID{members.identity}, identityRequester, ""); err != nil {
+		return fmt.Errorf("seed: request identification: %w", err)
 	}
 
-	slog.Info("seeded activity",
-		slog.Int("invited", inviteCount+1), slog.Int("revoked", revokeCount), slog.Int("roleChanged", roleChangeCount))
+	// The VOG test member is an external, and the policy asks a VOG of
+	// externals only, so the admins' own rows stay "not required".
+	if _, err := orgs.UpdateMemberType(actorCtx(pickAdmin()), orgID, members.vog, organization.MemberTypeExternal, nil); err != nil {
+		return fmt.Errorf("seed: vog member type: %w", err)
+	}
+
+	policy, err := orgs.GetScreeningSettings(ctx, orgID)
+	if err != nil {
+		return fmt.Errorf("seed: screening settings: %w", err)
+	}
+
+	if _, err := orgs.SaveScreeningSettings(actorCtx(pickAdmin()), orgID, organization.ScreeningSettingsInput{
+		RequiredFor:                 organization.ScreeningRequiredForExternals,
+		RequiredCodes:               policy.RequiredCodes,
+		RecheckAnchor:               policy.RecheckAnchor,
+		ReminderDaysBefore:          policy.ReminderDaysBefore,
+		OverdueReminderIntervalDays: policy.OverdueReminderIntervalDays,
+		OverdueReminderMaxCount:     policy.OverdueReminderMaxCount,
+		OverdueConsequence:          policy.OverdueConsequence,
+	}); err != nil {
+		return fmt.Errorf("seed: screening policy: %w", err)
+	}
+
+	vogRequester := pickAdmin()
+	if _, err := orgs.RequestVog(actorCtx(vogRequester), orgID, []uuid.UUID{members.vog}, vogRequester, ""); err != nil {
+		return fmt.Errorf("seed: request vog: %w", err)
+	}
+
+	slog.Info("seeded activity", slog.Int("invited", inviteCount+1), slog.Int("revoked", inviteCount))
 	return nil
 }
 
@@ -790,14 +987,51 @@ func seedAttestations(ctx context.Context, pool *pgxpool.Pool, orgID uuid.UUID) 
 	return nil
 }
 
-// seedEmailSettings points the demo org's SMTP at the dev Mailpit service (no
-// auth), so person-facing credential-offer e-mails are captured and viewable at
-// http://localhost:8025 out of the box. Idempotent.
-func seedEmailSettings(ctx context.Context, pool *pgxpool.Pool, orgID uuid.UUID) error {
+// seedRulebookSchemas imports every WE BUILD rulebook into an org, with a template
+// each, skipping the ones it already holds.
+func seedRulebookSchemas(ctx context.Context, pool *pgxpool.Pool, orgID uuid.UUID) error {
+	store := attestation.NewStore(pool, audit.NewDBRecorder())
+	existing, err := store.ListSchemas(ctx, orgID)
+	if err != nil {
+		return fmt.Errorf("seed: list attestation schemas: %w", err)
+	}
+	held := make(map[string]bool, len(existing))
+	for _, s := range existing {
+		held[s.VCT] = true
+	}
+	created := 0
+	for _, rb := range rulebook.All() {
+		if held[rb.VCT] {
+			continue
+		}
+		in, err := attestation.SchemaFromRulebook(rb.ID, "")
+		if err != nil {
+			return fmt.Errorf("seed: rulebook schema %q: %w", rb.ID, err)
+		}
+		schema, err := store.CreateSchema(ctx, orgID, in)
+		if err != nil {
+			return fmt.Errorf("seed: create rulebook schema %q: %w", rb.ID, err)
+		}
+		if _, err := store.CreateTemplate(ctx, orgID, attestation.Template{SchemaID: schema.ID, Name: in.DisplayName}); err != nil {
+			return fmt.Errorf("seed: create rulebook template %q: %w", rb.ID, err)
+		}
+		created++
+	}
+	if created > 0 {
+		slog.Info("seeded WE BUILD rulebook schemas + templates", slog.Int("count", created))
+	}
+	return nil
+}
+
+// seedEmailSettings points an org's SMTP at the dev Mailpit service (no auth),
+// so person-facing credential-offer e-mails are captured and viewable at
+// http://localhost:8025 out of the box. Dev seed only: staging has no Mailpit.
+// Idempotent.
+func seedEmailSettings(ctx context.Context, pool *pgxpool.Pool, orgID uuid.UUID, fromName, fromAddress string) error {
 	const insert = `INSERT INTO org_email_settings (organization_id, host, port, from_name, from_address, enabled)
-		VALUES ($1, 'mailpit', 1025, 'Yivi B.V.', 'noreply@yivi.app', true)
+		VALUES ($1, 'mailpit', 1025, $2, $3, true)
 		ON CONFLICT (organization_id) DO NOTHING`
-	if _, err := pool.Exec(ctx, insert, orgID); err != nil {
+	if _, err := pool.Exec(ctx, insert, orgID, fromName, fromAddress); err != nil {
 		return fmt.Errorf("seed: email settings: %w", err)
 	}
 	return nil
@@ -865,6 +1099,96 @@ func seedKVKRegisterAttestation(ctx context.Context, pool *pgxpool.Pool, orgID u
 	}
 
 	slog.Info("seeded KVK registration schema + template")
+	return nil
+}
+
+// nijmegenApvSchema is the APV standplaatsvergunning (market-stall permit)
+// Gemeente Nijmegen issues to another business wallet — an organization-subject
+// credential, the first schema owned by a public-sector tenant rather than Yivi
+// or the KVK register (issue #245). The attribute set mirrors that issue's
+// schema table; the schema/store carry no per-attribute selective-disclosure
+// flag today, so every claim is disclosable, matching every other schema.
+var nijmegenApvSchema = attestation.Schema{
+	VCT:                "nl.nijmegen.apv.standplaatsvergunning",
+	DisplayName:        "APV standplaatsvergunning",
+	CredentialConfigID: "NijmegenApvStandplaatsvergunningSdJwt",
+	SubjectType:        attestation.SubjectOrganization,
+	Display: []attestation.LocalizedName{
+		{Lang: "en", Name: "Market stall permit (APV)"},
+		{Lang: "nl", Name: "APV standplaatsvergunning"},
+	},
+	Attributes: []attestation.AttributeDef{
+		{Key: "vergunningnummer", Label: "Permit number", Type: attestation.AttributeTypeString, Required: true, Display: []attestation.LocalizedLabel{
+			{Lang: "en", Label: "Permit number"}, {Lang: "nl", Label: "Vergunningnummer"},
+		}},
+		{Key: "vergunninghouder_kvk", Label: "Permit holder KVK number", Type: attestation.AttributeTypeString, Required: true, Display: []attestation.LocalizedLabel{
+			{Lang: "en", Label: "Permit holder KVK number"}, {Lang: "nl", Label: "KVK-nummer vergunninghouder"},
+		}},
+		{Key: "vergunninghouder_naam", Label: "Permit holder name", Type: attestation.AttributeTypeString, Required: true, Display: []attestation.LocalizedLabel{
+			{Lang: "en", Label: "Permit holder name"}, {Lang: "nl", Label: "Naam vergunninghouder"},
+		}},
+		{Key: "markt", Label: "Market", Type: attestation.AttributeTypeString, Required: true, Display: []attestation.LocalizedLabel{
+			{Lang: "en", Label: "Market"}, {Lang: "nl", Label: "Markt"},
+		}},
+		{Key: "standplaats", Label: "Stall", Type: attestation.AttributeTypeString, Required: true, Display: []attestation.LocalizedLabel{
+			{Lang: "en", Label: "Stall"}, {Lang: "nl", Label: "Standplaats"},
+		}},
+		// dagen is a comma-separated day list (e.g. "ma,wo,za"): AttributeDef has no
+		// array type, only the SupportedAttributeTypes scalars.
+		{Key: "dagen", Label: "Days", Type: attestation.AttributeTypeString, Display: []attestation.LocalizedLabel{
+			{Lang: "en", Label: "Days"}, {Lang: "nl", Label: "Dagen"},
+		}},
+		{Key: "branche", Label: "Trade", Type: attestation.AttributeTypeString, Display: []attestation.LocalizedLabel{
+			{Lang: "en", Label: "Trade"}, {Lang: "nl", Label: "Branche"},
+		}},
+		{Key: "geldig_van", Label: "Valid from", Type: attestation.AttributeTypeDate, Required: true, Display: []attestation.LocalizedLabel{
+			{Lang: "en", Label: "Valid from"}, {Lang: "nl", Label: "Geldig van"},
+		}},
+		{Key: "geldig_tot", Label: "Valid until", Type: attestation.AttributeTypeDate, Required: true, Display: []attestation.LocalizedLabel{
+			{Lang: "en", Label: "Valid until"}, {Lang: "nl", Label: "Geldig tot"},
+		}},
+		{Key: "voorschriften_url", Label: "Conditions URL", Type: attestation.AttributeTypeString, Display: []attestation.LocalizedLabel{
+			{Lang: "en", Label: "Conditions URL"}, {Lang: "nl", Label: "Voorschriften"},
+		}},
+	},
+}
+
+// nijmegenLogoPNG is Gemeente Nijmegen's mark (assets/README.md).
+//
+//go:embed assets/nijmegen-logo.png
+var nijmegenLogoPNG []byte
+
+// nijmegenRed is nijmegen.nl's brand red, its web manifest's theme colour.
+const nijmegenRed = "#A80A2D"
+
+// nijmegenTheme is nijmegen.nl's red (the web manifest's theme colour, and the
+// site's darker shade for the chrome), so the dev demo's municipality is told
+// apart from the court and the office at a glance, logo in the org switcher
+// included. Dev seed only: on staging the partner sets its own theme.
+var nijmegenTheme = &demoTheme{
+	settings: themesettings.SettingsInput{
+		PrimaryColor: nijmegenRed, AccentColor: "#830823", TextColor: "#2B1A1E", SurfaceColor: "#FBF6F7",
+		BorderColor: "#E8D5DA", LinkColor: nijmegenRed, SidebarColor: "#830823", TopbarColor: nijmegenRed,
+		FontFamily: fontSystemUI,
+	},
+	logo: nijmegenLogoPNG,
+}
+
+// nijmegenApvTemplateName names the template over nijmegenApvSchema, matching
+// the template name issue #245's scenario runs the issue wizard with.
+const nijmegenApvTemplateName = "APV standplaatsvergunning"
+
+// seedNijmegenAttestation gives the Gemeente Nijmegen tenant the APV
+// standplaatsvergunning schema + template (issue #245). Idempotent: skips when
+// the org already has that schema. The guard is per VCT because the bewind
+// demo adds a schema of its own to the same tenant, in either order.
+func seedNijmegenAttestation(ctx context.Context, pool *pgxpool.Pool, orgID uuid.UUID) error {
+	store := attestation.NewStore(pool, audit.NewDBRecorder())
+	if err := ensureSchemaTemplate(ctx, store, orgID, nijmegenApvSchema, attestation.Template{Name: nijmegenApvTemplateName}); err != nil {
+		return err
+	}
+
+	slog.Info("seeded Nijmegen APV standplaatsvergunning schema + template")
 	return nil
 }
 

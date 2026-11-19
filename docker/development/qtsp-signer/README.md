@@ -39,6 +39,14 @@ see `.ai/features/qtsp-signing-demo.md`.
 > you cannot complete the scan with the Yivi wallet. To self-contain it fully you would also
 > host the EUDI verifier-backend reference impl (not done here).
 
+> **The verifier demands a registration certificate.** Every `InitTransaction` must name a
+> Wallet-Relying-Party registration certificate, either by `INTENDED-USE-ID` (an intended use
+> configured *at the verifier*) or by `REGISTRATION-CERTIFICATE-JWT` (one we mint ourselves);
+> a request with neither is answered `400 {"error":"MissingRegistrationCertificate"}` and the
+> AS refuses to boot when both are blank. `compose.override.yaml` passes `TEST-01`, the test
+> intended use the public verifier publishes — the ids are per-verifier, so pointing
+> `VERIFIER-DOMAIN` at another verifier means configuring an intended use there too.
+
 ### Quick path (no wallet): `noauth`
 
 To exercise `signHash` without the ceremony, run the resource server in `noauth` mode
@@ -89,7 +97,9 @@ resource server (the AS encrypts the identity claims the RS later decrypts), and
 
 1. Update `UPSTREAM_REF` in the `Dockerfile`.
 2. Regenerate `qtsp-demo.patch` against the new commit (clone, apply the three changes,
-   `git diff > qtsp-demo.patch`) and re-verify with `run-demo.sh`.
+   `git diff > qtsp-demo.patch`) and re-verify with `run-demo.sh`. The patch only touches
+   `resource_server/**`, so a bump that leaves those files alone applies unchanged — check
+   with `git apply --check` before regenerating anything.
 3. Consider upstreaming the portability/build fixes — they make the reference impl run on
    any conformant token, not just Utimaco. See [`UPSTREAM.md`](./UPSTREAM.md) for the
    maintainer-facing write-up of each bug (symptom, root cause, location, fix).

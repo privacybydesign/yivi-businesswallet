@@ -3,12 +3,30 @@ import { useTranslation } from "react-i18next";
 import {
   useOrganizationMembersQuery,
   useOrganizationQuery,
+  useRequestIdentificationMutation,
+  useRequestVogMutation,
   useResendInvitationMutation,
   useRevokeInvitationMutation,
+  useScreeningSettingsQuery,
 } from "../api/organization.queries";
-import type { MemberSort } from "../api/organization";
+import type { MemberListEntry, MemberSort } from "../api/organization";
 import { accessMessage } from "../lib/access-message";
+import { useDateFormatter } from "../lib/format-when";
+import {
+  identityStatusHint,
+  identityStatusLabel,
+  identityStatusTone,
+  requestableIdentity,
+} from "../lib/identity-status";
+import {
+  requestableVog,
+  screeningConfigured,
+  screeningStatusHint,
+  screeningStatusLabel,
+  screeningStatusTone,
+} from "../lib/screening-status";
 import { fullName, personInitials } from "../lib/name";
+import { showsReviewTag } from "../lib/review-right";
 import { useDebouncedValue } from "../lib/use-debounced-value";
 import { Avatar, Button, Card, Icon, Input, Table, Tag, TopBar } from "../ui";
 import type { SortDir } from "../ui";
@@ -16,7 +34,40 @@ import * as React from "react";
 
 const PAGE_SIZE = 25;
 const SEARCH_DEBOUNCE_MS = 300;
-const COLUMN_COUNT = 6;
+// Column widths, with and without the VOG column: it only appears once the
+// org's screening policy requires a VOG from anyone, and the other columns
+// give up the room it takes.
+interface ColumnWidths {
+  member: string;
+  jobTitle: string;
+  department: string;
+  status: string;
+  vog: string;
+  role: string;
+  actions: string;
+}
+
+const COLUMN_WIDTHS: ColumnWidths = {
+  member: "w-[22%]",
+  jobTitle: "w-[14%]",
+  department: "w-[14%]",
+  status: "w-[17%]",
+  vog: "",
+  role: "w-[11%]",
+  actions: "w-[18%]",
+};
+
+const COLUMN_WIDTHS_WITH_VOG: ColumnWidths = {
+  member: "w-[20%]",
+  jobTitle: "w-[12%]",
+  department: "w-[12%]",
+  status: "w-[15%]",
+  vog: "w-[13%]",
+  role: "w-[9%]",
+  actions: "w-[15%]",
+};
+
+const COLUMN_COUNT = 7;
 
 type StatusFilter = "" | "active" | "invited";
 
@@ -43,6 +94,7 @@ function readSort(params: URLSearchParams): MemberSort {
 
 export default function Members(): React.JSX.Element {
   const { t } = useTranslation();
+  const formatDate = useDateFormatter();
   const navigate = useNavigate();
   const { orgSlug } = useParams();
   // Guaranteed by the ":orgSlug" route segment this component mounts under.
@@ -50,6 +102,12 @@ export default function Members(): React.JSX.Element {
 
   const org = useOrganizationQuery(slug);
   const isAdmin = org.data?.role === "admin";
+  // The admin-only reads start with the page instead of after the org read
+  // says who is asking: the backend refuses them for anyone else.
+  const screeningSettings = useScreeningSettingsQuery(slug, true);
+  const showVog = screeningConfigured(screeningSettings.data);
+  const widths = showVog ? COLUMN_WIDTHS_WITH_VOG : COLUMN_WIDTHS;
+  const columnCount = showVog ? COLUMN_COUNT + 1 : COLUMN_COUNT;
 
   // Sort, filter, search, and page live in the URL so the view survives a
   // refresh and can be bookmarked or shared.
@@ -105,31 +163,82 @@ export default function Members(): React.JSX.Element {
       limit: PAGE_SIZE,
       offset: page * PAGE_SIZE,
     },
-    isAdmin,
+    true,
   );
 
   // Per-status counts for the subtitle breakdown, independent of the active
   // filter/search (which only narrow the toolbar's result count).
-  const activeCount = useOrganizationMembersQuery(
-    slug,
-    { status: "active", limit: 1 },
-    isAdmin,
-  );
-  const pendingCount = useOrganizationMembersQuery(
-    slug,
-    { status: "invited", limit: 1 },
-    isAdmin,
-  );
-  const activeTotal = activeCount.data?.total;
-  const pendingTotal = pendingCount.data?.total;
+  const activeTotal = members.data?.activeTotal;
+  const pendingTotal = members.data?.invitedTotal;
 
   const resend = useResendInvitationMutation(slug);
   const revoke = useRevokeInvitationMutation(slug);
+  const requestIdentification = useRequestIdentificationMutation(slug);
+  const requestVog = useRequestVogMutation(slug);
+
+  // The bulk selection, by user id. It is deliberately page-local: it clears
+  // when the page, filter or search changes, so a request never reaches a
+  // member the admin can no longer see.
+  const [selected, setSelected] = React.useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
 
   const entries = members.data?.entries ?? [];
   const total = members.data?.total ?? 0;
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const filtered = status !== "" || q !== "";
+
+  // A row is selectable if either bulk action applies to it; each action then
+  // narrows the selection down to its own applicable subset when it runs, so a
+  // mixed selection does not send "request VOG" to a member for whom VOG is
+  // not required.
+  const identitySelectableIds = entries
+    .filter((entry) => entry.userId !== null && requestableIdentity(entry))
+    .map((entry) => entry.userId!);
+  const vogSelectableIds = entries
+    .filter((entry) => entry.userId !== null && requestableVog(entry))
+    .map((entry) => entry.userId!);
+  const selectableIds = [
+    ...new Set([...identitySelectableIds, ...vogSelectableIds]),
+  ];
+  const selectedIds = selectableIds.filter((id) => selected.has(id));
+  const identitySelectedIds = identitySelectableIds.filter((id) =>
+    selected.has(id),
+  );
+  const vogSelectedIds = vogSelectableIds.filter((id) => selected.has(id));
+  const allSelected =
+    selectableIds.length > 0 && selectedIds.length === selectableIds.length;
+
+  const clearSelection = (): void => setSelected(new Set());
+
+  const toggleSelected = (userId: string): void => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(userId)) next.delete(userId);
+      else next.add(userId);
+      return next;
+    });
+  };
+
+  const toggleAllSelected = (): void => {
+    setSelected(allSelected ? new Set() : new Set(selectableIds));
+  };
+
+  const requestIdentificationSelected = (): void => {
+    if (identitySelectedIds.length === 0) return;
+    requestIdentification.mutate(
+      { userIds: identitySelectedIds },
+      { onSuccess: clearSelection },
+    );
+  };
+
+  const requestVogSelected = (): void => {
+    if (vogSelectedIds.length === 0) return;
+    requestVog.mutate(
+      { userIds: vogSelectedIds },
+      { onSuccess: clearSelection },
+    );
+  };
 
   const toggleSort = (column: MemberSort): void => {
     updateParams((params) => {
@@ -149,6 +258,7 @@ export default function Members(): React.JSX.Element {
   };
 
   const setStatus = (value: StatusFilter): void => {
+    clearSelection();
     updateParams((params) => {
       if (value) params.set("status", value);
       else params.delete("status");
@@ -157,6 +267,7 @@ export default function Members(): React.JSX.Element {
   };
 
   const goToPage = (next: number): void => {
+    clearSelection();
     updateParams((params) => params.set("page", String(next)));
   };
 
@@ -180,8 +291,7 @@ export default function Members(): React.JSX.Element {
       <TopBar
         title={t("members.title")}
         subtitle={
-          org.isPending ||
-          (isAdmin && (activeCount.isPending || pendingCount.isPending))
+          org.isPending || members.isPending
             ? t("common.loading")
             : activeTotal !== undefined && pendingTotal !== undefined
               ? t("members.summary", {
@@ -202,7 +312,7 @@ export default function Members(): React.JSX.Element {
         }
       />
 
-      <div className="p-8">
+      <div className="p-4 sm:p-8">
         {org.isError ? (
           <Card className="p-6">
             <p className="text-error text-[14px]">
@@ -223,8 +333,8 @@ export default function Members(): React.JSX.Element {
           </Card>
         ) : (
           <Card className="overflow-hidden">
-            <div className="border-line flex items-center gap-3 border-b px-4 py-3">
-              <div className="max-w-[320px] flex-1">
+            <div className="border-line flex flex-wrap items-center gap-3 border-b px-4 py-3">
+              <div className="basis-full sm:max-w-[320px] sm:flex-1 sm:basis-0">
                 <Input
                   icon="search"
                   placeholder={t("members.search")}
@@ -259,61 +369,109 @@ export default function Members(): React.JSX.Element {
                   {t("members.reset")}
                 </Button>
               )}
-              {members.data && (
-                <span className="text-muted ml-auto shrink-0 text-[12px] whitespace-nowrap">
-                  {t("members.results", { count: total })}
-                </span>
+              {selectedIds.length > 0 ? (
+                <div className="ml-auto flex shrink-0 items-center gap-2">
+                  <span className="text-ink-soft text-[12px] whitespace-nowrap">
+                    {t("members.selectedCount", { count: selectedIds.length })}
+                  </span>
+                  {identitySelectedIds.length > 0 && (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      icon="personal"
+                      loading={requestIdentification.isPending}
+                      onClick={requestIdentificationSelected}
+                    >
+                      {t("members.requestIdentification")}
+                    </Button>
+                  )}
+                  {vogSelectedIds.length > 0 && (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      icon="valid"
+                      loading={requestVog.isPending}
+                      onClick={requestVogSelected}
+                    >
+                      {t("members.requestVog")}
+                    </Button>
+                  )}
+                  <Button variant="ghost" size="sm" onClick={clearSelection}>
+                    {t("members.clearSelection")}
+                  </Button>
+                </div>
+              ) : (
+                members.data && (
+                  <span className="text-muted ml-auto shrink-0 text-[12px] whitespace-nowrap">
+                    {t("members.results", { count: total })}
+                  </span>
+                )
               )}
             </div>
 
             <Table className="table-fixed">
               <Table.Head>
+                <Table.HeaderCell className="w-[36px]">
+                  <input
+                    type="checkbox"
+                    checked={allSelected}
+                    disabled={selectableIds.length === 0}
+                    onChange={toggleAllSelected}
+                    aria-label={t("members.selectAll")}
+                    className="cursor-pointer align-middle disabled:cursor-not-allowed"
+                  />
+                </Table.HeaderCell>
                 <Table.HeaderCell
-                  className="w-[26%]"
+                  className={widths.member}
                   sortDir={sortDirOf("name")}
                   onSort={() => toggleSort("name")}
                 >
                   {t("members.columns.member")}
                 </Table.HeaderCell>
                 <Table.HeaderCell
-                  className="w-[15%]"
+                  className={widths.jobTitle}
                   sortDir={sortDirOf("jobtitle")}
                   onSort={() => toggleSort("jobtitle")}
                 >
                   {t("common.jobTitle")}
                 </Table.HeaderCell>
                 <Table.HeaderCell
-                  className="w-[15%]"
+                  className={widths.department}
                   sortDir={sortDirOf("department")}
                   onSort={() => toggleSort("department")}
                 >
                   {t("common.department")}
                 </Table.HeaderCell>
                 <Table.HeaderCell
-                  className="w-[12%]"
+                  className={widths.status}
                   sortDir={sortDirOf("status")}
                   onSort={() => toggleSort("status")}
                 >
                   {t("members.columns.status")}
                 </Table.HeaderCell>
+                {showVog && (
+                  <Table.HeaderCell className={widths.vog}>
+                    {t("members.columns.vog")}
+                  </Table.HeaderCell>
+                )}
                 <Table.HeaderCell
-                  className="w-[12%]"
+                  className={widths.role}
                   sortDir={sortDirOf("role")}
                   onSort={() => toggleSort("role")}
                 >
                   {t("common.role")}
                 </Table.HeaderCell>
-                <Table.HeaderCell className="w-[20%]" srOnly>
+                <Table.HeaderCell className={widths.actions} srOnly>
                   {t("members.columns.actions")}
                 </Table.HeaderCell>
               </Table.Head>
               <Table.Body>
                 {org.isPending || members.isPending ? (
-                  <Table.State colSpan={COLUMN_COUNT}>
+                  <Table.State colSpan={columnCount}>
                     {t("common.loading")}
                   </Table.State>
                 ) : entries.length === 0 ? (
-                  <Table.State colSpan={COLUMN_COUNT}>
+                  <Table.State colSpan={columnCount}>
                     {filtered ? t("members.noMatch") : t("members.empty")}
                   </Table.State>
                 ) : (
@@ -338,6 +496,23 @@ export default function Members(): React.JSX.Element {
                             : "hover:bg-surface-3 cursor-pointer transition-colors"
                         }
                       >
+                        <Table.Cell
+                          onClick={(event) => event.stopPropagation()}
+                        >
+                          {member.userId !== null &&
+                            (requestableIdentity(member) ||
+                              requestableVog(member)) && (
+                              <input
+                                type="checkbox"
+                                checked={selected.has(member.userId)}
+                                onChange={() => toggleSelected(member.userId!)}
+                                aria-label={t("members.select", {
+                                  name: fullName(member),
+                                })}
+                                className="cursor-pointer align-middle"
+                              />
+                            )}
+                        </Table.Cell>
                         <Table.Cell>
                           <div className="flex items-center gap-2.5">
                             <Avatar
@@ -381,17 +556,42 @@ export default function Members(): React.JSX.Element {
                                 {t("members.active")}
                               </Tag>
                             )}
-                            {member.verified && (
-                              <Tag tone="blue">{t("members.verified")}</Tag>
+                            {!pending && (
+                              <IdentityTag
+                                member={member}
+                                formatDate={formatDate}
+                              />
                             )}
                           </div>
                         </Table.Cell>
+                        {showVog && (
+                          <Table.Cell>
+                            {pending ? (
+                              <span className="text-ink-soft">
+                                {t("members.unassigned")}
+                              </span>
+                            ) : member.vogStatus === "not_required" ? (
+                              <span className="text-muted truncate text-[12px]">
+                                {t("members.vog.notRequired")}
+                              </span>
+                            ) : (
+                              <VogTag member={member} formatDate={formatDate} />
+                            )}
+                          </Table.Cell>
+                        )}
                         <Table.Cell>
-                          <Tag
-                            tone={member.role === "admin" ? "blue" : "default"}
-                          >
-                            <span className="capitalize">{member.role}</span>
-                          </Tag>
+                          <div className="flex flex-wrap gap-1">
+                            <Tag
+                              tone={
+                                member.role === "admin" ? "blue" : "default"
+                              }
+                            >
+                              <span className="capitalize">{member.role}</span>
+                            </Tag>
+                            {showsReviewTag(member) && (
+                              <Tag>{t("common.canReview")}</Tag>
+                            )}
+                          </div>
                         </Table.Cell>
                         <Table.Cell className="text-right">
                           {pending && member.invitationId && (
@@ -467,5 +667,47 @@ export default function Members(): React.JSX.Element {
         )}
       </div>
     </>
+  );
+}
+
+// IdentityTag is the member's re-identification status: the badge carries the
+// status and the date behind it as its title, so the list stays one column
+// narrower than a separate "identified on" column would make it.
+function IdentityTag({
+  member,
+  formatDate,
+}: Readonly<{
+  member: MemberListEntry;
+  formatDate: (iso: string) => string;
+}>): React.JSX.Element {
+  const { t } = useTranslation();
+  return (
+    <Tag
+      tone={identityStatusTone(member.identityStatus)}
+      title={identityStatusHint(member, t, formatDate) || undefined}
+    >
+      {identityStatusLabel(member.identityStatus, t)}
+    </Tag>
+  );
+}
+
+// VogTag mirrors IdentityTag for the member's VOG screening status, in the VOG
+// column; shown only when the org's policy requires one from this member (see
+// the call site).
+function VogTag({
+  member,
+  formatDate,
+}: Readonly<{
+  member: MemberListEntry;
+  formatDate: (iso: string) => string;
+}>): React.JSX.Element {
+  const { t } = useTranslation();
+  return (
+    <Tag
+      tone={screeningStatusTone(member.vogStatus)}
+      title={screeningStatusHint(member, t, formatDate) || undefined}
+    >
+      {screeningStatusLabel(member.vogStatus, t)}
+    </Tag>
   );
 }

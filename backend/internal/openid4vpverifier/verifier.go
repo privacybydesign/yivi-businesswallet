@@ -13,6 +13,7 @@ import (
 	"maps"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Presentation status values reported by Status: PENDING until the holder
@@ -30,7 +31,40 @@ const (
 	ClaimDateOfBirth = "dateOfBirth"
 	ClaimNationality = "nationality"
 	ClaimPhone       = "mobilenumber"
+	// ClaimPhoto is the passport, id-card and residence-permit portrait, base64 (ScopeProofing).
+	ClaimPhoto = "photo"
+
+	// pbdf.gemeente.address claim keys (ScopeProofingAddress).
+	ClaimAddressStreet      = "street"
+	ClaimAddressHouseNumber = "houseNumber"
+	ClaimAddressPostalCode  = "zipcode"
+	ClaimAddressCity        = "city"
+
+	// pbdf.gemeente.personalData claim keys (SourcePersonalData).
+	ClaimPersonalFirstNames  = "firstnames"
+	ClaimPersonalPrefix      = "prefix"
+	ClaimPersonalFamilyName  = "familyname"
+	ClaimPersonalDateOfBirth = "dateofbirth"
+	ClaimPersonalBSN         = "bsn"
+
+	// pbdf.vog claim keys (#242 §4). Named distinctly from the identity claims
+	// above even where the value happens to coincide (ClaimDateOfBirth), because
+	// they come from a different credential's own attribute names.
+	ClaimVogIssueDate   = "issueDate"
+	ClaimVogSurname     = "surname"
+	ClaimVogPrefix      = "prefix"
+	ClaimVogGivenNames  = "givenNames"
+	ClaimVogDateOfBirth = "dateOfBirth"
+	// vogAspectClaimPrefix names the credential's per-aspect yes/no attributes
+	// (aspect11 .. aspect91). VogAspectClaim builds one from a two-digit code.
+	vogAspectClaimPrefix = "aspect"
 )
+
+// VogAspectClaim returns the pbdf.vog claim name for a function-aspect code
+// (e.g. "11" -> "aspect11"), the credential's own attribute naming.
+func VogAspectClaim(code string) string {
+	return vogAspectClaimPrefix + code
+}
 
 // ErrPending means the holder has not completed the presentation yet. The hosted
 // verifier returns a non-2xx for a pending (or unknown/expired) transaction and
@@ -47,9 +81,97 @@ type Session struct {
 }
 
 // Presentation is the verified, disclosed claim set, flattened across the
-// requested credentials.
+// requested credentials (Claims) and per credential (ByCredential).
 type Presentation struct {
 	Claims map[string]string
+	// ByCredential holds each requested credential's own disclosed claims,
+	// keyed by the DCQL credential id (passport, idcard, residencepermit, email,
+	// phone, vog, address).
+	// Needed because two credentials in one presentation may disclose the same
+	// claim name - both the identity credential and pbdf.vog carry a
+	// dateOfBirth - and Claims keeps only one of them, in map-iteration order.
+	ByCredential map[string]map[string]string
+	// IdentityIssuedAt is the `iat` claim of the identity credential's (passport,
+	// id-card or residence permit) issuer-signed JWT, the moment the wallet obtained that credential
+	// from its issuer, not the physical document's issue date. Used by a
+	// freshness check on re-identification (see .ai/features/auth-openid4vp.md and
+	// the member-reidentification feature); zero when the presentation carried no
+	// identity credential or its `iat` could not be read.
+	IdentityIssuedAt time.Time
+	// vcts names Document's credential; zero (a hand-built value) means
+	// defaultCredentialScheme's.
+	vcts vcts
+}
+
+// identityCredentialIDs are the credentials an identity disclosure draws on.
+var identityCredentialIDs = []string{credIDPassport, credIDIDCard, credIDResidencePermit, credIDEmail, credIDPhone}
+
+// IdentityClaims returns the claims the identity credentials disclosed
+// (passport, id-card or residence permit, email, phone) and VogClaims those of the pbdf.vog
+// credential, kept apart so a combined presentation (ScopeIdentityVog) cannot
+// let one credential's dateOfBirth overwrite the other's. A Presentation
+// carrying no per-credential detail (ByCredential empty - a fake, or a
+// hand-built value) falls back to the flattened Claims.
+func (p Presentation) IdentityClaims() map[string]string {
+	return p.claimsOf(identityCredentialIDs...)
+}
+
+// IdentityDocument is the passport, id-card or residence permit a presentation
+// disclosed.
+type IdentityDocument struct {
+	// Credential is the credential's vct (e.g. pbdf-staging.pbdf.passport).
+	Credential string
+	Claims     map[string]string
+}
+
+// Document returns the passport, id-card or residence permit the presentation
+// disclosed, in that order of preference; false when it carried none.
+func (p Presentation) Document() (IdentityDocument, bool) {
+	v := p.vcts
+	if v == (vcts{}) {
+		v = vctsFor(defaultCredentialScheme)
+	}
+	for _, c := range [...]struct{ id, vct string }{
+		{credIDPassport, v.passport}, {credIDIDCard, v.idCard}, {credIDResidencePermit, v.residencePermit}, {credIDDrivingLicence, v.drivingLicence},
+	} {
+		if claims, ok := p.ByCredential[c.id]; ok {
+			return IdentityDocument{Credential: c.vct, Claims: claims}, true
+		}
+	}
+	return IdentityDocument{}, false
+}
+
+// RegisteredAddress returns the claims of the registered address
+// (ScopeProofingAddress); false when the wallet left it out.
+func (p Presentation) RegisteredAddress() (map[string]string, bool) {
+	claims, ok := p.ByCredential[credIDAddress]
+	return claims, ok
+}
+
+// PersonalData returns the registered personal data (SourcePersonalData) as an
+// IdentityDocument, though it is none; false when the wallet left it out.
+func (p Presentation) PersonalData() (IdentityDocument, bool) {
+	claims, ok := p.ByCredential[credIDPersonalData]
+	if !ok {
+		return IdentityDocument{}, false
+	}
+	return IdentityDocument{Credential: personalDataVCT, Claims: claims}, true
+}
+
+// VogClaims returns the pbdf.vog credential's disclosed claims; see IdentityClaims.
+func (p Presentation) VogClaims() map[string]string {
+	return p.claimsOf(credIDVog)
+}
+
+func (p Presentation) claimsOf(ids ...string) map[string]string {
+	if len(p.ByCredential) == 0 {
+		return p.Claims
+	}
+	out := map[string]string{}
+	for _, id := range ids {
+		maps.Copy(out, p.ByCredential[id])
+	}
+	return out
 }
 
 // vpTokenResponse is the verifier's disclosed payload: credential id -> SD-JWT VCs.
@@ -68,6 +190,20 @@ func parseDisclosures(vp map[string][]string) map[string]string {
 		}
 	}
 	return claims
+}
+
+// parseDisclosuresByCredential is parseDisclosures kept per credential id
+// (Presentation.ByCredential).
+func parseDisclosuresByCredential(vp map[string][]string) map[string]map[string]string {
+	out := make(map[string]map[string]string, len(vp))
+	for id, tokens := range vp {
+		claims := map[string]string{}
+		for _, tok := range tokens {
+			maps.Copy(claims, disclosuresOf(tok))
+		}
+		out[id] = claims
+	}
+	return out
 }
 
 // disclosuresOf decodes the SD-JWT VC compact form: segments joined by '~', the
@@ -98,6 +234,50 @@ func disclosuresOf(sdjwt string) map[string]string {
 		out[name] = stringify(arr[2])
 	}
 	return out
+}
+
+// identityIssuedAt returns the `iat` of the identity credential (passport,
+// id-card or residence permit, whichever is present) in vp, zero when none is present or its
+// `iat` could not be read.
+func identityIssuedAt(vp map[string][]string) time.Time {
+	for _, id := range [...]string{credIDPassport, credIDIDCard, credIDResidencePermit} {
+		tokens := vp[id]
+		if len(tokens) == 0 {
+			continue
+		}
+		if t, ok := issuerIssuedAt(tokens[0]); ok {
+			return t
+		}
+	}
+	return time.Time{}
+}
+
+// issuerIssuedAt reads the `iat` claim from an SD-JWT VC's issuer-signed JWT (the
+// first `~`-separated segment: header.payload.signature). This is the moment the
+// wallet obtained the credential from its issuer — a registered top-level claim
+// carried on every presentation — not the physical document's own issue date.
+// Decoding the payload here is not signature verification (the hosted verifier
+// already did that; see the package doc); it only reads an already-trusted claim.
+func issuerIssuedAt(sdjwt string) (time.Time, bool) {
+	jwt := sdjwt
+	if before, _, ok := strings.Cut(sdjwt, "~"); ok {
+		jwt = before
+	}
+	segments := strings.Split(jwt, ".")
+	if len(segments) < 2 {
+		return time.Time{}, false
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(segments[1])
+	if err != nil {
+		return time.Time{}, false
+	}
+	var payload struct {
+		IssuedAt int64 `json:"iat"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil || payload.IssuedAt <= 0 {
+		return time.Time{}, false
+	}
+	return time.Unix(payload.IssuedAt, 0).UTC(), true
 }
 
 func stringify(v any) string {

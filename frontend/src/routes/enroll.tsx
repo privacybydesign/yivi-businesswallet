@@ -28,6 +28,9 @@ function errorMessage(error: Error, t: TFunction): string {
     if (error.status === FORBIDDEN_STATUS && code === "not_a_representative") {
       return t("enroll.notRepresentative");
     }
+    if (code === "ebwoid_mismatch") {
+      return t("enroll.ebwoidMismatch");
+    }
     if (code === "slug_taken") {
       return t("register.slugTaken");
     }
@@ -61,8 +64,8 @@ export default function Enroll(): React.JSX.Element {
     return (
       <>
         <TopBar title={t("enroll.title")} />
-        <div className="p-8">
-          <Card className="max-w-lg p-8">
+        <div className="p-4 sm:p-8">
+          <Card className="max-w-lg p-6 sm:p-8">
             <Outcome
               tone="success"
               icon="valid"
@@ -92,7 +95,7 @@ export default function Enroll(): React.JSX.Element {
     <>
       <TopBar title={t("enroll.title")} subtitle={t("enroll.subtitle")} />
 
-      <div className="p-8">
+      <div className="p-4 sm:p-8">
         <Card className="max-w-lg p-6">
           <p className="text-ink-soft mb-5 text-[13.5px] leading-relaxed">
             {t("enroll.intro")}

@@ -10,13 +10,14 @@ import (
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/database"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/lifecycle"
 )
 
-const keyColumns = `id, organization_id, kind, label, provider_ref, status, created_at, updated_at`
+const keyColumns = `id, organization_id, kind, label, provider_ref, status, wallet_unit_attestation, created_at, updated_at`
 
 func scanKey(row rowScanner) (Key, error) {
 	var k Key
-	if err := row.Scan(&k.ID, &k.OrganizationID, &k.Kind, &k.Label, &k.ProviderRef, &k.Status, &k.CreatedAt, &k.UpdatedAt); err != nil {
+	if err := row.Scan(&k.ID, &k.OrganizationID, &k.Kind, &k.Label, &k.ProviderRef, &k.Status, &k.WalletUnitAttestation, &k.CreatedAt, &k.UpdatedAt); err != nil {
 		return Key{}, err
 	}
 	return k, nil
@@ -49,11 +50,14 @@ func (s *Store) ListKeys(ctx context.Context, orgID uuid.UUID) ([]Key, error) {
 func (s *Store) CreateKey(ctx context.Context, orgID uuid.UUID, kind, label, providerRef string) (Key, error) {
 	var out Key
 	err := database.InTx(ctx, s.db, func(q database.Querier) error {
-		const insert = `INSERT INTO attestation_keys (organization_id, kind, label, provider_ref)
-			VALUES ($1, $2, $3, $4)
+		// A wallet_managed key is attested by the org's active wallet unit.
+		const insert = `INSERT INTO attestation_keys (organization_id, kind, label, provider_ref, wallet_unit_attestation)
+			VALUES ($1, $2, $3, $4, CASE WHEN $2 = $5 THEN
+				(SELECT jsonb_build_object('walletUnitId', id) FROM wallet_units WHERE organization_id = $1 AND status = 'active')
+			END)
 			RETURNING ` + keyColumns
 		var err error
-		out, err = scanKey(q.QueryRow(ctx, insert, orgID, kind, label, providerRef))
+		out, err = scanKey(q.QueryRow(ctx, insert, orgID, kind, label, providerRef, KeyWalletManaged))
 		if err != nil {
 			return fmt.Errorf("attestation: create key org %s: %w", orgID, err)
 		}
@@ -65,23 +69,33 @@ func (s *Store) CreateKey(ctx context.Context, orgID uuid.UUID, kind, label, pro
 }
 
 // SetKeyStatus transitions a key to suspended or revoked and audits, in one tx.
+// A move lifecycle does not allow, such as suspending a revoked key, is
+// refused with lifecycle.ErrTransition.
 func (s *Store) SetKeyStatus(ctx context.Context, orgID, id uuid.UUID, status, action string) (Key, error) {
 	var out Key
 	err := database.InTx(ctx, s.db, func(q database.Querier) error {
-		const update = `UPDATE attestation_keys SET status = $3, updated_at = now()
-			WHERE organization_id = $1 AND id = $2
-			RETURNING ` + keyColumns
-		var err error
-		out, err = scanKey(q.QueryRow(ctx, update, orgID, id, status))
+		// Locked, so the check and the write see the same status.
+		var before string
+		err := q.QueryRow(ctx, `SELECT status FROM attestation_keys WHERE organization_id = $1 AND id = $2 FOR UPDATE`, orgID, id).Scan(&before)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrKeyNotFound
 		}
+		if err != nil {
+			return fmt.Errorf("attestation: read key status %s: %w", id, err)
+		}
+		if err := lifecycle.Transition(before, status); err != nil {
+			return err
+		}
+		const update = `UPDATE attestation_keys SET status = $3, updated_at = now()
+			WHERE organization_id = $1 AND id = $2
+			RETURNING ` + keyColumns
+		out, err = scanKey(q.QueryRow(ctx, update, orgID, id, status))
 		if err != nil {
 			return fmt.Errorf("attestation: set key status %s: %w", id, err)
 		}
 		return s.audit.Record(ctx, q, action,
 			audit.Target{Type: audit.TargetAttestationKey, ID: out.ID.String(), OrgID: &orgID},
-			audit.Updated(nil, map[string]any{"status": out.Status}))
+			audit.Updated(map[string]any{"status": before}, map[string]any{"status": out.Status}))
 	})
 	return out, err
 }

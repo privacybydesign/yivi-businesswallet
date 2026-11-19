@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
+	"slices"
 	"strings"
 	"sync"
 
@@ -17,9 +19,12 @@ import (
 	"github.com/privacybydesign/irmago/eudi/openid4vci"
 	"github.com/privacybydesign/irmago/eudi/sdjwt"
 	"github.com/privacybydesign/irmago/eudi/services"
+	irmastorage "github.com/privacybydesign/irmago/eudi/storage"
 	"github.com/privacybydesign/irmago/eudi/storage/db"
 	"github.com/privacybydesign/irmago/eudi/storage/db/models"
-	"github.com/privacybydesign/irmago/eudi/utils"
+	"gorm.io/datatypes"
+
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/safehttp"
 )
 
 // redirectURI is unused by the pre-authorized-code grant (no browser redirect),
@@ -46,15 +51,21 @@ func (e *Engine) Redeem(ctx context.Context, orgID uuid.UUID, offerURI string) (
 		return Redeemed{}, err
 	}
 
-	conf, err := eudi.NewConfiguration(st)
+	conf, err := e.configuration(st, orgID)
 	if err != nil {
-		return Redeemed{}, fmt.Errorf("eudiholder: redeem config org %s: %w", orgID, err)
+		return Redeemed{}, err
 	}
-	if e.redeem.StagingTrustAnchors {
-		conf.EnableStagingTrustAnchors()
-	}
-	if err := conf.Reload(); err != nil {
-		return Redeemed{}, fmt.Errorf("eudiholder: redeem load trust anchors org %s: %w", orgID, err)
+
+	// x509Context is the trust material *both* x5c validations run against — the
+	// credential's own issuer certificate and, separately, the Status List Token
+	// its status.status_list reference resolves to. It is built here, above
+	// statusChecker, precisely so the checker inherits the merged anchors: built
+	// from the unmerged conf.Issuers, a partner credential would verify while its
+	// status list failed the redemption with "unauthorized: certificate
+	// validation" (statuslist/verifier.go).
+	x509Context, err := e.trustContext(&conf.Issuers)
+	if err != nil {
+		return Redeemed{}, err
 	}
 
 	// statusChecker performs the IETF Token Status List check the newer irmago
@@ -64,14 +75,13 @@ func (e *Engine) Redeem(ctx context.Context, orgID uuid.UUID, offerURI string) (
 	// wires it. Its cache is the org's own status_list_cache table (AutoMigrated
 	// with the rest of the holder schema). Credentials that carry no
 	// status.status_list reference are unaffected — the check is a no-op for them.
-	statusChecker := statuslist.NewChecker(statuslist.VerificationContext{
-		X509Context: &conf.Issuers,
-		Clock:       eudijwt.NewSystemClock(),
-	}, db.NewStatusListCacheStore(st.Db()))
+	statusChecker := e.newStatusChecker(x509Context, st)
 
-	verCtx, err := e.verificationContext(conf, statusChecker)
-	if err != nil {
-		return Redeemed{}, err
+	verCtx := sdjwtvc.SdJwtVcVerificationContext{
+		X509VerificationContext: x509Context,
+		Clock:                   eudijwt.NewSystemClock(),
+		JwtVerifier:             sdjwt.NewJwxJwtVerifier(),
+		StatusChecker:           statusChecker,
 	}
 	// holderKeyBinder is required by NewClient (non-nil): the WSCA-backed binder
 	// when configured (holder key + proof of possession produced by the
@@ -144,30 +154,168 @@ func (e *Engine) Redeem(ctx context.Context, orgID uuid.UUID, offerURI string) (
 	}
 }
 
-// verificationContext builds the SD-JWT VC trust context: a configured
-// trusted-issuer CA chain when set (the holder analogue of EUDI_ISSUER_CHAIN),
-// otherwise irmago's built-in trust model loaded into conf.Issuers. statusChecker
-// is set so a received credential that references a Token Status List is rejected
-// unless its bit reads valid (a no-op for credentials that carry no reference).
-func (e *Engine) verificationContext(conf *eudi.Configuration, statusChecker *statuslist.Checker) (sdjwtvc.SdJwtVcVerificationContext, error) {
-	if len(e.redeem.TrustChainPEM) > 0 {
-		opts, err := utils.CreateX509VerifyOptionsFromCertChain(e.redeem.TrustChainPEM)
-		if err != nil {
-			return sdjwtvc.SdJwtVcVerificationContext{}, fmt.Errorf("eudiholder: parse holder trust chain: %w", err)
-		}
-		return sdjwtvc.SdJwtVcVerificationContext{
-			X509VerificationContext: &eudijwt.StaticVerificationContext{VerifyOpts: *opts},
-			Clock:                   eudijwt.NewSystemClock(),
-			JwtVerifier:             sdjwt.NewJwxJwtVerifier(),
-			StatusChecker:           statusChecker,
-		}, nil
+// configuration loads the org's irmago configuration with its trust anchors
+// (and the staging anchors when configured): what both receiving a credential
+// and re-checking its status verify against.
+func (e *Engine) configuration(st irmastorage.Storage, orgID uuid.UUID) (*eudi.Configuration, error) {
+	conf, err := eudi.NewConfiguration(st)
+	if err != nil {
+		return nil, fmt.Errorf("eudiholder: config org %s: %w", orgID, err)
 	}
-	return sdjwtvc.SdJwtVcVerificationContext{
-		X509VerificationContext: &conf.Issuers,
-		Clock:                   eudijwt.NewSystemClock(),
-		JwtVerifier:             sdjwt.NewJwxJwtVerifier(),
-		StatusChecker:           statusChecker,
-	}, nil
+	if e.redeem.StagingTrustAnchors {
+		conf.EnableStagingTrustAnchors()
+	}
+	if err := conf.Reload(); err != nil {
+		return nil, fmt.Errorf("eudiholder: load trust anchors org %s: %w", orgID, err)
+	}
+	return conf, nil
+}
+
+// newStatusChecker is the org's Token Status List checker: status lists verify
+// against x509Context, are fetched with e.statusClient, and its cache is the
+// org's status_list_cache table.
+func (e *Engine) newStatusChecker(x509Context eudijwt.X509VerificationContext, st irmastorage.Storage) *statuslist.Checker {
+	return statuslist.NewChecker(statuslist.VerificationContext{
+		X509Context: x509Context,
+		Clock:       eudijwt.NewSystemClock(),
+		HTTPClient:  e.statusClient,
+	}, db.NewStatusListCacheStore(st.Db()))
+}
+
+// maxStatusListRedirects bounds the redirects one status list fetch follows:
+// the Token Status List spec has a client follow them (§8.2) but guard against
+// loops (§11.4).
+const maxStatusListRedirects = 3
+
+var errStatusListRedirects = errors.New("eudiholder: status list: too many redirects")
+
+// newStatusClient is a safehttp client that also enforces policy's scheme
+// rule on every request: a status list URI is issuer-supplied, so no request,
+// the first or a redirect's, may reach a private address or, outside dev, use
+// plain http. Unlike safehttp's default it follows redirects, since an issuer
+// that moves its lists can only redirect: the URI is signed into every
+// credential it issued. Each hop passes policyTransport and the dialer's
+// address check like the first, and the list it ends at is verified the same.
+func newStatusClient(policy safehttp.Policy) *http.Client {
+	client := safehttp.NewClient(policy)
+	client.Transport = policyTransport{policy: policy, next: client.Transport}
+	client.CheckRedirect = followStatusRedirect
+	return client
+}
+
+// followStatusRedirect is the status client's CheckRedirect: via holds the
+// requests already made, so its length is the redirect about to be followed.
+func followStatusRedirect(_ *http.Request, via []*http.Request) error {
+	if len(via) > maxStatusListRedirects {
+		return errStatusListRedirects
+	}
+	return nil
+}
+
+// policyTransport refuses a request whose URL policy rejects before it is sent.
+type policyTransport struct {
+	policy safehttp.Policy
+	next   http.RoundTripper
+}
+
+func (t policyTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if _, err := t.policy.CheckURL(req.URL.String()); err != nil {
+		return nil, fmt.Errorf("eudiholder: status list %s: %w", req.URL.Redacted(), err)
+	}
+	return t.next.RoundTrip(req)
+}
+
+// RefreshStatuses re-reads the Token Status List of every credential the org
+// holds that carries a status reference, and writes the observed status and the
+// time of the check back (irmago's RevocationService.RefreshStatuses, one check
+// per batch). It reports how many batches changed status. A list that cannot be
+// fetched or verified is logged and skipped, keeping the last known status.
+func (e *Engine) RefreshStatuses(ctx context.Context, orgID uuid.UUID) (int, error) {
+	st, err := e.engineFor(ctx, orgID)
+	if err != nil {
+		return 0, err
+	}
+	return e.refreshStatuses(ctx, orgID, st, db.NewCredentialStore(st.Db()))
+}
+
+// RefreshStatus is RefreshStatuses for the one credential ref names: only its
+// batch's status list is fetched. An unknown ref refreshes nothing.
+func (e *Engine) RefreshStatus(ctx context.Context, orgID uuid.UUID, ref string) (int, error) {
+	id, err := uuid.Parse(ref)
+	if err != nil {
+		return 0, nil
+	}
+	st, err := e.engineFor(ctx, orgID)
+	if err != nil {
+		return 0, err
+	}
+	var batchIDs []datatypes.UUID
+	if err := st.Db().WithContext(ctx).
+		Model(&models.IssuedCredentialInstance{}).
+		Where("id = ?", id).
+		Pluck("credential_batch_id", &batchIDs).Error; err != nil {
+		return 0, fmt.Errorf("eudiholder: batch of credential %s org %s: %w", ref, orgID, err)
+	}
+	if len(batchIDs) == 0 {
+		return 0, nil
+	}
+	return e.refreshStatuses(ctx, orgID, st, batchStatusStore{CredentialStore: db.NewCredentialStore(st.Db()), batchID: batchIDs[0]})
+}
+
+// refreshStatuses runs irmago's status sweep over the credentials store lists.
+func (e *Engine) refreshStatuses(ctx context.Context, orgID uuid.UUID, st irmastorage.Storage, store db.CredentialStore) (int, error) {
+	conf, err := e.configuration(st, orgID)
+	if err != nil {
+		return 0, err
+	}
+	x509Context, err := e.trustContext(&conf.Issuers)
+	if err != nil {
+		return 0, err
+	}
+	revocation := services.NewRevocationService(e.newStatusChecker(x509Context, st), store)
+	changed, err := revocation.RefreshStatuses(ctx)
+	if err != nil {
+		return changed, fmt.Errorf("eudiholder: refresh statuses org %s: %w", orgID, err)
+	}
+	return changed, nil
+}
+
+// batchStatusStore narrows the instances irmago's status sweep visits to one
+// batch, the sweep's only read of what to check.
+type batchStatusStore struct {
+	db.CredentialStore
+	batchID datatypes.UUID
+}
+
+func (s batchStatusStore) ListInstancesWithStatusReference() ([]db.CredentialStatusInstance, error) {
+	all, err := s.CredentialStore.ListInstancesWithStatusReference()
+	if err != nil {
+		return nil, err
+	}
+	return slices.DeleteFunc(all, func(inst db.CredentialStatusInstance) bool { return inst.BatchID != s.batchID }), nil
+}
+
+// trustContext builds the X.509 trust material received credentials are verified
+// against: base — irmago's built-in trust model, conf.Issuers, carrying its
+// staging anchors when enabled — with any configured trusted-issuer CA chain
+// merged on top. The chain adds anchors, it does not replace the built-in model
+// — a partner issuer has to be trusted alongside the ones already there, not
+// instead of them.
+//
+// One context serves every x5c path a redemption takes, which is why the caller
+// builds it before anything that consumes it. A credential and the Status List
+// Token it points at are two separate chain validations, and a partner signs
+// both under the same root: trusting the root for one and not the other rejects
+// the credential just as surely as trusting it for neither.
+func (e *Engine) trustContext(base eudijwt.X509VerificationContext) (eudijwt.X509VerificationContext, error) {
+	if len(e.redeem.TrustChainPEM) == 0 {
+		return base, nil
+	}
+	merged, err := mergeTrustChain(base, e.redeem.TrustChainPEM)
+	if err != nil {
+		return nil, fmt.Errorf("eudiholder: holder trust chain: %w", err)
+	}
+	return merged, nil
 }
 
 // storeRecorder decorates irmago's holder credential store to capture the batches

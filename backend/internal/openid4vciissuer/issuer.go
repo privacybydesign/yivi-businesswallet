@@ -47,6 +47,13 @@ type OfferRequest struct {
 	// CredentialConfigID is the issuer-registered credential type to issue (the
 	// Veramo credentialId our schema maps to).
 	CredentialConfigID string
+	// VCT, DisplayName and IssuerName are the credential type, its display
+	// name and the issuing organization's name. A real issuer takes these from
+	// its own configuration; only the stub reads them, to carry them to the stub
+	// holder (StubOfferContent).
+	VCT         string
+	DisplayName string
+	IssuerName  string
 	// Claims are the attribute values sealed into the credential
 	// (credentialDataSupplierInput).
 	Claims map[string]any
@@ -59,6 +66,9 @@ type OfferRequest struct {
 	// claim token remains the access boundary. Real recipient binding would
 	// require sending the PIN over a genuinely separate channel.
 	UseTxCode bool
+	// AwaitRedeem keeps a stub offer pending until the stub holder redeems it, as a
+	// real issuer does until a wallet collects the credential. Only the stub reads it.
+	AwaitRedeem bool
 }
 
 // Offer is a created credential offer: the opaque issuance id we poll on plus the

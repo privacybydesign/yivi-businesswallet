@@ -29,8 +29,8 @@ jobs:
     name: Build and push qtsp-signer to Scaleway
     # A wedged Maven build would otherwise hold a runner for the 6-hour default.
     timeout-minutes: 60
-    # SCW_SECRET_KEY lives in the `dev` environment (same as the mirror job in
-    # delivery.yml); without it docker login falls back to an interactive prompt.
+    # SCW_SECRET_KEY lives in the `dev` environment; without it docker login
+    # falls back to an interactive prompt.
     environment: dev
     env:
       IMAGE: rg.nl-ams.scw.cloud/yivi-containter-registry/qtsp-signer

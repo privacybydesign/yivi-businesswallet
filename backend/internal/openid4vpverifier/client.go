@@ -16,7 +16,10 @@ import (
 
 const (
 	presentationsPath = "/ui/presentations"
-	nonceBytes        = 16
+	// The wallet fetches the request object with GET and ignores this field; the
+	// verifier refuses the other method it was told to expect.
+	requestURIMethodGet = "get"
+	nonceBytes          = 16
 	// bodyLimit caps the verifier response we read, guarding against a hostile or
 	// broken upstream.
 	bodyLimit = 1 << 20
@@ -26,40 +29,75 @@ const (
 // the trusted credential issuer CA (PEM) so the verifier accepts the wallet's
 // credentials; it is configuration, never hardcoded.
 type Client struct {
-	baseURL     string
-	issuerChain string
-	http        *http.Client
+	baseURL                 string
+	issuerChain             string
+	intendedUseID           string
+	registrationCertificate string
+	vcts                    vcts
+	http                    *http.Client
 }
 
-func New(baseURL, issuerChain string, httpClient *http.Client) *Client {
-	return &Client{baseURL: strings.TrimRight(baseURL, "/"), issuerChain: issuerChain, http: httpClient}
+// credentialScheme is the Yivi scheme the requested credentials come from
+// (defaultCredentialScheme when empty).
+func New(baseURL, issuerChain, intendedUseID, registrationCertificate, credentialScheme string, httpClient *http.Client) *Client {
+	return &Client{
+		baseURL:                 strings.TrimRight(baseURL, "/"),
+		issuerChain:             issuerChain,
+		intendedUseID:           intendedUseID,
+		registrationCertificate: registrationCertificate,
+		vcts:                    vctsFor(credentialScheme),
+		http:                    httpClient,
+	}
 }
 
 // startRequest is the envelope the EUDI verifier's /ui/presentations expects.
 type startRequest struct {
-	Type             string    `json:"type"`
-	DCQLQuery        dcqlQuery `json:"dcql_query"`
-	Nonce            string    `json:"nonce"`
-	JARMode          string    `json:"jar_mode"`
-	RequestURIMethod string    `json:"request_uri_method"`
-	IssuerChain      string    `json:"issuer_chain,omitempty"`
+	Type                    string    `json:"type"`
+	DCQLQuery               dcqlQuery `json:"dcql_query"`
+	Nonce                   string    `json:"nonce"`
+	JARMode                 string    `json:"jar_mode"`
+	RequestURIMethod        string    `json:"request_uri_method"`
+	IssuerChain             string    `json:"issuer_chain,omitempty"`
+	IntendedUseID           string    `json:"intended_use_id,omitempty"`
+	RegistrationCertificate string    `json:"registration_certificate,omitempty"`
 }
 
 // StartPresentation creates a presentation request at the verifier for the given
 // scope and returns the wallet deeplink plus the transaction id to poll. The
-// nonce is random per request (never a fixed value).
-func (c *Client) StartPresentation(ctx context.Context, scope Scope) (Session, error) {
+// nonce is random per request (never a fixed value). claims is extra,
+// scope-specific claim names (currently only meaningful for ScopeVog, whose
+// aspect-flag claims are chosen per org - see queryFor); every other scope
+// ignores it.
+func (c *Client) StartPresentation(ctx context.Context, scope Scope, claims ...string) (Session, error) {
+	return c.start(ctx, c.vcts.queryFor(scope, claims))
+}
+
+// StartProofing creates an identity proofing presentation request: any one of
+// req's sources, as StartPresentation.
+func (c *Client) StartProofing(ctx context.Context, req ProofingRequest) (Session, error) {
+	return c.start(ctx, c.vcts.proofingRequestQuery(req))
+}
+
+// StartSigning creates the presentation request that authorises a signature:
+// the holder's name and date of birth from any one of req's sources.
+func (c *Client) StartSigning(ctx context.Context, req SigningRequest) (Session, error) {
+	return c.start(ctx, c.vcts.signingQuery(req))
+}
+
+func (c *Client) start(ctx context.Context, query dcqlQuery) (Session, error) {
 	nonce, err := randomNonce()
 	if err != nil {
 		return Session{}, err
 	}
 	body, err := json.Marshal(startRequest{
-		Type:             "vp_token",
-		DCQLQuery:        queryFor(scope),
-		Nonce:            nonce,
-		JARMode:          "by_reference",
-		RequestURIMethod: "post",
-		IssuerChain:      c.issuerChain,
+		Type:                    "vp_token",
+		DCQLQuery:               query,
+		Nonce:                   nonce,
+		JARMode:                 "by_reference",
+		RequestURIMethod:        requestURIMethodGet,
+		IssuerChain:             c.issuerChain,
+		IntendedUseID:           c.intendedUseID,
+		RegistrationCertificate: c.registrationCertificate,
 	})
 	if err != nil {
 		return Session{}, fmt.Errorf("openid4vpverifier: marshal start request: %w", err)
@@ -125,7 +163,12 @@ func (c *Client) Result(ctx context.Context, id string) (Presentation, error) {
 	if len(vt.VPToken) == 0 {
 		return Presentation{}, ErrPending
 	}
-	return Presentation{Claims: parseDisclosures(vt.VPToken)}, nil
+	return Presentation{
+		Claims:           parseDisclosures(vt.VPToken),
+		ByCredential:     parseDisclosuresByCredential(vt.VPToken),
+		IdentityIssuedAt: identityIssuedAt(vt.VPToken),
+		vcts:             c.vcts,
+	}, nil
 }
 
 // Status reports StatusPending until the presentation completes, then StatusDone.

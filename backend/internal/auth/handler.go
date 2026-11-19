@@ -26,6 +26,8 @@ type Handler struct {
 	users    avatarStore
 	cookie   CookieConfig
 	admins   PlatformAdmins
+	// selfReview is who may decide their own identity check (ReviewsOwn).
+	selfReview SelfReview
 }
 
 func NewHandler(svc *Service, sessions sessionLookuper, users avatarStore, cookie CookieConfig, admins PlatformAdmins) *Handler {
@@ -120,8 +122,12 @@ func (h *Handler) meResponse(u user.User) meResponse {
 		LastName:        u.LastName,
 		AvatarURI:       user.AvatarURL(MeAvatarPath, u.HasAvatar, u.AvatarUpdatedAt),
 		IsPlatformAdmin: h.admins.Has(u.Email),
+		ReviewsOwn:      h.selfReview.Allows(u.Email),
 	}
 }
+
+// SetSelfReview tells the app whether the user may decide their own checks.
+func (h *Handler) SetSelfReview(s SelfReview) { h.selfReview = s }
 
 func (h *Handler) logout(w http.ResponseWriter, r *http.Request) error {
 	if raw, ok := readSessionCookie(r); ok {
@@ -157,4 +163,7 @@ type meResponse struct {
 	// have not set one (the frontend then shows their initials).
 	AvatarURI       string `json:"avatarUri"`
 	IsPlatformAdmin bool   `json:"isPlatformAdmin"`
+	// ReviewsOwn is whether they may decide an identity check they sent or are
+	// the subject of (SelfReview).
+	ReviewsOwn bool `json:"reviewsOwn"`
 }

@@ -42,8 +42,16 @@ function lookup(locale: unknown, key: string): unknown {
 }
 
 describe("settings tab layout", () => {
-  it("has eight top-level tabs", () => {
-    expect(SETTINGS_TABS).toHaveLength(8);
+  it("has twelve top-level tabs", () => {
+    expect(SETTINGS_TABS).toHaveLength(12);
+  });
+
+  it("leads with Organisation, Branding and Data and privacy", () => {
+    expect(SETTINGS_TABS.slice(0, 3).map((item) => item.key)).toEqual([
+      "org",
+      "branding",
+      "privacy",
+    ]);
   });
 
   it("keeps the communication panels out of the top-level row", () => {
@@ -74,6 +82,35 @@ describe("resolveSettingsLocation", () => {
     for (const [value, tab, section] of LEGACY_TAB_KEYS) {
       expect(resolveSettingsLocation(value), value).toEqual({ tab, section });
     }
+  });
+
+  it("opens Branding, which holds the wallet theme, for the old theme key", () => {
+    expect(resolveSettingsLocation("theme")).toEqual({
+      tab: "branding",
+      section: DEFAULT_COMMUNICATION_SECTION,
+    });
+    expect(resolveSettingsLocation("branding").tab).toBe("branding");
+  });
+
+  it("opens the default tab for a key the prototype has", () => {
+    for (const value of ["constructor", "toString", "__proto__"]) {
+      expect(resolveSettingsLocation(value).tab, value).toBe(
+        DEFAULT_SETTINGS_TAB,
+      );
+    }
+  });
+
+  it("opens Data and privacy on its own key", () => {
+    expect(resolveSettingsLocation("privacy")).toEqual({
+      tab: "privacy",
+      section: DEFAULT_COMMUNICATION_SECTION,
+    });
+    expect(
+      settingsTabParam({
+        tab: "privacy",
+        section: DEFAULT_COMMUNICATION_SECTION,
+      }),
+    ).toBe("privacy");
   });
 
   it("opens the first section for the communication tab's own key", () => {

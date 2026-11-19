@@ -87,9 +87,9 @@ func TestDetectLogoType(t *testing.T) {
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			gotType, gotOK := detectLogoType(tc.data)
+			gotType, gotOK := DetectLogoType(tc.data)
 			if gotOK != tc.wantOK || gotType != tc.wantType {
-				t.Errorf("detectLogoType = (%q, %v), want (%q, %v)", gotType, gotOK, tc.wantType, tc.wantOK)
+				t.Errorf("DetectLogoType = (%q, %v), want (%q, %v)", gotType, gotOK, tc.wantType, tc.wantOK)
 			}
 		})
 	}
@@ -122,7 +122,7 @@ func TestLogoURL(t *testing.T) {
 
 func TestSetLogoResponseHeaders(t *testing.T) {
 	rec := httptest.NewRecorder()
-	setLogoResponseHeaders(rec.Header(), "image/svg+xml")
+	SetLogoResponseHeaders(rec.Header(), "image/svg+xml")
 
 	want := map[string]string{
 		"Content-Type":           "image/svg+xml",

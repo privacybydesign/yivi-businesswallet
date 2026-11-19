@@ -5,6 +5,8 @@ import type { AuditEvent } from "../api/organization";
 import i18n from "../i18n";
 import {
   auditActionLabel,
+  auditActorLabel,
+  auditDetailFields,
   auditSubject,
   auditTargetLabel,
 } from "./audit-event";
@@ -82,6 +84,7 @@ describe("auditSubject", () => {
         },
       }),
       dateFormatter,
+      t,
     );
     expect(subject).toBe("alice@example.test");
   });
@@ -99,6 +102,7 @@ describe("auditSubject", () => {
         },
       }),
       dateFormatter,
+      t,
     );
     expect(subject).toBe("alice@example.test, bob@example.test");
   });
@@ -108,13 +112,209 @@ describe("auditSubject", () => {
       auditSubject(
         event({ after: { name: "Acme", recipient: "acme-ref" } }),
         dateFormatter,
+        t,
       ),
     ).toBe("Acme");
     expect(
       auditSubject(
         event({ after: { email: "a@b.test", recipient: "acme-ref" } }),
         dateFormatter,
+        t,
       ),
     ).toBe("a@b.test");
+  });
+
+  // A proofing outcome names its subject, labels the fields it adds and drops
+  // the empty ones, so it never reads as "— → , — → low".
+  it("leads a proofing outcome with its subject and labels added fields", () => {
+    expect(
+      auditSubject(
+        event({
+          before: {
+            status: "in_progress",
+            subjectName: "Anna Jansen",
+            subjectEmail: "anna@example.test",
+          },
+          after: {
+            status: "approved",
+            subjectName: "Anna Jansen",
+            subjectEmail: "anna@example.test",
+            assuranceLevel: "substantial",
+            eidasLevel: "substantial",
+            errorCode: "",
+          },
+        }),
+        dateFormatter,
+        t,
+      ),
+    ).toBe(
+      "Anna Jansen: in_progress → approved, Assurance: substantial, eIDAS level: substantial",
+    );
+  });
+
+  it("gives a proofing rejection its reason in words", () => {
+    expect(
+      auditSubject(
+        event({
+          before: { status: "in_progress", subjectEmail: "anna@example.test" },
+          after: {
+            status: "rejected",
+            subjectEmail: "anna@example.test",
+            errorCode: "DOCUMENT_TYPE_NOT_ACCEPTED",
+          },
+        }),
+        dateFormatter,
+        t,
+      ),
+    ).toBe(
+      "anna@example.test: in_progress → rejected, Reason: document type not accepted by the flow",
+    );
+  });
+
+  it("falls back to the subject's e-mail when sent without a name", () => {
+    expect(
+      auditSubject(
+        event({
+          before: { status: "pending", subjectEmail: "anna@example.test" },
+          after: { status: "in_progress", subjectEmail: "anna@example.test" },
+        }),
+        dateFormatter,
+        t,
+      ),
+    ).toBe("anna@example.test: pending → in_progress");
+    expect(
+      auditSubject(
+        event({ after: { flowId: "f1", subjectEmail: "anna@example.test" } }),
+        dateFormatter,
+        t,
+      ),
+    ).toBe("anna@example.test");
+  });
+});
+
+describe("auditActorLabel", () => {
+  it("names an API key by its prefix", () => {
+    expect(auditActorLabel("api_key:yp_live_ab12", t)).toBe(
+      t("auditLog.apiKeyActor", { prefix: "yp_live_ab12" }),
+    );
+    expect(auditActorLabel("hosted_link", t)).toBe(
+      t("auditLog.hostedLinkActor"),
+    );
+    // An admin who acted on a member's request, unnamed in their timeline.
+    expect(auditActorLabel("admin", t)).toBe(t("auditLog.adminActor"));
+    expect(auditActorLabel("app:idem_app", t)).toBe(
+      t("identityProofing.methods.idemApp"),
+    );
+    expect(auditActorLabel(null, t)).toBeNull();
+    expect(auditActorLabel(undefined, t)).toBeNull();
+  });
+});
+
+describe("auditDetailFields", () => {
+  const dateFormatter = new Intl.DateTimeFormat("en", { timeZone: "UTC" });
+
+  function event(metadata: Record<string, unknown>): AuditEvent {
+    return {
+      id: "1",
+      occurredAt: "2026-07-22T10:00:00Z",
+      action: "identity_proofing.rejected",
+      targetType: "identity_proofing_request",
+      targetId: "req-1",
+      metadata,
+      actor: null,
+    };
+  }
+
+  // An update lists every field: the unchanged ones by their value, the
+  // changed ones before and after, and none empty on both sides.
+  it("shows an update's changed fields before and after", () => {
+    expect(
+      auditDetailFields(
+        event({
+          before: {
+            subjectName: "Anna Jansen",
+            status: "in_progress",
+            errorCode: "",
+          },
+          after: {
+            subjectName: "Anna Jansen",
+            status: "rejected",
+            errorCode: "",
+          },
+        }),
+        dateFormatter,
+        t,
+      ),
+    ).toEqual([
+      { key: "subjectName", label: "subjectName", value: "Anna Jansen" },
+      {
+        key: "status",
+        label: "status",
+        value: "rejected",
+        before: "in_progress",
+      },
+    ]);
+  });
+
+  // A value empty on one side reads as none, never as a label's copy for an
+  // unknown value (an error code's "the check did not pass ()").
+  it("shows an empty side of a change as none", () => {
+    expect(
+      auditDetailFields(
+        event({
+          before: { errorCode: "", note: "" },
+          after: { errorCode: "DOC_EXPIRED", note: "late" },
+        }),
+        dateFormatter,
+        t,
+      ),
+    ).toEqual([
+      {
+        key: "errorCode",
+        label: t("auditLog.fields.errorCode"),
+        value: t("identityProofing.rejectionReasons.docExpired"),
+        before: "—",
+      },
+      { key: "note", label: "note", value: "late", before: "—" },
+    ]);
+  });
+
+  // A known field reads by its label and value, an unknown one by its key; a
+  // nested value is compact and a timestamp formatted.
+  it("labels known fields and formats nested values and dates", () => {
+    const fields = auditDetailFields(
+      event({
+        after: {
+          method: "idem_app",
+          roles: ["admin", "member"],
+          sentAt: "2026-07-22T10:00:00Z",
+          note: null,
+        },
+      }),
+      dateFormatter,
+      t,
+    );
+    expect(fields.map((f) => [f.label, f.value])).toEqual([
+      [t("auditLog.fields.method"), t("identityProofing.methods.idemApp")],
+      ["roles", '["admin","member"]'],
+      ["sentAt", dateFormatter.format(new Date("2026-07-22T10:00:00Z"))],
+    ]);
+  });
+
+  it("adds metadata outside the snapshot", () => {
+    expect(
+      auditDetailFields(
+        event({ before: { name: "Sales" }, via: "api" }),
+        dateFormatter,
+        t,
+      ),
+    ).toEqual([
+      { key: "name", label: "name", value: "Sales" },
+      { key: "via", label: "via", value: "api" },
+    ]);
+  });
+
+  it("is empty without metadata", () => {
+    expect(auditDetailFields(event({}), dateFormatter, t)).toEqual([]);
   });
 });

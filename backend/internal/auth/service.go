@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -59,13 +60,18 @@ type DisclosedIdentity struct {
 	// Phone is the disclosed mobile number (identity scope). Best-effort: empty
 	// when the presentation carried no phone claim.
 	Phone string
+	// CredentialIssuedAt is the disclosed identity credential's issuer `iat`
+	// (openid4vpverifier.Presentation.IdentityIssuedAt), zero when unknown. Used
+	// by the re-identification credential-freshness check
+	// (organization.Service.CompleteReverification).
+	CredentialIssuedAt time.Time
 }
 
 // verifier is the slice of openid4vpverifier.Client the service needs, defined in
 // the consumer so the service is testable without a live verifier. Its id
 // argument is the verifier's transaction_id, never the client-facing session id.
 type verifier interface {
-	StartPresentation(ctx context.Context, scope openid4vpverifier.Scope) (openid4vpverifier.Session, error)
+	StartPresentation(ctx context.Context, scope openid4vpverifier.Scope, claims ...string) (openid4vpverifier.Session, error)
 	Result(ctx context.Context, transactionID string) (openid4vpverifier.Presentation, error)
 	Status(ctx context.Context, transactionID string) (string, error)
 }
@@ -84,7 +90,12 @@ type Service struct {
 	users         *user.Store
 	sessions      *session.Store
 	invites       invitationLookup
+	// bootstrap, on a DEV_MODE stack, makes the first unknown login its admin.
+	bootstrap *DevBootstrap
 }
+
+// SetDevBootstrap turns on DEV_MODE's first-login admin.
+func (s *Service) SetDevBootstrap(b *DevBootstrap) { s.bootstrap = b }
 
 func NewService(
 	verifier verifier,
@@ -113,8 +124,32 @@ func (s *Service) StartIdentitySession(ctx context.Context) (Session, error) {
 	return s.startPresentation(ctx, openid4vpverifier.ScopeIdentity)
 }
 
-func (s *Service) startPresentation(ctx context.Context, scope openid4vpverifier.Scope) (Session, error) {
-	sess, err := s.verifier.StartPresentation(ctx, scope)
+// StartVogSession begins the opt-in pbdf.vog credential disclosure (#242 §4),
+// requesting only the org's required function-aspect flags alongside the
+// credential's core identity fields - never every aspectNN flag, never
+// profileCodes as a blob.
+func (s *Service) StartVogSession(ctx context.Context, requiredAspectCodes []string) (Session, error) {
+	return s.startPresentation(ctx, openid4vpverifier.ScopeVog, vogAspectClaims(requiredAspectCodes)...)
+}
+
+// StartIdentityVogSession begins a combined disclosure: a verified identity (as
+// StartIdentitySession) and the pbdf.vog credential in one presentation, for a
+// member who has never identified and is asked for a VOG - one scan instead of
+// being turned away to identify first.
+func (s *Service) StartIdentityVogSession(ctx context.Context, requiredAspectCodes []string) (Session, error) {
+	return s.startPresentation(ctx, openid4vpverifier.ScopeIdentityVog, vogAspectClaims(requiredAspectCodes)...)
+}
+
+func vogAspectClaims(codes []string) []string {
+	claims := make([]string, len(codes))
+	for i, c := range codes {
+		claims[i] = openid4vpverifier.VogAspectClaim(c)
+	}
+	return claims
+}
+
+func (s *Service) startPresentation(ctx context.Context, scope openid4vpverifier.Scope, claims ...string) (Session, error) {
+	sess, err := s.verifier.StartPresentation(ctx, scope, claims...)
 	if err != nil {
 		return Session{}, fmt.Errorf("auth: start session: %w", err)
 	}
@@ -133,6 +168,36 @@ func (s *Service) DiscloseIdentity(ctx context.Context, id string) (DisclosedIde
 		return DisclosedIdentity{}, err
 	}
 	return extractIdentity(res)
+}
+
+// DiscloseVog reads a completed pbdf.vog disclosure (#242 §4). requiredAspectCodes
+// must be the same list StartVogSession was called with, so the aspect claims
+// read back are exactly the ones that were requested.
+func (s *Service) DiscloseVog(ctx context.Context, id string, requiredAspectCodes []string) (DisclosedVog, error) {
+	res, err := s.result(ctx, id)
+	if err != nil {
+		return DisclosedVog{}, err
+	}
+	return extractVog(res, requiredAspectCodes)
+}
+
+// DiscloseIdentityAndVog reads a completed combined disclosure
+// (StartIdentityVogSession): the identity part and the pbdf.vog part, each
+// read from its own credential so the two dateOfBirth claims stay apart.
+func (s *Service) DiscloseIdentityAndVog(ctx context.Context, id string, requiredAspectCodes []string) (DisclosedIdentity, DisclosedVog, error) {
+	res, err := s.result(ctx, id)
+	if err != nil {
+		return DisclosedIdentity{}, DisclosedVog{}, err
+	}
+	ident, err := extractIdentity(res)
+	if err != nil {
+		return DisclosedIdentity{}, DisclosedVog{}, err
+	}
+	disclosedVog, err := extractVog(res, requiredAspectCodes)
+	if err != nil {
+		return DisclosedIdentity{}, DisclosedVog{}, err
+	}
+	return ident, disclosedVog, nil
 }
 
 func (s *Service) Status(ctx context.Context, id string) (string, error) {
@@ -161,10 +226,10 @@ func (s *Service) Authenticate(ctx context.Context, id string) (user.User, strin
 	}
 
 	u, err := s.users.FindByEmail(ctx, email)
+	if errors.Is(err, user.ErrNotFound) {
+		u, err = s.unknownUser(ctx, email)
+	}
 	if err != nil {
-		if errors.Is(err, user.ErrNotFound) {
-			return user.User{}, "", s.invitedOrNotFound(ctx, email)
-		}
 		return user.User{}, "", err
 	}
 
@@ -197,6 +262,24 @@ func (s *Service) result(ctx context.Context, id string) (openid4vpverifier.Pres
 		return openid4vpverifier.Presentation{}, err
 	}
 	return res, nil
+}
+
+// unknownUser answers a login by an address the wallet has no user for: its
+// invitations, else on a DEV_MODE stack the bootstrap admin while unclaimed,
+// else errUserNotInvited.
+func (s *Service) unknownUser(ctx context.Context, email user.Email) (user.User, error) {
+	err := s.invitedOrNotFound(ctx, email)
+	if !errors.Is(err, errUserNotInvited) || s.bootstrap == nil {
+		return user.User{}, err
+	}
+	u, claimed, cerr := s.bootstrap.claim(ctx, email)
+	if cerr != nil {
+		return user.User{}, cerr
+	}
+	if !claimed {
+		return user.User{}, err
+	}
+	return u, nil
 }
 
 func (s *Service) invitedOrNotFound(ctx context.Context, email user.Email) error {

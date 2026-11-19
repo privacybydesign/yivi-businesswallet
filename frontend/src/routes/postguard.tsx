@@ -64,7 +64,7 @@ export default function Postguard(): React.JSX.Element {
         }
       />
 
-      <div className="grid grid-cols-1 gap-5 p-8 lg:grid-cols-[1fr_320px]">
+      <div className="grid grid-cols-1 gap-5 p-4 sm:p-8 lg:grid-cols-[1fr_320px]">
         {org.isError ? (
           <Card className="p-6">
             <p className="text-error text-[14px]">

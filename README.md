@@ -31,6 +31,41 @@ npm run dev:reset     # same, but wipes DB volumes first (clean slate)
 - Frontend: http://localhost:5173
 - Backend: http://localhost:8080
 
+Optional Compose profiles add local counterparts for flows that otherwise need a
+hosted partner (`COMPOSE_PROFILES=<name>` in `.env`, or `docker compose --profile
+<name> up`): `verifier` runs a local OpenID4VP relying party at http://localhost:8091
+that invokes the business wallet as a holder (see
+`.ai/features/openid4vp-inbound.md` §8; the same verifier runs on staging from the
+`devverifier` image the Delivery workflow publishes); `signer`, `domibus` and `verid` are
+the signing and QERDS benches.
+
+Identity proofing runs in the backend itself (`internal/proofingengine`): the Idem app
+claims a session and submits its steps to `/api/v1/app/...` on this backend. To test with
+a phone, set `IDENTITY_PROOFING_PUBLIC_URL` in `.env` to an address the phone reaches
+(e.g. `http://<your-LAN-IP>:8080`) and `REGULA_FACE_API_URL` for the face step;
+`IDENTITY_PROOFING_PROVIDER=stub` swaps in an in-memory stand-in no phone can reach.
+Diploma uploads accept any PDF in the dev stack (`DIPLOMA_VALIDATOR_PROVIDER=stub`, set by
+`compose.override.yaml`); set it to `duo` in `.env` to check real DUO extracts.
+Verzekeringsbericht uploads likewise (`EMPLOYMENT_VALIDATOR_PROVIDER=stub`); set it to `uwv`
+to check UWV's seal for real, or `off` to check none.
+VOG uploads likewise (`VOG_VALIDATOR_PROVIDER=stub`); set it to `validatie_nl` to check
+them for real.
+
+The dev stack runs with `DEV_MODE=true` (`compose.override.yaml`):
+
+- The stub settings above work only with it; a deployment refuses them at boot.
+- The first person to log in with Yivi whose e-mail address the wallet does not know
+  becomes the platform admin, whenever that happens: logging in as a seeded account
+  leaves the claim open. Every later unknown address is refused as usual. No
+  `PLATFORM_ADMIN_EMAILS` entry is needed.
+- The backend refuses to start with it unless `APP_BASE_URL` is set to a localhost URL.
+- Outside it, these URLs must be https, or plain http to localhost:
+  `IDENTITY_PROOFING_PUBLIC_URL`, `REGULA_FACE_API_PUBLIC_URL`, `VOG_VALIDATOR_URL`,
+  `ID_SCAN_API_URL`, `APP_BASE_URL`, `OPENID4VP_REQUESTER_PUBLIC_URL`,
+  `ADDRESS_LOOKUP_URL` and `SIGNING_REDIRECT_URI`.
+- Outside it, `OPENID4VP_PRESENTER_ALLOW_INSECURE_HTTP` and
+  `ATTESTATION_HOLDER_ALLOW_INSECURE_HTTP` must stay off.
+
 On first run `npm run dev` creates a root `.env` from `.env.example` if one does
 not exist. Compose **requires** `POSTGRES_PASSWORD` (there is no weak default), so
 without this file it would abort with `required variable POSTGRES_PASSWORD is
@@ -44,6 +79,42 @@ cp .env.example .env      # then edit POSTGRES_PASSWORD to a strong, unique valu
 
 The Vite dev server proxies health probes and `/api` to the backend container, so
 the frontend talks to the backend out of the box.
+
+### Upgrading the database from PostgreSQL 16 to 17
+
+The `db` service runs `postgres:17-alpine` on the `pgdata17` volume. The old
+PostgreSQL 16 data stays in the `pgdata` volume, which Compose no longer uses, so
+after the upgrade the stack starts with an empty database.
+
+If you don't need the old data (local dev), remove the old volume with
+`docker volume rm yivi-business-wallet_pgdata` and stop here.
+To keep the data, dump it from `pgdata` with a temporary 16 container and restore
+it into `pgdata17`. Run these from the repo root. Replace `postgres` /
+`yivi_business_wallet` if you set `POSTGRES_USER` / `POSTGRES_DB` in `.env`:
+
+```sh
+docker compose down
+
+# 1. Start PostgreSQL 16 on the old volume and dump the database
+docker run -d --name pg16-upgrade -v yivi-business-wallet_pgdata:/var/lib/postgresql postgres:16-alpine
+docker exec pg16-upgrade pg_isready -U postgres          # repeat until "accepting connections"
+docker exec pg16-upgrade pg_dump -U postgres -Fc -f /tmp/wallet.dump yivi_business_wallet
+docker cp pg16-upgrade:/tmp/wallet.dump ./wallet.dump
+docker rm -f pg16-upgrade
+
+# 2. Restore into a fresh PostgreSQL 17 volume
+docker volume rm yivi-business-wallet_pgdata17           # only if it already exists, e.g. from an earlier `npm run dev`
+docker compose up -d --wait db
+docker compose cp ./wallet.dump db:/tmp/wallet.dump
+docker compose exec db pg_restore -U postgres -d yivi_business_wallet --no-owner /tmp/wallet.dump
+
+# 3. Start the stack as usual
+npm run dev
+```
+
+Once you have checked the restored data, delete `wallet.dump` and the old volume
+(`docker volume rm yivi-business-wallet_pgdata`). The dump holds the full
+database, so don't commit it.
 
 ## Login (development)
 
@@ -65,7 +136,9 @@ Override the verifier with `EUDI_VERIFIER_URL`, and pin the trusted issuer CA wi
 
 ### Production
 
-Point `EUDI_VERIFIER_URL` at the production EUDI verifier and set `EUDI_ISSUER_CHAIN`.
+Point `EUDI_VERIFIER_URL` at the production EUDI verifier, set `EUDI_ISSUER_CHAIN`, and
+set `EUDI_CREDENTIAL_SCHEME=pbdf` so it requests the production `pbdf.*` credentials
+instead of `pbdf-staging.*`.
 The backend runs a one-shot readiness probe at boot (it creates a presentation request of
 the shape it will use) and **exits non-zero** if the verifier won't accept it — so a
 misconfigured verifier fails the deploy, not the first user.
@@ -152,5 +225,7 @@ Install hooks once after cloning with `npm install` at the repo root.
 
 ## Continuous integration
 
-GitHub Actions (`.github/workflows/ci.yml`) runs format, lint, type-check, build,
-and test for both the frontend and backend on every push and pull request.
+GitHub Actions (`.github/workflows/status-checks.yml`, using the shared
+[privacybydesign/github-workflows](https://github.com/privacybydesign/github-workflows))
+runs format, lint, type-check, build, and test for both the frontend and backend
+on every push and pull request, and builds and scans the images on pull requests.

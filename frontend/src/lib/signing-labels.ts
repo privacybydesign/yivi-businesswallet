@@ -1,5 +1,7 @@
 import type { TFunction } from "i18next";
+import type { SigningRequest } from "../api/signing";
 import {
+  CREATED_VIA,
   DELIVERY_STATUS,
   RECIPIENT_CHANNEL,
   SIGNER_KIND,
@@ -23,6 +25,17 @@ export function modeLabel(t: TFunction, mode: string): string {
   }
 }
 
+// Who asked for a request. One made over the signing API has no creator, so it
+// names the API instead of an empty name.
+export function requestedByLabel(
+  t: TFunction,
+  request: Pick<SigningRequest, "createdVia" | "createdByName">,
+): string {
+  return request.createdVia === CREATED_VIA.api
+    ? t("signing.requestedViaApi")
+    : t("signing.requestedBy", { name: request.createdByName });
+}
+
 export function signerStatusLabel(t: TFunction, status: string): string {
   switch (status) {
     case SIGNER_STATUS.pending:
@@ -31,6 +44,8 @@ export function signerStatusLabel(t: TFunction, status: string): string {
       return t("signing.signerStatus.signed");
     case SIGNER_STATUS.failed:
       return t("signing.signerStatus.failed");
+    case SIGNER_STATUS.declined:
+      return t("signing.signerStatus.declined");
     default:
       return status;
   }
@@ -55,6 +70,8 @@ export function requestStatusLabel(t: TFunction, status: string): string {
       return t("signing.requestStatus.completed");
     case SIGNING_STATUS.failed:
       return t("signing.requestStatus.failed");
+    case SIGNING_STATUS.declined:
+      return t("signing.requestStatus.declined");
     default:
       return status;
   }

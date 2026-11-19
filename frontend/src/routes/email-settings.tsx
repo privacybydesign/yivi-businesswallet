@@ -15,16 +15,16 @@ import {
   smtpAuthMechanismOptions,
 } from "../api/email";
 import { ApiError } from "../api/http";
-import { Button, Card, Input } from "../ui";
+import { Button, Card, Input, Select } from "../ui";
 import * as React from "react";
+import { draftChanged } from "../lib/form-draft";
+import { UnsavedChanges } from "./unsaved-changes";
 
 const DECIMAL_RADIX = 10;
 const CONFLICT_STATUS = 409;
 const DEFAULT_SMTP_PORT = 587;
 const LABEL = "text-ink-soft text-[12px] font-semibold";
 const HINT = "text-ink-soft text-[12px]";
-const CONTROL =
-  "rounded-yivi border-line-strong bg-surface text-ink h-9 w-full border px-3 text-[13.5px] outline-none transition-colors focus:border-ink focus:ring-ink/10 focus:ring-3";
 // Plausible address check only; the backend is the authority.
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -66,10 +66,10 @@ function testError(error: Error, t: TFunction): string {
 function SmtpForm({
   slug,
   initial,
-}: {
+}: Readonly<{
   slug: string;
   initial: EmailSettingsData;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const save = useUpdateEmailSettingsMutation(slug);
 
@@ -128,8 +128,38 @@ function SmtpForm({
     );
   }
 
+  const dirty = draftChanged(
+    {
+      host,
+      port,
+      username,
+      password,
+      authMechanism,
+      tenantId,
+      clientId,
+      clientSecret,
+      fromName,
+      fromAddress,
+      enabled,
+    },
+    {
+      host: initial.host,
+      port: String(initial.port || DEFAULT_SMTP_PORT),
+      username: initial.username,
+      password: "",
+      authMechanism: initial.authMechanism || SMTP_AUTH_MECHANISMS[0],
+      tenantId: initial.tenantId,
+      clientId: initial.clientId,
+      clientSecret: "",
+      fromName: initial.fromName,
+      fromAddress: initial.fromAddress,
+      enabled: initial.enabled,
+    },
+  );
+
   return (
     <Card className="max-w-2xl p-7">
+      <UnsavedChanges dirty={dirty && !save.isPending} />
       <h2 className="text-[16px] font-semibold">
         {t("emailSettings.heading")}
       </h2>
@@ -169,9 +199,8 @@ function SmtpForm({
           <label htmlFor="email-auth-mechanism" className={LABEL}>
             {t("emailSettings.authMechanism")}
           </label>
-          <select
+          <Select
             id="email-auth-mechanism"
-            className={CONTROL}
             value={authMechanism}
             onChange={(event) => {
               setAuthMechanism(event.target.value);
@@ -187,7 +216,7 @@ function SmtpForm({
                 </option>
               ),
             )}
-          </select>
+          </Select>
           {usesOAuth && (
             <span id="email-mechanism-hint" className={HINT}>
               {t("emailSettings.xoauth2Hint")}
@@ -341,7 +370,7 @@ function SmtpForm({
   );
 }
 
-function TestForm({ slug }: { slug: string }): React.JSX.Element {
+function TestForm({ slug }: Readonly<{ slug: string }>): React.JSX.Element {
   const { t } = useTranslation();
   const test = useSendTestEmailMutation(slug);
   const [testTo, setTestTo] = useState("");
@@ -397,9 +426,9 @@ function TestForm({ slug }: { slug: string }): React.JSX.Element {
 // gated on admin, so the panel only owns the settings query and its forms.
 export function EmailSettingsPanel({
   slug,
-}: {
+}: Readonly<{
   slug: string;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const settings = useEmailSettingsQuery(slug, true);
 

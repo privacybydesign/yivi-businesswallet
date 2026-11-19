@@ -28,14 +28,17 @@ type tester interface {
 // Both reads and writes are org-admin only: this is provider configuration that
 // holds a credential, and even the read says whether a secret is stored.
 type Handler struct {
-	store       settingsStore
-	client      tester
+	store  settingsStore
+	client tester
+	// builtIn is the wallet's own signing service; nil when the deployment does
+	// not run it.
+	builtIn     *BuiltIn
 	requireUser func(http.Handler) http.Handler
 	authorize   func(http.Handler) http.Handler
 }
 
-func NewHandler(store settingsStore, client tester, requireUser, authorize func(http.Handler) http.Handler) *Handler {
-	return &Handler{store: store, client: client, requireUser: requireUser, authorize: authorize}
+func NewHandler(store settingsStore, client tester, builtIn *BuiltIn, requireUser, authorize func(http.Handler) http.Handler) *Handler {
+	return &Handler{store: store, client: client, builtIn: builtIn, requireUser: requireUser, authorize: authorize}
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {
@@ -54,8 +57,8 @@ type settingsResponse struct {
 	ProviderKinds []ProviderKindInfo `json:"providerKinds"`
 }
 
-func newSettingsResponse(s Settings) settingsResponse {
-	return settingsResponse{Settings: s, ProviderKinds: ProviderKinds()}
+func (h *Handler) newSettingsResponse(s Settings) settingsResponse {
+	return settingsResponse{Settings: s, ProviderKinds: ProviderKindsFor(h.builtIn)}
 }
 
 func (h *Handler) getSettings(w http.ResponseWriter, r *http.Request) error {
@@ -64,7 +67,7 @@ func (h *Handler) getSettings(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return fmt.Errorf("getting csc settings: %w", err)
 	}
-	respond.JSON(w, r, http.StatusOK, newSettingsResponse(settings))
+	respond.JSON(w, r, http.StatusOK, h.newSettingsResponse(settings))
 	return nil
 }
 
@@ -94,10 +97,17 @@ func (h *Handler) putSettings(w http.ResponseWriter, r *http.Request) error {
 			Message: "this deployment has no CSC encryption key configured, so a client secret cannot be stored; set CSC_ENCRYPTION_KEY on the server",
 		}
 	}
+	if errors.Is(err, ErrBuiltInUnavailable) {
+		return &respond.APIError{
+			Status:  http.StatusConflict,
+			Code:    "built_in_unavailable",
+			Message: "this deployment does not run the built-in signing service; set CSC_ENCRYPTION_KEY on the server, or connect another provider",
+		}
+	}
 	if err != nil {
 		return fmt.Errorf("updating csc settings: %w", err)
 	}
-	respond.JSON(w, r, http.StatusOK, newSettingsResponse(settings))
+	respond.JSON(w, r, http.StatusOK, h.newSettingsResponse(settings))
 	return nil
 }
 
@@ -120,6 +130,17 @@ func parseSettingsRequest(r *http.Request) (SettingsInput, error) {
 // connection reached the QTSP they meant.
 func (h *Handler) postTest(w http.ResponseWriter, r *http.Request) error {
 	org := organization.OrgFromContext(r.Context())
+	// The wallet's own service is this process: asked over HTTP it would have to
+	// reach its own public address, which a container often cannot. That it
+	// answers is what the boot probe already established.
+	settings, err := h.store.GetSettings(r.Context(), org.ID)
+	if err != nil {
+		return fmt.Errorf("reading csc settings: %w", err)
+	}
+	if settings.ProviderKind == ProviderKindYivi && h.builtIn != nil {
+		respond.JSON(w, r, http.StatusOK, h.builtIn.Info)
+		return nil
+	}
 	baseURL, err := h.store.BaseURLFor(r.Context(), org.ID)
 	if errors.Is(err, ErrNotConfigured) {
 		return &respond.APIError{Status: http.StatusConflict, Code: "not_configured", Message: "save a CSC base URL before testing the connection"}

@@ -7,16 +7,16 @@ const LOGO_HEIGHT = 22;
 export function Logo({
   src,
   alt,
-}: {
+}: Readonly<{
   src?: string;
   alt?: string;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   if (src) {
     return (
       <img
         src={src}
         alt={alt ?? ""}
-        style={{ maxHeight: LOGO_HEIGHT, maxWidth: "100%" }}
+        style={{ maxHeight: "var(--yb-logo-height)", maxWidth: "100%" }}
       />
     );
   }

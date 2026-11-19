@@ -1,0 +1,320 @@
+package proofingengine
+
+import (
+	"encoding/base64"
+	"log/slog"
+	"slices"
+
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/bsn"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/flow"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/images"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/privacy"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/session"
+)
+
+// requestedAttributesOf is what fd releases: its own list, or everything its
+// steps collect when it lists none. Only attrOutcomeOnly, chosen explicitly,
+// releases nothing but the outcome.
+func requestedAttributesOf(fd flow.FlowDefinition) []string {
+	if len(fd.RequestedAttributes) > 0 {
+		return fd.RequestedAttributes
+	}
+	if attrs := attributesForSteps(fd.Steps); len(attrs) > 0 {
+		return attrs
+	}
+	return []string{attrOutcomeOnly}
+}
+
+// attributesForSteps is every result attribute steps collect.
+func attributesForSteps(steps []flow.Step) []string {
+	var attrs []string
+	add := func(vs ...string) {
+		for _, v := range vs {
+			if !slices.Contains(attrs, v) {
+				attrs = append(attrs, v)
+			}
+		}
+	}
+	for _, step := range steps {
+		switch step {
+		case flow.StepDocumentCapture:
+			add(attrDocument, attrDocumentImage)
+		case flow.StepNFCRead:
+			add(attrDG11, attrDG2, attrChipChecks)
+		case flow.StepDocumentPhoto:
+			add(attrDocumentImage)
+		case flow.StepSelfie:
+			add(attrSelfie)
+		case flow.StepLiveness, flow.StepFaceMatch:
+			add(attrBiometrics)
+		case flow.StepFaceVerification:
+			add(attrSelfie, attrBiometrics)
+		}
+	}
+	return attrs
+}
+
+// Result attributes a flow can request (requestedAttributes).
+const (
+	attrDocument      = "dg1"        // document/MRZ fields, holder identity, validity
+	attrDG11          = "dg11"       // DG11 extras: personalNumber, placeOfBirth
+	attrDG2           = "dg2"        // raw face image off the chip
+	attrFaceImage     = "face_image" // alias for attrDG2
+	attrChipChecks    = "chip_checks"
+	attrBiometrics    = "biometrics"
+	attrSelfie        = "selfie"         // live selfie captured during face verification
+	attrDocumentImage = "document_image" // visual (VIZ) capture of the document
+	attrAgeOver       = flow.AttributeAgeOver
+	// attrOutcomeOnly is a flow's whole list when the admin chose to release no
+	// data: it names no result attribute, so nothing but the outcome (status,
+	// assurance) is released.
+	attrOutcomeOnly = "outcome_only"
+)
+
+// attrRequested reports whether any of keys was requested. An empty
+// RequestedAttributes list is unrestricted: only a session no flow governs
+// has one, since a flow's session gets requestedAttributesOf the flow.
+func attrRequested(sess session.Session, keys ...string) bool {
+	if len(sess.RequestedAttributes) == 0 {
+		return true
+	}
+	for _, want := range keys {
+		if slices.Contains(sess.RequestedAttributes, want) {
+			return true
+		}
+	}
+	return false
+}
+
+// buildResult is the stored and released result: only what the session
+// requested, after the flow's BSN and redaction policy. It is the one place
+// evidence becomes a result, so nothing leaves raw. Chip checks are the
+// server's own (verifiedChipChecks), never the app's.
+func buildResult(sess session.Session, req appResultRequest, verifiedChipChecks *chipChecksInfo, fd *flow.FlowDefinition, bsnPolicy privacy.BSNPolicy, redaction privacy.RedactionPolicy) map[string]any {
+	result := map[string]any{}
+
+	if req.Document != nil && attrRequested(sess, attrDocument) {
+		doc := *req.Document
+		applyBSNPolicy(&doc, bsnPolicy)
+		if !attrRequested(sess, attrDG11) {
+			doc.PersonalNumber = ""
+			doc.PlaceOfBirth = ""
+		}
+		// The age check wins over the document data: the date of birth it
+		// answers from is never released next to it.
+		if attrRequested(sess, attrAgeOver) {
+			doc.DateOfBirth = ""
+		}
+		result["document"] = doc
+	}
+
+	// The face photos are released only when the flow keeps them
+	// (KeepFacePhotos): the face match has run on them already, and its verdicts
+	// are in the result either way.
+	if req.Photo != nil && redaction.KeepFacePhotos && attrRequested(sess, attrDG2, attrFaceImage) {
+		photo := *req.Photo
+		// Browsers do not render JPEG2000, which DG2 portraits often are.
+		if converted, mime, err := images.ToDisplayablePNG(photo.ImageBase64, photo.MimeType); err != nil {
+			slog.Warn("identity proofing: could not convert the photo for display", slog.String("session_id", sess.ID), slog.Any("error", err))
+		} else {
+			photo.ImageBase64, photo.MimeType = converted, mime
+		}
+		result["photo"] = &photo
+	}
+
+	addSelfie(result, sess, req.Selfie, redaction)
+
+	// A face matched against the relying party's own photo (a flow without
+	// nfc_read) says so, and releases that photo with the selfie, so whoever
+	// reads the result sees both faces that were compared.
+	if sess.ReferencePhoto != "" {
+		result["faceReference"] = faceReferenceRelyingParty
+		if redaction.KeepFacePhotos && attrRequested(sess, attrSelfie) {
+			result["referencePhoto"] = &photoInfo{ImageBase64: sess.ReferencePhoto, MimeType: sess.ReferencePhotoMime}
+		}
+	}
+
+	if attrRequested(sess, attrDocumentImage) {
+		docRedaction := redaction
+		docRedaction.BlurBSN = coversDocumentBSN(redaction, resultIssuingState(sess, req))
+		if img := releasedDocumentImage(sess, req.DocumentImage, docRedaction); img != nil {
+			result["documentImage"] = img
+		}
+		if img := releasedDocumentImage(sess, req.DocumentImageBack, docRedaction); img != nil {
+			result["documentImageBack"] = img
+		}
+	}
+
+	if verifiedChipChecks != nil && attrRequested(sess, attrChipChecks) {
+		result["chipChecks"] = verifiedChipChecks
+	}
+	if req.Biometrics != nil && attrRequested(sess, attrBiometrics) {
+		result["biometrics"] = req.Biometrics
+	}
+	if req.Device != nil {
+		result["device"] = req.Device
+	}
+	if req.AgeOver != nil && attrRequested(sess, attrAgeOver) {
+		result["ageOver"] = req.AgeOver
+	}
+
+	// Released whatever was requested, like device: how well the session was
+	// verified, not personal data.
+	result["assurance"] = computeAssurance(fd, req, verifiedChipChecks, faceMatchSourceOf(sess))
+	addDocumentCheck(result, sess)
+	addFaceCheck(result, sess)
+	return result
+}
+
+// documentCheckInfo is a document scan's result as a session's result carries
+// it: its verdict and checks, and the kind of document, never what it read.
+type documentCheckInfo struct {
+	Verdict      string   `json:"verdict,omitempty"`
+	Score        *float64 `json:"score,omitempty"`
+	FieldsValid  *bool    `json:"fieldsValid,omitempty"`
+	ZonesMatch   *bool    `json:"zonesMatch,omitempty"`
+	DocumentKind string   `json:"documentKind,omitempty"`
+}
+
+// addDocumentCheck adds sess's document scan result to result, released
+// whatever was requested, like assurance: how the document was checked, not
+// personal data.
+func addDocumentCheck(result map[string]any, sess session.Session) {
+	p := sess.Steps.DocumentPhoto
+	if p == nil || p.Check == nil {
+		return
+	}
+	c := p.Check
+	result["documentCheck"] = documentCheckInfo{
+		Verdict: c.Verdict, Score: c.Score, FieldsValid: c.FieldsValid, ZonesMatch: c.ZonesMatch, DocumentKind: c.Document.Kind,
+	}
+}
+
+// faceCheckInfo is a face step's verdicts as a session's result carries them:
+// the match score, whether it matched, the liveness result and the provider,
+// never the face.
+type faceCheckInfo struct {
+	FaceMatchScore *float64 `json:"faceMatchScore,omitempty"`
+	FaceVerified   *bool    `json:"faceVerified,omitempty"`
+	LivenessResult string   `json:"livenessResult"`
+	Engine         string   `json:"engine,omitempty"`
+}
+
+// faceStepEvidence is the face step ev as a result request carries it: the
+// selfie (nil for a Regula capture without a crop: no match ran, or no face
+// was found) and the verdicts; both nil without a face step.
+func faceStepEvidence(ev *session.SelfieStepEvidence) (*photoInfo, *biometricsInfo) {
+	if ev == nil {
+		return nil, nil
+	}
+	var selfie *photoInfo
+	if ev.Image != "" {
+		if raw, mime, err := decodeImageBase64(ev.Image, firstNonEmpty(ev.MimeType, defaultImageMime)); err == nil {
+			selfie = &photoInfo{ImageBase64: base64.StdEncoding.EncodeToString(raw), MimeType: mime}
+		}
+	}
+	// Liveness ran on every face submission, so a failure is "failed", not
+	// "not_performed".
+	return selfie, &biometricsInfo{
+		FaceMatchScore: ev.FaceMatchScore, FaceVerified: ev.FaceVerified,
+		LivenessResult: livenessResults[ev.LivenessPassed], LivenessScore: ev.LivenessScore,
+		Engine: selfieEngine(ev),
+	}
+}
+
+// addSelfie adds selfie to result when the flow keeps the face photos and the
+// session requested it, as a browser shows it.
+func addSelfie(result map[string]any, sess session.Session, selfie *photoInfo, redaction privacy.RedactionPolicy) {
+	if selfie == nil || !redaction.KeepFacePhotos || !attrRequested(sess, attrSelfie) {
+		return
+	}
+	released := *selfie
+	if converted, mime, err := images.ToDisplayablePNG(released.ImageBase64, released.MimeType); err != nil {
+		slog.Warn("identity proofing: could not convert the selfie for display", slog.String("session_id", sess.ID), slog.Any("error", err))
+	} else {
+		released.ImageBase64, released.MimeType = converted, mime
+	}
+	result["selfie"] = &released
+}
+
+// addFaceCheck adds sess's face step verdicts to result, released whatever
+// was requested, like documentCheck: how the face was checked, not personal
+// data.
+func addFaceCheck(result map[string]any, sess session.Session) {
+	ev := sess.Steps.Selfie
+	if ev == nil {
+		return
+	}
+	result["faceCheck"] = faceCheckInfo{
+		FaceMatchScore: ev.FaceMatchScore, FaceVerified: ev.FaceVerified,
+		LivenessResult: livenessResults[ev.LivenessPassed], Engine: selfieEngine(ev),
+	}
+}
+
+// faceReferenceRelyingParty is a result's faceReference when the face was
+// matched against the relying party's own photo rather than the chip's DG2.
+const faceReferenceRelyingParty = "relying_party"
+
+// releasedDocumentImage is docImage as the result carries it: its BSN region
+// covered under a BlurBSN policy. Nil when there is none, or when the BSN
+// could not be covered (no region came in, or covering failed): the photo is
+// then withheld, never released readable.
+func releasedDocumentImage(sess session.Session, docImage *documentImageInfo, redaction privacy.RedactionPolicy) *documentImageInfo {
+	if docImage == nil {
+		return nil
+	}
+	out := *docImage
+	if redaction.BlurBSN && !out.BSNRedacted {
+		blurred, mime, err := coverBSN(out.ImageBase64, out.MimeType, out.BSNRegion)
+		if err != nil {
+			slog.Warn("identity proofing: could not cover the BSN in a document image; withholding it", slog.String("session_id", sess.ID), slog.Any("error", err))
+			return nil
+		}
+		out.ImageBase64, out.MimeType = blurred, mime
+	}
+	return &out
+}
+
+// dutchIssuingState is the only issuing state whose DG11 personal number is a
+// BSN.
+const dutchIssuingState = "NLD"
+
+// applyBSNPolicy applies the BSN policy to doc.PersonalNumber before doc goes
+// into any result, whatever was requested. Another country's personal number
+// is no BSN, and the result's personal number is only ever one: it is dropped
+// whatever the policy. A Dutch number failing the 11-proef is dropped too.
+func applyBSNPolicy(doc *documentInfo, policy privacy.BSNPolicy) {
+	if doc.PersonalNumber == "" {
+		return
+	}
+	if doc.IssuingState != dutchIssuingState {
+		doc.PersonalNumber = ""
+		return
+	}
+	if !bsn.Masked(doc.PersonalNumber) && !bsn.Valid(doc.PersonalNumber) {
+		doc.PersonalNumber = ""
+		return
+	}
+	switch policy.Effective() {
+	case privacy.BSNPolicyOmit:
+		doc.PersonalNumber = ""
+	case privacy.BSNPolicyMask:
+		doc.PersonalNumber = bsn.Mask(doc.PersonalNumber)
+	case privacy.BSNPolicyRetrieve:
+	}
+}
+
+// redactBSNFromEvidence drops the raw DG11 from a Dutch document's evidence
+// under a mask or omit policy, before it is stored: raw ASN.1 has no masked
+// form. Chip verification does not need DG11. It runs even with an empty
+// parsed personal number: older chips carry a BSN in DG11 the MRZ does not
+// show.
+func redactBSNFromEvidence(ev *mrtdEvidenceRequest, doc *documentInfo, policy privacy.BSNPolicy) {
+	if ev == nil || doc == nil || doc.IssuingState != dutchIssuingState {
+		return
+	}
+	switch policy.Effective() {
+	case privacy.BSNPolicyMask, privacy.BSNPolicyOmit:
+		delete(ev.DataGroups, dataGroupPersonalDetails)
+	}
+}

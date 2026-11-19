@@ -12,14 +12,20 @@ import type {
 } from "../api/attestations";
 import { resolveSubjectSource } from "../api/attestations";
 import {
+  useAttestationRulebooksQuery,
   useIssueAttestationMutation,
   useIssuedAttestationQuery,
 } from "../api/attestations.queries";
 import { useQerdsContactsQuery } from "../api/qerds.queries";
 import { useOrganizationMembersQuery } from "../api/organization.queries";
 import { fullName } from "../lib/name";
-import { Button, Icon, Modal, Outcome } from "../ui";
+import { Button, Icon, Modal, Outcome, Select } from "../ui";
 import { apiErrorCode, control } from "../lib/attestation-form";
+import {
+  claimSummary,
+  formatClaims,
+  parseClaims,
+} from "../lib/rulebook-claims";
 import { Field } from "./attestations-fields";
 
 const QR_SIZE = 220;
@@ -58,33 +64,6 @@ function isStep(phase: Phase): phase is Step {
   return (
     phase === "template" || phase === "recipient" || phase === "attributes"
   );
-}
-
-// The organization-to-organization offer is delivered over QERDS and redeemed
-// automatically by the receiving wallet, so there is no QR to scan. The backend
-// issuance lifecycle for this path is offered -> claimed (see backend
-// internal/attestation/status.go); the stepper reflects those two real states
-// rather than faking intermediate progress the backend cannot report.
-const OFFER_STEP_ORDER = ["sent", "claimed"] as const;
-type OfferStep = (typeof OFFER_STEP_ORDER)[number];
-
-const OFFER_STEP_LABEL_KEYS = {
-  sent: "attestations.wizard.offerSteps.sent",
-  claimed: "attestations.wizard.offerSteps.claimed",
-} as const;
-
-type StepState = "done" | "active";
-
-// Maps the polled issuance status to a per-step state. "sent" is complete as
-// soon as the offer screen renders (the offer was created and dispatched over
-// QERDS); "claimed" completes once the receiving wallet has redeemed it.
-function offerStepStates(
-  status: string | undefined,
-): Record<OfferStep, StepState> {
-  return {
-    sent: "done",
-    claimed: status === CLAIMED_STATUS ? "done" : "active",
-  };
 }
 
 function defaultsFor(template: AttestationTemplate): Record<string, string> {
@@ -129,6 +108,9 @@ function inlineError(error: Error, t: TFunction): string {
   if (code === "missing_attribute") {
     return t("attestations.wizard.missingAttribute");
   }
+  if (code === "invalid_claims") {
+    return t("attestations.wizard.invalidClaims", { message: error.message });
+  }
   return error.message;
 }
 
@@ -145,7 +127,7 @@ export function AttestationIssueWizard({
   templates,
   initialTemplate,
   onClose,
-}: Props): React.JSX.Element {
+}: Readonly<Props>): React.JSX.Element {
   const { t } = useTranslation();
   const issue = useIssueAttestationMutation(slug);
 
@@ -175,11 +157,31 @@ export function AttestationIssueWizard({
   const [result, setResult] = useState<IssueResult | null>(null);
   const [qrDataUrl, setQrDataUrl] = useState("");
   const [attempted, setAttempted] = useState(false);
+  // JSON claims for a rulebook template; null until prefilled from its sample.
+  const [claimsText, setClaimsText] = useState<string | null>(null);
 
   const template = useMemo(
     () => templates.find((tpl) => tpl.id === templateId),
     [templates, templateId],
   );
+  const rulebookId = template?.rulebook;
+  const rulebooks = useAttestationRulebooksQuery(
+    slug,
+    rulebookId !== undefined,
+  );
+  const rulebookSample = rulebooks.data?.find(
+    (rulebook) => rulebook.id === rulebookId,
+  )?.sample;
+  const claimsDraft =
+    claimsText ?? (rulebookSample ? formatClaims(rulebookSample) : "");
+  const parsedClaims = parseClaims(claimsDraft);
+
+  function reviewValue(key: string): string {
+    if (rulebookId === undefined) {
+      return values[key] || "—";
+    }
+    return claimSummary(parsedClaims.ok ? parsedClaims.claims[key] : undefined);
+  }
 
   const memberEntries = (members.data?.entries ?? []).filter(
     (entry) => entry.userId !== null,
@@ -188,20 +190,25 @@ export function AttestationIssueWizard({
     (entry) => entry.userId === memberUserId,
   );
 
-  // Poll the issued attestation until the recipient claims it.
+  // Organization recipients get a "sent" confirmation instead of a QR (see
+  // below): the offer is delivered over QERDS and now waits for an admin at the
+  // receiving organization to accept it from their Wallet tab, so there is
+  // nothing for the issuer to wait on here.
+  const offerToOrganization = result?.recipientKind === RECIPIENT_ORGANIZATION;
+
+  // Poll the issued attestation until the recipient claims it. Only the
+  // natural-person paths reach "claimed" here (a QR scan or e-mailed link that
+  // auto-redeems); an organization offer is not polled — its acceptance is a
+  // deliberate step in the receiving org's wallet, not something to spin on.
   const issued = useIssuedAttestationQuery(
     slug,
     result?.id ?? "",
-    result !== null,
+    result !== null && !offerToOrganization,
   );
   const claimed = issued.data?.status === CLAIMED_STATUS;
 
-  // Organization recipients get a status stepper instead of a QR (see below).
-  const offerToOrganization = result?.recipientKind === RECIPIENT_ORGANIZATION;
-  const offerStates = offerStepStates(issued.data?.status);
-
   // Render the offer link as a QR once issued (natural-person recipients only;
-  // the organization path shows a status stepper instead of a scannable code).
+  // the organization path shows a success outcome instead of a scannable code).
   useEffect(() => {
     if (!result || result.recipientKind === RECIPIENT_ORGANIZATION) {
       return;
@@ -225,6 +232,7 @@ export function AttestationIssueWizard({
     setTemplateId(id);
     const picked = templates.find((tpl) => tpl.id === id);
     setValues(picked ? defaultsFor(picked) : {});
+    setClaimsText(null);
   }
 
   function selectMember(userId: string): void {
@@ -286,9 +294,16 @@ export function AttestationIssueWizard({
     if (!template || issue.isPending) {
       return;
     }
-    const attributes: Record<string, string> = {};
-    for (const attribute of template.attributes) {
-      attributes[attribute.key] = values[attribute.key] ?? "";
+    let attributes: Record<string, unknown> = {};
+    if (rulebookId !== undefined) {
+      if (!parsedClaims.ok) {
+        return;
+      }
+      attributes = parsedClaims.claims;
+    } else {
+      for (const attribute of template.attributes) {
+        attributes[attribute.key] = values[attribute.key] ?? "";
+      }
     }
     const recipient: IssueAttestationInput["recipient"] = isOrganization
       ? { kind: RECIPIENT_ORGANIZATION, ref: recipientRef }
@@ -413,9 +428,9 @@ export function AttestationIssueWizard({
                   : undefined
               }
             >
-              <select
+              <Select
                 id="wizard-contact"
-                className={`${control(attempted && !recipientValid)} h-9`}
+                state={attempted && !recipientValid ? "error" : "ok"}
                 value={contactAddress}
                 onChange={(event) => selectContact(event.target.value)}
               >
@@ -427,7 +442,7 @@ export function AttestationIssueWizard({
                     {contact.name} — {contact.address}
                   </option>
                 ))}
-              </select>
+              </Select>
             </Field>
           )}
         </div>
@@ -471,9 +486,9 @@ export function AttestationIssueWizard({
                   : undefined
               }
             >
-              <select
+              <Select
                 id="wizard-member"
-                className={`${control(attempted && !recipientValid)} h-9`}
+                state={attempted && !recipientValid ? "error" : "ok"}
                 value={memberUserId}
                 onChange={(event) => selectMember(event.target.value)}
               >
@@ -485,7 +500,7 @@ export function AttestationIssueWizard({
                     {fullName(entry)} — {entry.email}
                   </option>
                 ))}
-              </select>
+              </Select>
             </Field>
           ) : (
             <Field
@@ -536,7 +551,44 @@ export function AttestationIssueWizard({
         </div>
       )}
 
-      {phase === "attributes" && template && (
+      {phase === "attributes" && template && rulebookId !== undefined && (
+        <div className="flex flex-col gap-2">
+          <p className="text-ink-soft text-[13.5px]">
+            {t("attestations.wizard.rulebookClaimsIntro")}
+          </p>
+          <Field
+            id="wizard-rulebook-claims"
+            label={t("attestations.wizard.rulebookClaimsLabel")}
+            required
+            error={
+              attempted && !parsedClaims.ok
+                ? t(`attestations.wizard.claims.${parsedClaims.reason}`)
+                : undefined
+            }
+          >
+            <textarea
+              id="wizard-rulebook-claims"
+              className={`${control(attempted && !parsedClaims.ok)} min-h-[320px] py-2 font-mono text-[12.5px]`}
+              spellCheck={false}
+              value={claimsDraft}
+              onChange={(event) => setClaimsText(event.target.value)}
+            />
+          </Field>
+          {rulebookSample && (
+            <div>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setClaimsText(formatClaims(rulebookSample))}
+              >
+                {t("attestations.wizard.rulebookClaimsReset")}
+              </Button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {phase === "attributes" && template && rulebookId === undefined && (
         <div className="flex flex-col gap-3">
           {template.attributes.length === 0 ? (
             <p className="text-ink-soft text-[13.5px]">
@@ -600,11 +652,11 @@ export function AttestationIssueWizard({
                 key={attribute.key}
                 className="flex justify-between gap-4 text-[13px]"
               >
-                <span className="text-ink-soft">
+                <span className="text-ink-soft shrink-0">
                   {attribute.label || attribute.key}
                 </span>
-                <span className="text-ink font-mono">
-                  {values[attribute.key] || "—"}
+                <span className="text-ink min-w-0 truncate font-mono">
+                  {reviewValue(attribute.key)}
                 </span>
               </div>
             ))}
@@ -623,51 +675,15 @@ export function AttestationIssueWizard({
       )}
 
       {phase === "offer" && result && offerToOrganization && (
-        <div className="flex flex-col items-center gap-4">
-          <p className="text-ink-soft text-center text-[13px]">
-            {t("attestations.wizard.offerOrgHint")}
-          </p>
-          <ol className="flex w-full max-w-xs flex-col gap-3">
-            {OFFER_STEP_ORDER.map((step) => {
-              const done = offerStates[step] === "done";
-              return (
-                <li
-                  key={step}
-                  className="flex items-center gap-3"
-                  aria-current={done ? undefined : "step"}
-                >
-                  <span
-                    className={[
-                      "flex h-6 w-6 shrink-0 items-center justify-center rounded-full",
-                      done
-                        ? "bg-success-bg text-success"
-                        : "bg-primary text-primary-fg",
-                    ].join(" ")}
-                  >
-                    {done ? (
-                      <Icon name="valid" size={13} />
-                    ) : (
-                      <span
-                        aria-hidden="true"
-                        className="h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent"
-                      />
-                    )}
-                  </span>
-                  <span className="text-ink text-[13px] font-semibold">
-                    {t(OFFER_STEP_LABEL_KEYS[step])}
-                  </span>
-                </li>
-              );
-            })}
-          </ol>
-          {claimed ? (
+        <Outcome
+          tone="success"
+          icon="valid"
+          title={t("attestations.wizard.offerSentTitle")}
+          message={t("attestations.wizard.offerOrgHint")}
+          action={
             <Button onClick={onClose}>{t("attestations.wizard.done")}</Button>
-          ) : (
-            <p className="text-muted text-center text-[12px]">
-              {t("attestations.wizard.waitingOrg")}
-            </p>
-          )}
-        </div>
+          }
+        />
       )}
 
       {phase === "offer" && result && !offerToOrganization && (
@@ -783,6 +799,14 @@ export function AttestationIssueWizard({
       if (recipientValid) {
         setAttempted(false);
         setPhase("attributes");
+      }
+      return;
+    }
+    if (phase === "attributes" && template && rulebookId !== undefined) {
+      setAttempted(true);
+      if (parsedClaims.ok) {
+        setAttempted(false);
+        setPhase("review");
       }
       return;
     }

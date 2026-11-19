@@ -9,6 +9,7 @@ Load when editing `frontend/`. General rules (magic values, formatter, scoped ch
 - `isolatedModules` + bundler resolution — no `const enum`, no namespace tricks.
 - No `any`. Prefer `unknown` + narrowing guard. Never `as any` to silence the compiler.
 - Explicit return types on exported functions and component prop types.
+- **Component props are read-only** (SonarCloud S6759): an inline props type is `}: Readonly<{ … }>`, a named one is wrapped where it is used (`}: Readonly<ButtonProps>`). `sonarjs/prefer-read-only-props` fails lint on one that is not, but it misses a component whose every `return` is a ternary and one whose props type is a union (`Avatar`), so those keep the form by hand.
 
 ## Imports
 
@@ -26,7 +27,11 @@ Load when editing `frontend/`. General rules (magic values, formatter, scoped ch
 - Routes in `src/routes/`, wired through `src/router.tsx` (react-router).
 - All backend calls go through `src/api/` — never `fetch` directly from components.
 - API base URL: `import.meta.env.VITE_API_BASE_URL ?? ""` (empty = Vite proxy). Don't hardcode hosts.
+- **That proxy only resolves inside Docker.** `vite.config.ts` hardcodes `http://backend:8080` as the target for `/healthz` and `/api`, which is a Compose service name — so a bare `npm run dev` in `frontend/` serves the UI but reaches no backend. Use the dev stack (`npm run dev` from the repo root); the static production build has no proxy at all and needs `VITE_API_BASE_URL` set at build time.
 - File names: kebab-case.
+- **`returnTo` is allowlisted per route, never sanitized generically.** `Login` reads `?returnTo=` through `src/lib/return-to.ts`'s `safeReturnTo`, which accepts only the exact route shapes that need it (today `^/openid4vp/[A-Za-z0-9_-]+$`) and falls back to `/`. Adding a caller means adding its pattern and a rejection case in `return-to.test.ts`; an absolute URL, a protocol-relative path or a query string must keep falling back — anything looser is an open redirect. `ProtectedRoute` cannot carry a return target; a public route that needs one handles the unauthenticated branch itself with `<Navigate to={loginPathFor(...)}>`.
+- **Selects go through `ui/Select`, never a bare `<select>`.** It insets the chevron 16 px from the right and cuts a long value off 40 px before it; `src/ui/select.test.ts` fails on a bare one. `className` lays out the field (width, margin) and replaces its default `w-full`, `state="error"` marks an invalid one, `size="compact"` fits a dense row.
+- **Statuses, versions and counts on the identity proofing screens (the flow editor and its tabs, the hosted page, Settings › Data and privacy and Organisation included) and the dashboard are plain text through `ui/StatusText`, never a `Tag` chip.** It never wraps, so a row that holds one next to a name lets the statuses wrap below the name at phone width (`flex-wrap`, the name `grow basis-44`), and `tone` colours a good, a warning or a bad one. `src/ui/status-text.test.ts` holds the route-file pattern that fails on a `Tag` import there; pages outside that redesign keep `Tag`. Green text is `text-success-fg`, not `text-success`, which is 3.8:1 on white; a palette block that sets `--yb-success` sets `--yb-success-fg` too (`index-css-dark.test.ts`).
 - Organize by feature as the app grows; co-locate route + its API concerns where it reads cleanly.
 
 ### API layer (`src/api/`)
@@ -35,7 +40,7 @@ Load when editing `frontend/`. General rules (magic values, formatter, scoped ch
 - **Resource clients**: one file per resource (`src/api/health.ts`), exporting plain async functions calling `request()`.
 - **Query hooks**: co-located `<resource>.queries.ts`, exporting `<resource>QueryKey` + `use<Resource>Query()`.
 - **Validate, don't cast**: zod schema per response, passed to `request({ schema })`; type via `z.infer`. Never cast `res.json()`.
-- **Errors**: `request()` throws `ApiError` (non-2xx; carries `status`/`body`/`url`) or `ApiValidationError` (schema mismatch). Surface via the query's `isError`/`error`, don't swallow.
+- **Errors**: `request()` throws `ApiError` (non-2xx; carries `status`/`body`/`url`) or `ApiValidationError` (schema mismatch). Surface via the query's `isError`/`error`, don't swallow. Show a read's error only while it has no data (`blockingError` in `lib/query-state.ts`): with `retry: false` and refetch on window focus, checking `isError` first replaces loaded rows, a running session or an unsaved form with the error on one failed background refetch. A poll stops on an error only when `pollFailedForGood` (a 4xx or an unreadable answer), not on a network error or 5xx.
 - **Retries**: idempotent GETs only (network + 5xx, capped backoff), in the transport — so `QueryClient` sets `retry: false`.
 - **Auth**: `getAuthHeaders()` in `http.ts` is a no-op stub; Yivi auth + central 401 handling plug in there without touching callers.
 
@@ -50,8 +55,24 @@ Load when editing `frontend/`. General rules (magic values, formatter, scoped ch
 - **No user-facing string literals in components** — every label/placeholder/`aria-label`/message goes through `t()`. Brand tokens (`"Yivi"`, the `"Business"` wordmark in `logo.tsx`) are the only exception.
 - `src/i18n/locales/en.ts` is the typed source of truth (`as const`); `i18next.d.ts` augments `i18next` so `t("...")` **keys** are compile-time checked. Caveat: interpolation **variable presence** (`{{email}}`) is *not* type-enforced — pass them by hand.
 - **Group related keys into sub-objects, not flat prefixes**: keys that share a prefix because they belong together (`columns`, `modes`, `preview`, `stats`, `greeting`) nest as a sub-object (`auditLog.columns.when`), not flat (`auditLog.columnWhen`). Keep a key flat only when it is genuinely standalone (a one-member group is over-nesting) or when a suffix carries the meaning (the `*Required` validation messages). Renaming a key moves every `t()` call site, but typecheck flags each one.
-- Init is bundled & synchronous (`src/i18n/index.ts`, imported once in `main.tsx`); no Suspense, no async loading.
+- Each language is its own chunk (`LOCALE_LOADERS` in `src/i18n/index.ts`): `main.tsx` renders after `i18nReady`, and `vite.config.ts` preloads the visitor's language from `index.html`. Switch language through `changeLanguage` or `showLanguage`, never `i18n.changeLanguage` directly, or the strings are not loaded. Tests get both languages synchronously from `src/i18n/test-setup.ts`. No Suspense.
 - Plurals via `key_one`/`key_other` + `t(key, { count })`; interpolation via `{{var}}` + `t(key, { var })`.
 - Presentational `ui/` components stay translation-free — they take already-translated strings as props; `t()` is called at the route/feature level. (`sidebar.tsx` is the exception: it owns its own nav copy.)
-- **Add a language**: copy `locales/en.ts` → `<lng>.ts` (same shape), register it in `index.ts` `resources`, add a switcher. No language detector is wired yet.
+- **Add a language**: copy `locales/en.ts` → `<lng>.ts` (same shape), register it in `index.ts` `LOCALE_LOADERS` and in `test-setup.ts`, add a switcher. No language detector is wired yet.
 - Backend error prose (raw `error.message`) is **not** localizable from the frontend — only mapped status codes (403/404) are. True localized errors need backend error codes.
+
+## Testing
+
+- Vitest, `node` environment, no jsdom (`vitest.config.ts`). Tests cover extracted pure logic rather than rendered components, and live beside their source. CI runs them in the `frontend-test` job.
+- **The `include` glob is `src/**/*.test.ts`, so a `.test.tsx` is silently skipped** — it is never collected, so the run reports the same file and test counts as if it did not exist and stays green. Extract the logic under test and name the file `.ts`; do not reach for a `.tsx` test.
+- Vitest transpiles without type-checking, so a type error *inside a test* surfaces only in `npm run typecheck`, never in `npm test`. Both are in the verify sequence for that reason.
+- **Cross-boundary guards** live in `src/lib/` and read files outside `frontend/` to pin a mirror the type system cannot see across. They do not all assert the same mirror, so copy the one that matches what you are adding:
+  - `mail-template.test.ts`, `held-credential.test.ts` and `notification-catalog.test.ts` parse the constants out of their Go source and assert each has both its `src/api/` enum member (`MAIL_TEMPLATE_KINDS`, `HELD_SOURCES`, `NOTIFICATION_CHANNELS` and `NOTIFICATION_GROUPS`) and its i18n copy.
+  - `audit-event.test.ts` has **no enum to check against** — `auditEventSchema.action` is a plain `z.string()`. It parses the action and target constants out of `backend/internal/audit/audit.go` and asserts each one resolves to a translation, because `auditActionLabel`/`auditTargetLabel` are `switch`es that fall back to the raw dotted key. A new backend audit action therefore needs a `case` in `audit-event.ts` **and** `auditLog.actions.*` / `auditLog.targets.*` copy; without both the row renders `postguard.file_sent` to the user.
+  - `vog-codes.test.ts` and `mandate.test.ts` parse string constants out of their Go source (`FunctionAspects` in `vog/vog.go`; the constants in `organization/mandate.go` and `mandates.go`) and assert both lists agree in both directions. `mandate.test.ts` also asserts each value is named in `en.ts`.
+  - `identity-proofing.test.ts` holds eight mirrors of `backend/internal/proofing`, `backend/internal/diploma` and `backend/internal/proofingengine`: the session lifetimes and the request list's cap (`proofing.go`), the diploma modes (`diploma.go`), the diploma rejection reasons (`checker.go`, `diploma.go`), the document kinds the flow editor saves and the Substantial face match floor (`flow/flow.go`), the recommended face match threshold (`regula/regula.go`) and the longest reason for a requested item (`flow_reasons.go`).
+  - `credential-offer.test.ts` reads the json tags of the `CredentialOffer` struct in `attestation/offer_store.go`. The `Offer` deeplink is a bearer token and must stay `json:"-"`, and every served field must be named in the zod schema.
+  - `legal-retention.test.ts` reads `maxLegalRetentionMonths` and `maxLegalReasonLength` out of `proofing/legal_retention.go` and asserts the form's bounds equal them.
+  - `issuing-countries.test.ts` reads `icaoIssuingCodes` out of `proofingengine/flow/flow.go` and asserts the flow editor's country list offers each. The other direction, that every code the list offers is one the engine accepts, is a Go test, `TestEditorCountriesAreValid` in the same package, which reads `issuing-countries.ts`: only Go can run `ValidIssuingCountry`.
+  - `agents-md.test.ts` bounds the repo-root `AGENTS.md` — a size gate, not a mirror.
+- Mirroring a backend **enum** in the frontend means adding to this pattern, and asserting membership **in both directions** — a length check alone passes on exactly the drift it exists to catch, both lists being short by the same one.

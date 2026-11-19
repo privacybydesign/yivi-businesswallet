@@ -51,7 +51,7 @@ func uiHandler() http.Handler {
 func specHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/yaml; charset=utf-8")
-		if _, err := w.Write(spec); err != nil {
+		if _, err := w.Write(served); err != nil {
 			slog.ErrorContext(r.Context(), "apidocs: write openapi spec failed",
 				slog.String("error", err.Error()),
 			)

@@ -101,6 +101,45 @@ func (s *Store) SetDefaultAddress(ctx context.Context, orgID, addressID uuid.UUI
 	return a, err
 }
 
+// DeleteAddress removes a digital address from an organization's set. It
+// refuses to remove the current default (ErrAddressIsDefault — promote another
+// address first via SetDefaultAddress) or the organization's only remaining
+// address (ErrAddressLastRemaining), since an org with zero addresses can
+// neither send nor receive. Returns ErrAddressNotFound if the address does not
+// belong to the organization.
+func (s *Store) DeleteAddress(ctx context.Context, orgID, id uuid.UUID) error {
+	return database.InTx(ctx, s.db, func(q database.Querier) error {
+		const owned = `SELECT ` + addressColumns + ` FROM qerds_addresses WHERE id = $1 AND organization_id = $2`
+		existing, err := scanAddress(q.QueryRow(ctx, owned, id, orgID))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrAddressNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("qerds: load address %s: %w", id, err)
+		}
+
+		const count = `SELECT count(*) FROM qerds_addresses WHERE organization_id = $1`
+		var total int
+		if err := q.QueryRow(ctx, count, orgID).Scan(&total); err != nil {
+			return fmt.Errorf("qerds: count addresses org %s: %w", orgID, err)
+		}
+		if total <= 1 {
+			return ErrAddressLastRemaining
+		}
+		if existing.IsDefault {
+			return ErrAddressIsDefault
+		}
+
+		const del = `DELETE FROM qerds_addresses WHERE id = $1`
+		if _, err := q.Exec(ctx, del, id); err != nil {
+			return fmt.Errorf("qerds: delete address %s: %w", id, err)
+		}
+		return s.audit.Record(ctx, q, audit.QerdsAddressDeleted,
+			audit.Target{Type: audit.TargetQerdsAddress, ID: id.String(), OrgID: &orgID},
+			audit.Deleted(map[string]any{"address": existing.Address}))
+	})
+}
+
 // ListAddresses returns an organization's digital addresses, default first.
 func (s *Store) ListAddresses(ctx context.Context, orgID uuid.UUID) ([]Address, error) {
 	const query = `SELECT ` + addressColumns + ` FROM qerds_addresses WHERE organization_id = $1 ORDER BY is_default DESC, created_at`
@@ -124,10 +163,45 @@ func (s *Store) ListAddresses(ctx context.Context, orgID uuid.UUID) ([]Address, 
 	return addresses, nil
 }
 
+// AllAddresses returns every provisioned digital address across all
+// organizations, each carrying its owning org. It backs the background inbound
+// poller, which must drain the access point's queue for addresses nobody is
+// currently looking at — an offer pushed by a remote party must land without an
+// operator having a browser tab open.
+func (s *Store) AllAddresses(ctx context.Context) ([]Address, error) {
+	const query = `SELECT ` + addressColumns + ` FROM qerds_addresses ORDER BY created_at`
+	rows, err := s.db.Query(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("qerds: list all addresses: %w", err)
+	}
+	defer rows.Close()
+
+	addresses := []Address{}
+	for rows.Next() {
+		a, err := scanAddress(rows)
+		if err != nil {
+			return nil, fmt.Errorf("qerds: list all addresses scan: %w", err)
+		}
+		addresses = append(addresses, a)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("qerds: list all addresses rows: %w", err)
+	}
+	return addresses, nil
+}
+
 // OrgByAddress resolves the organization that owns a digital address. Used by
-// the inbound webhook, which is keyed on recipient address, not org slug.
+// the inbound webhook and the background poller, both of which are keyed on the
+// recipient address a remote party put on the message, not on an org slug.
+//
+// The match folds case: the address comes off the wire as the sender typed it,
+// and eDelivery access points treat the finalRecipient property
+// case-insensitively, so an exact comparison would fail to resolve an address we
+// do own and drop a message the provider has already handed over. Provisioning
+// lowercases every address it mints, so the fold resolves one row — the UNIQUE
+// constraint on `address` is case-sensitive and does not enforce that.
 func (s *Store) OrgByAddress(ctx context.Context, address string) (uuid.UUID, error) {
-	const query = `SELECT organization_id FROM qerds_addresses WHERE address = $1`
+	const query = `SELECT organization_id FROM qerds_addresses WHERE lower(address) = lower($1)`
 	var orgID uuid.UUID
 	err := s.db.QueryRow(ctx, query, address).Scan(&orgID)
 	if errors.Is(err, pgx.ErrNoRows) {

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -90,6 +91,38 @@ func TestIdentityReviewListAndApprove(t *testing.T) {
 	}
 	if n := env.reviewCount("pending"); n != 0 {
 		t.Errorf("pending reviews after approve = %d, want 0", n)
+	}
+}
+
+func TestIdentityReviewApproveSetsIdentityVerifiedAt(t *testing.T) {
+	env := setup(t, "boss@example.test")
+	orgID := env.createOrg("Acme", "acme")
+	env.seedPendingReview(orgID, "changed@example.test")
+	env.login("boss@example.test")
+
+	reviews := env.listReviews()
+	if len(reviews) != 1 {
+		t.Fatalf("reviews = %d, want 1", len(reviews))
+	}
+	resp := env.do(http.MethodPost, "/api/v1/admin/identity-reviews/"+reviews[0].ID.String()+"/approve", nil)
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("approve = %d, want 200", resp.StatusCode)
+	}
+
+	// An admin-approved review only clears a name mismatch: the person still
+	// disclosed a passport/id-card identity during accept, so the resulting
+	// membership is verified exactly like a clean accept.
+	var verifiedAt *time.Time
+	if err := env.pool.QueryRow(context.Background(),
+		`SELECT m.identity_verified_at FROM memberships m JOIN users u ON u.id = m.user_id
+		 WHERE m.organization_id = $1 AND u.email = $2`,
+		orgID, "changed@example.test",
+	).Scan(&verifiedAt); err != nil {
+		t.Fatalf("query identity_verified_at: %v", err)
+	}
+	if verifiedAt == nil {
+		t.Error("identity_verified_at is nil, want set after an approved review")
 	}
 }
 

@@ -14,6 +14,7 @@ import { Button, Card, Input, TopBar } from "../ui";
 import * as React from "react";
 
 const CONFLICT_STATUS = 409;
+const BAD_REQUEST_STATUS = 400;
 
 function errorCode(error: ApiError): string | null {
   const body = error.body;
@@ -31,6 +32,13 @@ function contactError(error: Error, t: TFunction): string {
     errorCode(error) === "address_taken"
   ) {
     return t("qerds.contacts.taken");
+  }
+  if (
+    error instanceof ApiError &&
+    error.status === BAD_REQUEST_STATUS &&
+    errorCode(error) === "invalid_euid"
+  ) {
+    return t("qerds.contacts.invalidEuid");
   }
   return t("qerds.contacts.error", { message: error.message });
 }
@@ -227,7 +235,7 @@ export default function QerdsContacts(): React.JSX.Element {
         title={t("qerds.contacts.title")}
         subtitle={t("qerds.contacts.subtitle")}
       />
-      <div className="p-8">{body()}</div>
+      <div className="p-4 sm:p-8">{body()}</div>
     </>
   );
 }

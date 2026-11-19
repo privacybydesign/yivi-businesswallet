@@ -14,7 +14,7 @@ import (
 )
 
 const schemaColumns = `id, organization_id, vct, display_name, credential_config_id,
-	subject_type, attributes, display, qualified, status, created_at, updated_at,
+	subject_type, attributes, display, qualified, status, COALESCE(rulebook, ''), created_at, updated_at,
 	(logo_bytes IS NOT NULL) AS has_logo`
 
 func scanSchema(row rowScanner) (Schema, error) {
@@ -25,7 +25,7 @@ func scanSchema(row rowScanner) (Schema, error) {
 	)
 	if err := row.Scan(
 		&s.ID, &s.OrganizationID, &s.VCT, &s.DisplayName, &s.CredentialConfigID,
-		&s.SubjectType, &attrsRaw, &displayRaw, &s.Qualified, &s.Status, &s.CreatedAt, &s.UpdatedAt,
+		&s.SubjectType, &attrsRaw, &displayRaw, &s.Qualified, &s.Status, &s.Rulebook, &s.CreatedAt, &s.UpdatedAt,
 		&s.HasLogo,
 	); err != nil {
 		return Schema{}, err
@@ -105,11 +105,11 @@ func (s *Store) CreateSchema(ctx context.Context, orgID uuid.UUID, in Schema) (S
 	var out Schema
 	err = database.InTx(ctx, s.db, func(q database.Querier) error {
 		const insert = `INSERT INTO attestation_schemas
-			(organization_id, vct, display_name, credential_config_id, subject_type, attributes, display, qualified, status)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+			(organization_id, vct, display_name, credential_config_id, subject_type, attributes, display, qualified, status, rulebook)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NULLIF($10, ''))
 			RETURNING ` + schemaColumns
 		var err error
-		out, err = scanSchema(q.QueryRow(ctx, insert, orgID, in.VCT, in.DisplayName, in.CredentialConfigID, subjectType, attrs, display, in.Qualified, status))
+		out, err = scanSchema(q.QueryRow(ctx, insert, orgID, in.VCT, in.DisplayName, in.CredentialConfigID, subjectType, attrs, display, in.Qualified, status, in.Rulebook))
 		if isUniqueViolation(err) {
 			return ErrSchemaVctTaken
 		}
@@ -118,7 +118,7 @@ func (s *Store) CreateSchema(ctx context.Context, orgID uuid.UUID, in Schema) (S
 		}
 		return s.audit.Record(ctx, q, audit.AttestationSchemaCreated,
 			audit.Target{Type: audit.TargetAttestationSchema, ID: out.ID.String(), OrgID: &orgID},
-			audit.Created(map[string]any{"vct": out.VCT, "displayName": out.DisplayName, "qualified": out.Qualified}))
+			audit.Created(map[string]any{"vct": out.VCT, "displayName": out.DisplayName, "qualified": out.Qualified, "rulebook": out.Rulebook}))
 	})
 	return out, err
 }

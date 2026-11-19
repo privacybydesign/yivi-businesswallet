@@ -1,0 +1,505 @@
+package proofingengine
+
+import (
+	"context"
+	"encoding/base64"
+	"errors"
+	"fmt"
+	"log/slog"
+	"net/http"
+	"slices"
+	"strings"
+	"time"
+
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/diploma"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/flow"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/images"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/privacy"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/session"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingprovider"
+)
+
+// The Yivi method: the wallet verifies the subject's OpenID4VP disclosure of a
+// passport or ID-card credential and hands the engine its claims, with the
+// photo only when the flow keeps it (SubmitReference). The disclosure decides
+// the session: the Yivi app vouches for its holder, so no face check runs
+// here, and the session reaches eIDAS low (boundLoginAssurance).
+
+// eventDisclosureReceived marks the engine accepting a disclosure as reference.
+const eventDisclosureReceived = "proofing.disclosure.received"
+
+// Limits and names of a Yivi-method disclosure.
+const (
+	yiviPhotoAttribute        = "photo"      // the passport/idcard credentials' photo claim
+	attrDisclosedAttributes   = "attributes" // requestedAttributes key releasing the disclosed values
+	maxDisclosedPhotoBytes    = 4 << 20      // a passport photo is tens of kB
+	referenceSourceOpenID4VP  = "openid4vp"
+	maxReferenceAttributes    = 20
+	maxReferenceAttrKeyLen    = 40
+	maxReferenceAttrValueLen  = 200
+	maxReferenceCredentialLen = 200
+)
+
+// Codes SubmitReference refuses a disclosure with: the flow restricts the
+// document type, issuing country or expiry and the disclosure does not show
+// it complies, the flow checks the age and the disclosure does not answer
+// it, or the face checked in the document scan did not verify the person.
+const (
+	disclosureCodeDocumentRefused = "document_not_accepted"
+	disclosureCodeAgeNotDisclosed = "age_not_disclosed"
+	disclosureCodeFaceNotVerified = "face_not_verified"
+)
+
+// disclosureInfo is the result's "disclosure": where the photo and claims came from.
+type disclosureInfo struct {
+	Source         string            `json:"source"`
+	Credential     string            `json:"credential,omitempty"`
+	Issuer         string            `json:"issuer,omitempty"`
+	PhotoAttribute string            `json:"photoAttribute,omitempty"`
+	ProofStatus    string            `json:"proofStatus,omitempty"`
+	Attributes     map[string]string `json:"attributes,omitempty"`
+	AttributeIDs   []string          `json:"attributeIds,omitempty"`
+}
+
+// boundLoginSession checks that sess is a Yivi-method session that can still take part.
+func boundLoginSession(sess session.Session) error {
+	if sess.Method != session.MethodBiometricBoundLogin {
+		return &proofingprovider.RejectedError{Status: http.StatusConflict, Message: "not a Yivi-method session"}
+	}
+	if sess.Status == session.StatusExpired {
+		return &proofingprovider.RejectedError{Status: http.StatusGone, Message: "session expired"}
+	}
+	if sess.Status.Terminal() {
+		return &proofingprovider.RejectedError{Status: http.StatusConflict, Message: "session already finished (" + string(sess.Status) + ")"}
+	}
+	return nil
+}
+
+// acceptReference decides sess from its disclosure ref: approved with the
+// result, or rejected when the document does not comply with the flow.
+func (s *Server) acceptReference(ctx context.Context, sess session.Session, ref proofingprovider.Reference) (proofingprovider.YiviDisclosure, error) {
+	if err := boundLoginSession(sess); err != nil {
+		return proofingprovider.YiviDisclosure{}, err
+	}
+
+	credential, err := referenceCredential(ref)
+	if err != nil {
+		return proofingprovider.YiviDisclosure{}, err
+	}
+
+	info := referenceDisclosureInfo(credential, ref.Attributes)
+	fd, err := s.resolveSessionFlow(ctx, sess)
+	if err != nil {
+		return proofingprovider.YiviDisclosure{}, fmt.Errorf("proofingengine: accept reference: %w", err)
+	}
+	var ageOver *ageOverInfo
+	if asksAge(fd) {
+		ageOver = disclosedAgeOver(info.Attributes, fd.AgeOver)
+		withholdDisclosedBirthDate(&info)
+	}
+
+	bsnPolicy, redaction := effectivePrivacyPolicy(fd)
+	doc, checksDocument := disclosedDocument(sess, info, bsnPolicy, time.Now())
+	withholdDisclosedBSN(&info, bsnPolicy)
+	docRedaction := redaction
+	docRedaction.BlurBSN = coversDocumentBSN(redaction, flow.IssuingStateCode(doc.IssuingState))
+
+	details := map[string]any{detailStage: "disclosure", "credential": info.Credential}
+	if failed, errorCode := disclosureComplianceFailure(fd, doc, time.Now()); checksDocument && failed {
+		details[detailReason] = disclosureCodeDocumentRefused
+		s.boundLoginFinish(sess, session.StatusRejected, errorCode, nil, details, docRedaction)
+		return proofingprovider.YiviDisclosure{OK: false, Code: disclosureCodeDocumentRefused}, nil
+	}
+	if asksAge(fd) && ageOver == nil {
+		details[detailReason] = disclosureCodeAgeNotDisclosed
+		s.boundLoginFinish(sess, session.StatusRejected, errCodeAgeNotDisclosed, nil, details, docRedaction)
+		return proofingprovider.YiviDisclosure{OK: false, Code: disclosureCodeAgeNotDisclosed}, nil
+	}
+	decided, err := s.decideByDocumentPhoto(sess, fd, info, doc, details, docRedaction)
+	switch {
+	case err != nil:
+		return proofingprovider.YiviDisclosure{}, err
+	case decided == session.StatusRejected:
+		return proofingprovider.YiviDisclosure{OK: false, Code: disclosureCodeDocumentRefused}, nil
+	}
+
+	// A face checked in the document scan is this session's face step too: it
+	// must have verified the person, as on the other paths, and its selfie and
+	// verdicts go in the result.
+	selfie, biometrics := faceStepEvidence(sess.Steps.Selfie)
+	if failed, code := scannedFaceFailure(fd, biometrics); failed {
+		details[detailReason] = disclosureCodeFaceNotVerified
+		s.boundLoginFinish(sess, session.StatusRejected, code, nil, details, docRedaction)
+		return proofingprovider.YiviDisclosure{OK: false, Code: disclosureCodeFaceNotVerified}, nil
+	}
+
+	if decided == session.StatusApproved && alwaysReviews(fd) {
+		decided = session.StatusNeedsReview
+		details[detailReason] = reasonFlowAlwaysReview
+	}
+
+	result := buildBoundLoginResult(sess, info, doc, s.disclosedPhoto(sess, ref.Photo, redaction), ageOver)
+	addDocumentPhoto(result, sess, docRedaction)
+	addDocumentCheck(result, sess)
+	addSelfie(result, sess, selfie, redaction)
+	addBiometrics(result, sess, biometrics)
+	addFaceCheck(result, sess)
+
+	if sess.Status == session.StatusCreated {
+		opened := sess
+		opened.Status = session.StatusOpened
+		s.auditProofing(opened, eventSessionOpened, nil)
+	}
+	s.auditProofing(sess, eventDisclosureReceived, map[string]any{"credential": info.Credential})
+	if _, ok := s.boundLoginFinish(sess, decided, "", result, details, docRedaction); !ok {
+		return proofingprovider.YiviDisclosure{}, fmt.Errorf("proofingengine: accept reference: session %s not decided", sess.ID)
+	}
+	return proofingprovider.YiviDisclosure{OK: true}, nil
+}
+
+// referenceCredential is ref's credential, trimmed; a blank or oversized one,
+// or too many attributes, is refused.
+func referenceCredential(ref proofingprovider.Reference) (string, error) {
+	credential := strings.TrimSpace(ref.Credential)
+	if credential == "" || len(credential) > maxReferenceCredentialLen {
+		return "", &proofingprovider.RejectedError{Status: http.StatusBadRequest, Message: "credential is required"}
+	}
+	if len(ref.Attributes) > maxReferenceAttributes {
+		return "", &proofingprovider.RejectedError{Status: http.StatusBadRequest, Message: "too many attributes"}
+	}
+	return credential, nil
+}
+
+// addBiometrics releases the face step's biometrics in result, when asked.
+func addBiometrics(result map[string]any, sess session.Session, biometrics *biometricsInfo) {
+	if biometrics != nil && attrRequested(sess, attrBiometrics) {
+		result["biometrics"] = biometrics
+	}
+}
+
+// referenceDisclosureInfo is the disclosure of credential's attributes, minus
+// the photo and any blank or oversized one.
+func referenceDisclosureInfo(credential string, attributes map[string]string) disclosureInfo {
+	info := disclosureInfo{
+		Source: referenceSourceOpenID4VP, Credential: credential,
+		PhotoAttribute: credential + "." + yiviPhotoAttribute, Attributes: map[string]string{},
+	}
+	if parts := strings.Split(credential, "."); len(parts) == 3 {
+		info.Issuer = parts[0] + "." + parts[1]
+	}
+	for k, v := range attributes {
+		k, v = strings.TrimSpace(k), strings.TrimSpace(v)
+		if k == "" || v == "" || k == yiviPhotoAttribute || len(k) > maxReferenceAttrKeyLen || len(v) > maxReferenceAttrValueLen {
+			continue
+		}
+		info.Attributes[k] = v
+		info.AttributeIDs = append(info.AttributeIDs, credential+"."+k)
+	}
+	return info
+}
+
+// scannedFaceFailure is faceStepFailure for the face the document scan
+// checked, with its biometrics; no failure when it checked none.
+func scannedFaceFailure(fd *flow.FlowDefinition, biometrics *biometricsInfo) (bool, string) {
+	if biometrics == nil {
+		return false, ""
+	}
+	return faceStepFailure(fd, appResultRequest{Biometrics: biometrics}, nil)
+}
+
+// decideByDocumentPhoto checks the disclosed document doc against the
+// browser's document photo: an error while the photo is not in yet, rejected
+// (sess is decided so) when the scanned document is refused or its holder is
+// not doc's (scannedHolderOf) or, for personal data, not the registered
+// person (personalDataMatch), needs_review when the scan was doubtful or read
+// no holder, else approved. The holder, not the document number, binds the
+// two: the disclosure carries no number, and a holder may photograph another
+// document of theirs than the one in the Yivi app.
+func (s *Server) decideByDocumentPhoto(sess session.Session, fd *flow.FlowDefinition, info disclosureInfo, doc documentInfo, details map[string]any, docRedaction privacy.RedactionPolicy) (session.Status, error) {
+	if fd != nil && slices.Contains(fd.Steps, flow.StepDocumentPhoto) && sess.Steps.DocumentPhoto == nil {
+		return "", &proofingprovider.RejectedError{
+			Status: http.StatusConflict, Code: proofingprovider.CodeDocumentPhotoMissing,
+			Message: "the document photo is taken in the browser and has not come in yet",
+		}
+	}
+	scanCode, doubtful := documentPhotoOutcome(sess, "")
+	reviewReason := reasonDocumentDoubtful
+	if scanCode == "" && disclosesPersonalData(info) {
+		var mismatch bool
+		if scanCode, mismatch = personalDataMatch(sess, info); mismatch && !doubtful {
+			doubtful, reviewReason = true, reasonPersonalDataMismatch
+		}
+	} else if p := sess.Steps.DocumentPhoto; scanCode == "" && p != nil && p.Check != nil {
+		switch scannedHolderOf(doc, p.Check.Document) {
+		case holderOther:
+			scanCode = errCodeDocMismatch
+		case holderUnknown:
+			doubtful = true
+		}
+	}
+	switch {
+	case scanCode != "":
+		details[detailReason] = disclosureCodeDocumentRefused
+		s.boundLoginFinish(sess, session.StatusRejected, scanCode, nil, details, docRedaction)
+		return session.StatusRejected, nil
+	case doubtful:
+		details[detailReason] = reviewReason
+		return session.StatusNeedsReview, nil
+	}
+	return session.StatusApproved, nil
+}
+
+// scannedHolder is whether a document scan read the disclosed holder.
+type scannedHolder int
+
+const (
+	holderSame scannedHolder = iota
+	holderOther
+	holderUnknown
+)
+
+// scannedHolderOf compares the holder of the disclosed document doc with the
+// one the scan read: the same full name (diploma.SameName), and the same date
+// of birth when both carry one. An age check withholds the date on both
+// sides, so the name alone decides there. A scan that read no surname, or a
+// date that does not parse, cannot tell.
+func scannedHolderOf(doc documentInfo, scanned session.ScannedDocument) scannedHolder {
+	if strings.TrimSpace(scanned.Surname) == "" || strings.TrimSpace(doc.LastName) == "" {
+		return holderUnknown
+	}
+	if !diploma.SameName(doc.FirstName+" "+doc.LastName, scanned.GivenNames+" "+scanned.Surname) {
+		return holderOther
+	}
+	if doc.DateOfBirth == "" || scanned.DateOfBirth == "" {
+		return holderSame
+	}
+	disclosed, errDisclosed := diploma.ParseDate(doc.DateOfBirth)
+	read, errRead := diploma.ParseDate(scanned.DateOfBirth)
+	switch {
+	case errDisclosed != nil || errRead != nil:
+		return holderUnknown
+	case !disclosed.Equal(read):
+		return holderOther
+	}
+	return holderSame
+}
+
+// disclosedPhoto is the disclosed photo as the result releases it: only when
+// the flow keeps the face photos and asks for one, as in buildResult. A photo
+// that cannot be read is left out.
+func (s *Server) disclosedPhoto(sess session.Session, photo string, redaction privacy.RedactionPolicy) *photoInfo {
+	if strings.TrimSpace(photo) == "" || !redaction.KeepFacePhotos || !attrRequested(sess, attrDG2, attrFaceImage) {
+		return nil
+	}
+	raw, mime, err := decodeImageBase64(photo, defaultImageMime)
+	if err != nil || len(raw) > maxDisclosedPhotoBytes {
+		slog.Warn("identity proofing: could not read the disclosed photo; leaving it out", slog.String("session_id", sess.ID))
+		return nil
+	}
+	image := base64.StdEncoding.EncodeToString(raw)
+	// A chip-derived photo may be JPEG2000, which browsers need as PNG.
+	if converted, convertedMime, err := images.ToDisplayablePNG(image, mime); err == nil && converted != "" {
+		image, mime = converted, convertedMime
+	}
+	return &photoInfo{ImageBase64: image, MimeType: mime}
+}
+
+// disclosureComplianceFailure is flowComplianceFailure for a disclosed
+// document: a flow restricting the type or issuing country refuses one that
+// does not show it, and a disclosed expiry in the past is refused.
+func disclosureComplianceFailure(fd *flow.FlowDefinition, doc documentInfo, now time.Time) (failed bool, errorCode string) {
+	if fd == nil {
+		return false, ""
+	}
+	if !fd.AcceptsDocumentType(doc.Type, doc.Kind) {
+		return true, errCodeDocTypeRefused
+	}
+	if len(fd.AcceptedIssuingCountries) > 0 &&
+		(doc.IssuingState == "" || !slices.Contains(fd.AcceptedIssuingCountries, flow.IssuingStateCode(doc.IssuingState))) {
+		return true, errCodeCountryRefused
+	}
+	if expiry, ok := disclosedDate(doc.DateOfExpiry); ok && expiry.Before(now.UTC().Truncate(day)) {
+		return true, errCodeDocExpired
+	}
+	return false, ""
+}
+
+// disclosedDateLayouts are the date formats a disclosed credential uses.
+var disclosedDateLayouts = []string{time.DateOnly, "02-01-2006"}
+
+// disclosedDate parses a disclosed date; ok is false when absent or in no
+// known format, the credential's own validity then standing for it.
+func disclosedDate(raw string) (time.Time, bool) {
+	for _, layout := range disclosedDateLayouts {
+		if t, err := time.Parse(layout, raw); err == nil {
+			return t, true
+		}
+	}
+	return time.Time{}, false
+}
+
+// boundLoginAssurance is an approved Yivi-method session's assurance: the Yivi
+// app vouches for the holder, with no chip check and no face check here,
+// which is eIDAS low. It is not scored on the tier ladder, which needs checks
+// this method does not run.
+func boundLoginAssurance() assuranceInfo {
+	return assuranceInfo{EIDASLevel: flow.AssuranceLevelLow}
+}
+
+// buildBoundLoginResult is the released result, gated by requestedAttributes:
+// the session's document (disclosedDocument) and the disclosed claims, the age answer, and photo when the flow
+// keeps it (disclosedPhoto).
+func buildBoundLoginResult(sess session.Session, info disclosureInfo, doc documentInfo, photo *photoInfo, ageOver *ageOverInfo) map[string]any {
+	result := map[string]any{}
+	if attrRequested(sess, attrDisclosedAttributes, attrDocument) {
+		result["document"] = doc
+	} else {
+		info.Attributes = nil
+	}
+	result["disclosure"] = info
+	if ageOver != nil && attrRequested(sess, attrAgeOver) {
+		result["ageOver"] = ageOver
+	}
+	if photo != nil {
+		result["photo"] = photo
+	}
+	result["assurance"] = boundLoginAssurance()
+	return result
+}
+
+// addDocumentPhoto adds the browser's document photo to result as buildResult
+// releases it: only when asked, with the BSN covered under docRedaction.
+func addDocumentPhoto(result map[string]any, sess session.Session, docRedaction privacy.RedactionPolicy) {
+	p := sess.Steps.DocumentPhoto
+	if p == nil || !attrRequested(sess, attrDocumentImage) {
+		return
+	}
+	if img := releasedDocumentImage(sess, documentImageFromSide(&p.Front), docRedaction); img != nil {
+		result["documentImage"] = img
+	}
+	if img := releasedDocumentImage(sess, documentImageFromSide(p.Back), docRedaction); img != nil {
+		result["documentImageBack"] = img
+	}
+}
+
+// boundLoginFinish settles sess as to (stepping through opened and
+// in_progress), stores result and error code, and reports it. The stored
+// evidence takes docRedaction (heldForReview) in the same write: the BSN
+// covered in the document photo, and the selfie dropped unless kept.
+func (s *Server) boundLoginFinish(sess session.Session, to session.Status, errorCode string, result map[string]any, details map[string]any, docRedaction privacy.RedactionPolicy) (session.Session, bool) {
+	updated, err := s.sessions.Update(sess.TenantID, sess.ID, func(sess *session.Session) error {
+		if err := settleBoundLogin(sess, to, time.Now().UTC()); err != nil {
+			return err
+		}
+		sess.ErrorCode = errorCode
+		if result != nil {
+			sess.Result = result
+		}
+		redaction := heldForReview(to, docRedaction)
+		if redaction.BlurBSN {
+			redactStoredDocumentPhoto(sess)
+		}
+		if !redaction.KeepFacePhotos {
+			dropStoredSelfie(sess)
+		}
+		return nil
+	})
+	if err != nil {
+		if !errors.Is(err, errSessionComplete) {
+			slog.Error("identity proofing: could not finish a Yivi-method session",
+				slog.String("session_id", sess.ID), slog.String("status", string(to)), slog.Any("error", err))
+		}
+		return session.Session{}, false
+	}
+	if details == nil {
+		details = map[string]any{}
+	}
+	if updated.ErrorCode != "" {
+		details[detailErrorCode] = updated.ErrorCode
+	}
+	s.auditProofing(updated, eventTypeForStatus(updated.Status), details)
+	return updated, true
+}
+
+// settleBoundLogin steps sess to status to, through opened and in_progress.
+func settleBoundLogin(sess *session.Session, to session.Status, now time.Time) error {
+	if sess.Status.Terminal() {
+		return errSessionComplete
+	}
+	if sess.Status == session.StatusCreated {
+		if err := sess.SetStatus(session.StatusOpened, now); err != nil {
+			return err
+		}
+	}
+	if sess.Status == session.StatusOpened && to != session.StatusCancelled && to != session.StatusExpired {
+		if err := sess.SetStatus(session.StatusInProgress, now); err != nil {
+			return err
+		}
+	}
+	return sess.SetStatus(to, now)
+}
+
+// yiviDocumentKinds are the kinds of the identity credentials, by the last
+// segment of their vct (pbdf-staging.pbdf.residencepermit).
+var yiviDocumentKinds = map[string]string{
+	"passport":        flow.DocumentKindPassport,
+	"idcard":          flow.DocumentKindIdentityCard,
+	"residencepermit": flow.DocumentKindResidencePermit,
+	"drivinglicence":  flow.DocumentTypeDrivingLicence,
+}
+
+// documentFromDisclosure maps the passport, idcard or residencepermit claims
+// onto documentInfo.
+func documentFromDisclosure(info disclosureInfo) documentInfo {
+	a := info.Attributes
+	doc := documentInfo{
+		Type: a["documentType"], Kind: yiviDocumentKinds[info.Credential[strings.LastIndex(info.Credential, ".")+1:]],
+		Number: a["documentNumber"], IssuingState: a["country"], Nationality: a["nationality"],
+		FirstName: a["firstName"], LastName: a["lastName"], Sex: a["gender"],
+		DateOfBirth: a["dateOfBirth"], DateOfExpiry: a["dateOfExpiry"],
+	}
+	if doc.FirstName == "" && doc.LastName == "" {
+		doc.DisplayName = firstNonEmpty(a["displayName"], a["name"], a["fullName"])
+	} else {
+		doc.DisplayName = strings.TrimSpace(doc.FirstName + " " + doc.LastName)
+	}
+	return doc
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// decodeImageBase64 accepts a data URL or bare (standard or raw) base64 and
+// returns the bytes plus the MIME type: the data URL's, else defaultMime.
+func decodeImageBase64(input, defaultMime string) ([]byte, string, error) {
+	input = strings.TrimSpace(input)
+	if input == "" {
+		return nil, "", errors.New("image is empty")
+	}
+	mime := defaultMime
+	if strings.HasPrefix(input, "data:") {
+		idx := strings.Index(input, ",")
+		if idx < 0 {
+			return nil, "", errors.New("image data URL has no payload")
+		}
+		if meta := input[len("data:"):idx]; meta != "" {
+			mime = strings.TrimSpace(strings.Split(meta, ";")[0])
+		}
+		input = input[idx+1:]
+	}
+
+	raw, err := base64.StdEncoding.DecodeString(input)
+	if err != nil {
+		raw, err = base64.RawStdEncoding.DecodeString(input)
+		if err != nil {
+			return nil, "", fmt.Errorf("image is not valid base64: %w", err)
+		}
+	}
+	return raw, mime, nil
+}

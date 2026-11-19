@@ -7,10 +7,28 @@ import {
   useOrganizationMemberQuery,
   useOrganizationQuery,
   useRemoveMemberMutation,
+  useRequestIdentificationMutation,
+  useRequestVogMutation,
+  useScreeningHistoryQuery,
+  useUploadVogMutation,
 } from "../api/organization.queries";
 import type { AuditEvent } from "../api/organization";
 import { ApiError } from "../api/http";
 import { accessMessage } from "../lib/access-message";
+import {
+  identityStatusLabel,
+  identityStatusTone,
+  memberTypeLabel,
+  requestableIdentity,
+} from "../lib/identity-status";
+import {
+  requestableVog,
+  screeningResultLabel,
+  screeningResultTone,
+  screeningStatusLabel,
+  screeningStatusTone,
+  vogResultMessage,
+} from "../lib/screening-status";
 import {
   auditActionLabel,
   auditSubject,
@@ -19,11 +37,12 @@ import {
 } from "../lib/audit-event";
 import { fullName, personInitials } from "../lib/name";
 import { useWhenFormatter } from "../lib/format-when";
+import { showsReviewTag } from "../lib/review-right";
 import { Avatar, Button, Card, Icon, Modal, Tag, TopBar } from "../ui";
 import * as React from "react";
 
 const EYEBROW =
-  "text-muted font-mono text-[11px] font-medium tracking-[0.06em] uppercase";
+  "text-muted font-label text-[11px] font-medium tracking-[0.06em] uppercase";
 
 const CONFLICT_STATUS = 409;
 
@@ -31,11 +50,11 @@ function DetailRow({
   label,
   value,
   capitalize,
-}: {
+}: Readonly<{
   label: string;
   value: string;
   capitalize?: boolean;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   return (
     <div className="flex items-center justify-between gap-3">
       <span className={EYEBROW}>{label}</span>
@@ -57,15 +76,15 @@ function TimelineItem({
   formatWhen,
   t,
   isLast,
-}: {
+}: Readonly<{
   event: AuditEvent;
   dateFormatter: Intl.DateTimeFormat;
   formatWhen: (iso: string) => string;
   t: TFunction;
   isLast: boolean;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const visual = auditVisual(event.action);
-  const subject = auditSubject(event, dateFormatter);
+  const subject = auditSubject(event, dateFormatter, t);
   return (
     <li className="flex gap-3">
       <div className="flex flex-col items-center">
@@ -128,12 +147,17 @@ export default function MemberDetail(): React.JSX.Element {
   );
   const formatWhen = useWhenFormatter();
   const removeMember = useRemoveMemberMutation(slug);
+  const requestIdentification = useRequestIdentificationMutation(slug);
+  const requestVog = useRequestVogMutation(slug);
+  const uploadVog = useUploadVogMutation(slug, id);
+  const vogHistory = useScreeningHistoryQuery(slug, id, isAdmin);
+  const vogFileInput = React.useRef<HTMLInputElement>(null);
   const [confirmingOffboard, setConfirmingOffboard] = React.useState(false);
 
   const shell = (body: React.ReactNode): React.JSX.Element => (
     <>
       <TopBar title={t("memberDetail.title")} />
-      <div className="p-8">{body}</div>
+      <div className="p-4 sm:p-8">{body}</div>
     </>
   );
   const message = (text: string, isError = false): React.JSX.Element => (
@@ -190,7 +214,7 @@ export default function MemberDetail(): React.JSX.Element {
         }
       />
 
-      <div className="grid grid-cols-1 gap-5 p-8 lg:grid-cols-[1fr_320px]">
+      <div className="grid grid-cols-1 gap-5 p-4 sm:p-8 lg:grid-cols-[1fr_320px]">
         <div className="flex flex-col gap-4">
           <Card className="p-6">
             <h2 className="text-[16px] font-semibold">
@@ -248,6 +272,71 @@ export default function MemberDetail(): React.JSX.Element {
               </>
             )}
           </Card>
+          {member.vogStatus !== "not_required" && (
+            <Card className="p-6">
+              <h2 className="text-[16px] font-semibold">
+                {t("memberDetail.vogHistory.title")}
+              </h2>
+              {vogHistory.isError ? (
+                <p className="text-error mt-2 text-[14px]">
+                  {t("memberDetail.vogHistory.error", {
+                    message: vogHistory.error.message,
+                  })}
+                </p>
+              ) : vogHistory.isPending ? (
+                <p className="text-ink-soft mt-2 text-[14px]">
+                  {t("common.loading")}
+                </p>
+              ) : vogHistory.data.length === 0 ? (
+                <p className="text-ink-soft mt-2 text-[14px]">
+                  {t("memberDetail.vogHistory.empty")}
+                </p>
+              ) : (
+                <table className="mt-4 w-full text-[13px]">
+                  <thead>
+                    <tr className="text-ink-soft text-left text-[11.5px]">
+                      <th className="pb-2 font-medium">
+                        {t("memberDetail.vogHistory.columns.checkedAt")}
+                      </th>
+                      <th className="pb-2 font-medium">
+                        {t("memberDetail.vogHistory.columns.method")}
+                      </th>
+                      <th className="pb-2 font-medium">
+                        {t("memberDetail.vogHistory.columns.result")}
+                      </th>
+                      <th className="pb-2 font-medium">
+                        {t("memberDetail.vogHistory.columns.validUntil")}
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {vogHistory.data.map((record) => (
+                      <tr key={record.id} className="border-line border-t">
+                        <td className="py-2">
+                          {dateFormatter.format(new Date(record.checkedAt))}
+                        </td>
+                        <td className="py-2">
+                          {record.method === "pdf"
+                            ? t("memberDetail.vogHistory.methodPdf")
+                            : t("memberDetail.vogHistory.methodCredential")}
+                        </td>
+                        <td className="py-2">
+                          <Tag tone={screeningResultTone(record.result)}>
+                            {screeningResultLabel(record.result, t)}
+                          </Tag>
+                        </td>
+                        <td className="py-2">
+                          {record.validUntil
+                            ? dateFormatter.format(new Date(record.validUntil))
+                            : "—"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </Card>
+          )}
         </div>
 
         <Card className="h-fit p-0">
@@ -268,11 +357,15 @@ export default function MemberDetail(): React.JSX.Element {
               <Tag tone="green" dot>
                 {t("memberDetail.active")}
               </Tag>
-              {member.verified && (
-                <Tag tone="blue" dot>
-                  {t("memberDetail.verified")}
+              <Tag tone={identityStatusTone(member.identityStatus)}>
+                {identityStatusLabel(member.identityStatus, t)}
+              </Tag>
+              {member.vogStatus !== "not_required" && (
+                <Tag tone={screeningStatusTone(member.vogStatus)}>
+                  {screeningStatusLabel(member.vogStatus, t)}
                 </Tag>
               )}
+              {showsReviewTag(member) && <Tag>{t("common.canReview")}</Tag>}
             </div>
           </div>
           <div className="flex flex-col gap-2.5 p-5">
@@ -290,8 +383,134 @@ export default function MemberDetail(): React.JSX.Element {
               value={member.departmentName ?? "—"}
             />
             <DetailRow label={t("common.phone")} value={member.phone ?? "—"} />
+            <DetailRow
+              label={t("memberDetail.memberType")}
+              value={memberTypeLabel(member.memberType, t)}
+            />
+            {member.memberType === "external" && (
+              <DetailRow
+                label={t("memberDetail.externalOrganisation")}
+                value={member.externalOrganisation ?? "—"}
+              />
+            )}
+            <DetailRow
+              label={t("memberDetail.identifiedOn")}
+              value={
+                member.identityVerifiedAt
+                  ? dateFormatter.format(new Date(member.identityVerifiedAt))
+                  : t("memberDetail.never")
+              }
+            />
+            {member.identityDueAt && (
+              <DetailRow
+                label={t("memberDetail.identityDueOn")}
+                value={dateFormatter.format(new Date(member.identityDueAt))}
+              />
+            )}
+            {member.vogStatus !== "not_required" && (
+              <DetailRow
+                label={t("memberDetail.vogValidUntil")}
+                value={
+                  member.vogValidUntil
+                    ? dateFormatter.format(new Date(member.vogValidUntil))
+                    : t("memberDetail.vogNone")
+                }
+              />
+            )}
           </div>
           <div className="border-line flex flex-col gap-2 border-t p-4">
+            {requestableIdentity({
+              status: "active",
+              identityStatus: member.identityStatus,
+            }) ? (
+              <>
+                <Button
+                  variant="secondary"
+                  icon="personal"
+                  className="w-full"
+                  loading={requestIdentification.isPending}
+                  onClick={() =>
+                    requestIdentification.mutate({ userIds: [id] })
+                  }
+                >
+                  {t("memberDetail.requestIdentification")}
+                </Button>
+                <p className="text-ink-soft text-[12px]">
+                  {t("memberDetail.requestIdentificationHint")}
+                </p>
+              </>
+            ) : (
+              <p className="text-ink-soft text-[12px]">
+                {t("memberDetail.identityRequested")}
+              </p>
+            )}
+            {requestableVog({
+              status: "active",
+              vogStatus: member.vogStatus,
+            }) ? (
+              <>
+                <Button
+                  variant="secondary"
+                  icon="valid"
+                  className="w-full"
+                  loading={requestVog.isPending}
+                  onClick={() => requestVog.mutate({ userIds: [id] })}
+                >
+                  {t("memberDetail.requestVog")}
+                </Button>
+                <p className="text-ink-soft text-[12px]">
+                  {t("memberDetail.requestVogHint")}
+                </p>
+              </>
+            ) : (
+              member.vogStatus !== "not_required" && (
+                <p className="text-ink-soft text-[12px]">
+                  {t("memberDetail.vogRequested")}
+                </p>
+              )
+            )}
+            <input
+              ref={vogFileInput}
+              type="file"
+              accept="application/pdf"
+              className="hidden"
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                event.target.value = "";
+                if (file) uploadVog.mutate(file);
+              }}
+            />
+            <Button
+              variant="secondary"
+              icon="add"
+              className="w-full"
+              loading={uploadVog.isPending}
+              onClick={() => vogFileInput.current?.click()}
+            >
+              {t("memberDetail.uploadVog")}
+            </Button>
+            <p className="text-ink-soft text-[12px]">
+              {t("memberDetail.uploadVogHint")}
+            </p>
+            {uploadVog.data && (
+              <p
+                className={`text-[12px] ${uploadVog.data.result === "valid" ? "text-success" : "text-error"}`}
+              >
+                {vogResultMessage(
+                  uploadVog.data.result,
+                  uploadVog.data.rejectionReason,
+                  org.data.name,
+                  t,
+                )}
+              </p>
+            )}
+            {uploadVog.isError && (
+              <p role="alert" className="text-error text-[12px]">
+                {t("memberDetail.uploadVogError", {
+                  message: uploadVog.error.message,
+                })}
+              </p>
+            )}
             <Button
               variant="secondary"
               icon="email"

@@ -1,19 +1,115 @@
-import { useParams } from "react-router";
+import { Link, useParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { useQerdsMessageQuery } from "../api/qerds.queries";
 import { useOrganizationQuery } from "../api/organization.queries";
 import { downloadQerdsAttachment } from "../api/qerds";
-import type { QerdsAttachment, QerdsEvidence } from "../api/qerds";
+import type {
+  QerdsAttachment,
+  QerdsCredentialOffer,
+  QerdsEvidence,
+} from "../api/qerds";
 import { ApiError } from "../api/http";
 import { accessMessage } from "../lib/access-message";
-import { decodeEvidence, formatBytes, qerdsStatusTone } from "../lib/qerds";
+import {
+  credentialOfferStatusTone,
+  decodeEvidence,
+  formatBytes,
+  qerdsStatusTone,
+} from "../lib/qerds";
 import { toast } from "../lib/toast";
 import { Button, Card, Icon, Tag, TopBar } from "../ui";
 import * as React from "react";
 
 const EYEBROW =
-  "text-muted font-mono text-[11px] font-medium tracking-[0.06em] uppercase";
+  "text-muted font-label text-[11px] font-medium tracking-[0.06em] uppercase";
+
+// Matches the Button component's secondary/md classes so the deep-link to the
+// Attestations page reads as a regular action while staying a real navigation
+// anchor (see wsca-activation-notice.tsx for the same pattern).
+const OFFER_REVIEW_LINK_CLASSES =
+  "rounded-yivi font-display bg-surface text-ink border-line-strong hover:bg-surface-3 inline-flex h-9 w-fit items-center justify-center border px-3.5 text-[13.5px] font-semibold whitespace-nowrap transition-colors duration-150";
+
+function credentialOfferStatusLabel(
+  offer: QerdsCredentialOffer,
+  t: TFunction,
+): string {
+  switch (offer.status) {
+    case "accepting":
+      return t("qerds.offer.status.accepting");
+    case "accepted":
+      return t("qerds.offer.status.accepted");
+    case "declined":
+      return t("qerds.offer.status.declined");
+    default:
+      return t("attestations.offers.pending");
+  }
+}
+
+// Renders an inbound credential-offer envelope as an attestation, not raw
+// envelope JSON: who offers it, which credential, and — while it is still
+// pending — a link through to the Attestations page where it is accepted or
+// declined. The raw (already redacted) envelope stays reachable behind a
+// details toggle for an operator debugging a delivery.
+function OfferCard({
+  slug,
+  offer,
+  senderAddress,
+  rawBody,
+  t,
+}: Readonly<{
+  slug: string;
+  offer: QerdsCredentialOffer;
+  senderAddress: string;
+  rawBody: string;
+  t: TFunction;
+}>): React.JSX.Element {
+  const credentialName =
+    offer.credentialName || t("attestations.offers.unnamedCredential");
+  const sender = offer.senderOrgName || senderAddress;
+
+  return (
+    <Card className="p-6">
+      <h2 className="text-[16px] font-semibold">{t("qerds.offer.title")}</h2>
+      <div className="mt-3 flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="text-ink truncate font-semibold">
+            {credentialName}
+          </div>
+          <div className="text-ink-soft truncate text-[12.5px]">
+            {t("attestations.offers.from", { sender })}
+          </div>
+        </div>
+        {offer.offerId && (
+          <Tag tone={credentialOfferStatusTone(offer.status ?? "")} dot>
+            {credentialOfferStatusLabel(offer, t)}
+          </Tag>
+        )}
+      </div>
+      {offer.message && (
+        <p className="text-ink mt-3 text-[14px] whitespace-pre-wrap">
+          {offer.message}
+        </p>
+      )}
+      {offer.offerId && offer.status === "pending" && (
+        <Link
+          to={`/${slug}/attestations`}
+          className={`${OFFER_REVIEW_LINK_CLASSES} mt-4`}
+        >
+          {t("qerds.offer.review")}
+        </Link>
+      )}
+      <details className="mt-4">
+        <summary className="text-link cursor-pointer text-[11.5px]">
+          {t("qerds.offer.rawEnvelope")}
+        </summary>
+        <pre className="bg-surface-2 border-line text-ink-soft mt-1.5 overflow-x-auto rounded-md border p-2.5 font-mono text-[11px] break-all whitespace-pre-wrap">
+          {rawBody}
+        </pre>
+      </details>
+    </Card>
+  );
+}
 
 function evidenceTypeLabel(type: string, t: TFunction): string {
   switch (type) {
@@ -35,12 +131,12 @@ function DetailRow({
   value,
   mono,
   capitalize,
-}: {
+}: Readonly<{
   label: string;
   value: string;
   mono?: boolean;
   capitalize?: boolean;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   return (
     <div className="flex items-center justify-between gap-3">
       <span className={EYEBROW}>{label}</span>
@@ -61,11 +157,11 @@ function EvidenceItem({
   evidence,
   dateFormatter,
   t,
-}: {
+}: Readonly<{
   evidence: QerdsEvidence;
   dateFormatter: Intl.DateTimeFormat;
   t: TFunction;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   return (
     <li className="flex gap-3">
       <span className="text-valid inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[color-mix(in_srgb,var(--color-valid)_14%,transparent)]">
@@ -101,12 +197,12 @@ function AttachmentsCard({
   messageId,
   attachments,
   t,
-}: {
+}: Readonly<{
   slug: string;
   messageId: string;
   attachments: QerdsAttachment[];
   t: TFunction;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const [downloadingId, setDownloadingId] = React.useState<string | null>(null);
 
   async function download(attachment: QerdsAttachment): Promise<void> {
@@ -181,7 +277,7 @@ export default function QerdsMessage(): React.JSX.Element {
   const shell = (body: React.ReactNode): React.JSX.Element => (
     <>
       <TopBar title={t("qerds.message.title")} />
-      <div className="p-8">{body}</div>
+      <div className="p-4 sm:p-8">{body}</div>
     </>
   );
   const notice = (text: string, isError = false): React.JSX.Element => (
@@ -221,22 +317,32 @@ export default function QerdsMessage(): React.JSX.Element {
         }
       />
 
-      <div className="grid grid-cols-1 gap-5 p-8 lg:grid-cols-[1fr_320px]">
+      <div className="grid grid-cols-1 gap-5 p-4 sm:p-8 lg:grid-cols-[1fr_320px]">
         <div className="flex flex-col gap-4">
-          <Card className="p-6">
-            <h2 className="text-[16px] font-semibold">
-              {t("qerds.message.content")}
-            </h2>
-            {message.body.trim() === "" ? (
-              <p className="text-ink-soft mt-2 text-[14px] italic">
-                {t("qerds.message.noBody")}
-              </p>
-            ) : (
-              <p className="text-ink mt-2 text-[14px] whitespace-pre-wrap">
-                {message.body}
-              </p>
-            )}
-          </Card>
+          {message.offer ? (
+            <OfferCard
+              slug={slug}
+              offer={message.offer}
+              senderAddress={message.senderAddress}
+              rawBody={message.body}
+              t={t}
+            />
+          ) : (
+            <Card className="p-6">
+              <h2 className="text-[16px] font-semibold">
+                {t("qerds.message.content")}
+              </h2>
+              {message.body.trim() === "" ? (
+                <p className="text-ink-soft mt-2 text-[14px] italic">
+                  {t("qerds.message.noBody")}
+                </p>
+              ) : (
+                <p className="text-ink mt-2 text-[14px] whitespace-pre-wrap">
+                  {message.body}
+                </p>
+              )}
+            </Card>
+          )}
 
           {message.attachments.length > 0 && (
             <AttachmentsCard

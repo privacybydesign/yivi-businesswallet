@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/eudiholder"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/qerds"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/qerdsprovider"
@@ -16,6 +17,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/testdb"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/wallet"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/walletunit"
 )
 
 // captureInbox records the deposited attestation instead of writing it, so the
@@ -55,10 +57,11 @@ func TestOpenWalletSucceedsForSeededRegisterCompany(t *testing.T) {
 		t.Fatalf("create requester: %v", err)
 	}
 
-	store := wallet.NewStore(pool, audit.NopRecorder{})
+	store := wallet.NewStore(pool, audit.NopRecorder{}, walletunit.NewStore(pool, audit.NopRecorder{}))
 	reg := registryprovider.NewSeededRegistry(pool, audit.NewDBRecorder())
 	inbox := &captureInbox{}
-	svc := wallet.NewService(store, reg, nil, nil, inbox, "qerds.localhost")
+	holder := eudiholder.NewStubHolder()
+	svc := wallet.NewService(store, reg, wallet.OwnerID{Issuer: registryprovider.StubEBWOIDIssuer{}, Holder: holder}, nil, nil, inbox, "qerds.localhost")
 
 	res, err := svc.OpenWallet(ctx, requester.ID, wallet.Requester{
 		GivenNames:  "Sanne Marijke",
@@ -72,6 +75,9 @@ func TestOpenWalletSucceedsForSeededRegisterCompany(t *testing.T) {
 	org := res.Organization
 	if org.KVKNumber != registryprovider.OpenableKVKNumber {
 		t.Fatalf("org kvk = %q, want %q", org.KVKNumber, registryprovider.OpenableKVKNumber)
+	}
+	if want := "NLNHR." + registryprovider.OpenableKVKNumber; org.EUID != want {
+		t.Fatalf("org euid = %q, want %q", org.EUID, want)
 	}
 	if org.Name != "Zonnedael B.V." {
 		t.Fatalf("org name = %q, want the register's legal name Zonnedael B.V.", org.Name)
@@ -90,6 +96,23 @@ func TestOpenWalletSucceedsForSeededRegisterCompany(t *testing.T) {
 	}
 	if role != organization.RoleAdmin {
 		t.Fatalf("owner role = %q, want admin", role)
+	}
+	// The wallet opens holding its EBWOID, and the org identity matches its claims.
+	var ref string
+	if err := pool.QueryRow(ctx, `SELECT credential_ref FROM held_attestations WHERE organization_id = $1 AND vct = $2 AND source = 'bootstrap'`,
+		org.ID, registryprovider.EBWOIDVCT).Scan(&ref); err != nil {
+		t.Fatalf("held EBWOID missing: %v", err)
+	}
+	cred, err := holder.Claims(ctx, org.ID, ref, registryprovider.EBWOIDVCT, "")
+	if err != nil {
+		t.Fatalf("EBWOID claims: %v", err)
+	}
+	claims := map[string]any{}
+	for _, a := range cred.Attributes {
+		claims[a.Key] = a.Value
+	}
+	if claims[registryprovider.EBWOIDClaimID] != org.EUID || claims[registryprovider.EBWOIDClaimName] != org.Name {
+		t.Fatalf("EBWOID claims = %v, want id %q and name %q", claims, org.EUID, org.Name)
 	}
 	if inbox.deposited != 1 {
 		t.Fatalf("deposited attestations = %d, want 1", inbox.deposited)

@@ -9,10 +9,10 @@ import { toast } from "../lib/toast";
 export function JsonSnippet({
   title,
   value,
-}: {
+}: Readonly<{
   title: string;
   value: unknown;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const json = JSON.stringify(value, null, 2);
 

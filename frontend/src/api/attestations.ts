@@ -1,5 +1,7 @@
 import { z } from "zod";
 import { absoluteApiUrl, request } from "./http";
+import { auditEventSchema } from "./organization";
+import type { AuditEvent } from "./organization";
 
 // The value types an attribute may declare, mirroring the backend's
 // SupportedAttributeTypes allow-list. The schema editor offers these as a
@@ -167,6 +169,9 @@ export const attestationSchemaSchema = z.object({
   subjectType: attestationSubjectTypeSchema,
   qualified: z.boolean(),
   status: z.string(),
+  // The WE BUILD rulebook the schema was imported from; absent for a schema the
+  // organization defined. A rulebook schema's vct and attributes are fixed.
+  rulebook: z.string().optional(),
   logoUri: z.string(),
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -207,6 +212,8 @@ export const attestationTemplateSchema = z.object({
   attributes: z.array(attestationAttributeSchema),
   subjectType: attestationSubjectTypeSchema,
   qualified: z.boolean(),
+  // Set when the template's schema was imported from a WE BUILD rulebook.
+  rulebook: z.string().optional(),
   issuedCount: z.number(),
 });
 
@@ -255,7 +262,8 @@ export const issuedAttestationSchema = z.object({
   recipientKind: z.string(),
   recipientUserId: z.string().optional(),
   recipientRef: z.string(),
-  attributes: z.record(z.string(), z.string()),
+  // Strings for an organization-defined schema; any JSON value for a rulebook one.
+  attributes: z.record(z.string(), z.unknown()),
   qualified: z.boolean(),
   status: z.string(),
   // The delivery channel the offer was routed over: "email", "qerds", or "none"
@@ -305,11 +313,42 @@ export const heldAttestationSchema = z.object({
   logoUri: z.string().default(""),
   expiresAt: z.string().optional(),
   revoked: z.boolean().default(false),
+  // What the wallet knows of the credential's integrity: its iat and format,
+  // whether it carries a status list, and when that was last read.
+  issuedAt: z.string().optional(),
+  format: z.string().default(""),
+  hasStatusList: z.boolean().default(false),
+  statusCheckedAt: z.string().optional(),
 });
 
 export type HeldAttestation = z.infer<typeof heldAttestationSchema>;
 
 const heldAttestationListSchema = z.array(heldAttestationSchema);
+
+// An inbound credential offer waiting for the organization to accept or decline
+// it (backend/internal/attestation/offer_store.go). Receiving an offer over QERDS
+// does not add the credential to the wallet — accepting it does. The offer
+// deeplink itself is never served: it is a bearer token, so the backend replays
+// it server-side on accept.
+export const credentialOfferSchema = z.object({
+  id: z.string(),
+  organizationId: z.string(),
+  sourceMessageId: z.string(),
+  senderOrgName: z.string().default(""),
+  senderAddress: z.string().default(""),
+  fromParty: z.string().default(""),
+  credentialName: z.string().default(""),
+  status: z.string(),
+  // Absent on every offer this list serves: only pending ones are listed, and a
+  // pending offer has no decision yet.
+  decidedAt: z.string().optional(),
+  receivedAt: z.string(),
+  createdAt: z.string(),
+});
+
+export type CredentialOffer = z.infer<typeof credentialOfferSchema>;
+
+const credentialOfferListSchema = z.array(credentialOfferSchema);
 
 // One disclosed attribute of a held credential: its payload key, the issuer
 // metadata display label (empty when the credential carries no label — the UI
@@ -318,6 +357,9 @@ export const heldAttributeSchema = z.object({
   key: z.string(),
   label: z.string(),
   value: z.unknown(),
+  // Labels of the claims inside an object or array value, keyed by their path
+  // below key ("post_code", "[].full_name").
+  nestedLabels: z.record(z.string(), z.string()).optional(),
 });
 
 export type HeldAttribute = z.infer<typeof heldAttributeSchema>;
@@ -336,7 +378,17 @@ export const heldAttestationClaimsSchema = z.object({
   receivedAt: z.string(),
   expiresAt: z.string().optional(),
   revoked: z.boolean().default(false),
+  // What the wallet knows of the credential's integrity: its iat and format,
+  // whether it carries a status list, and when that was last read.
+  issuedAt: z.string().optional(),
+  format: z.string().default(""),
+  hasStatusList: z.boolean().default(false),
+  statusCheckedAt: z.string().optional(),
   attributes: z.array(heldAttributeSchema),
+  // The WE BUILD rulebook the credential type belongs to, and where its claims
+  // do not match that rulebook's schema.
+  rulebook: z.string().optional(),
+  rulebookViolations: z.array(z.string()).optional(),
 });
 
 export type HeldAttestationClaims = z.infer<typeof heldAttestationClaimsSchema>;
@@ -410,7 +462,7 @@ export interface AttestationKeyInput {
 export interface IssueAttestationInput {
   templateId: string;
   recipient: { kind: string; userId?: string; ref: string };
-  attributes: Record<string, string>;
+  attributes: Record<string, unknown>;
   // "email" (send a claim link) or "qr" (show the QR directly, no e-mail) for a
   // natural person; omitted for organizations (always delivered over QERDS).
   deliveryMethod?: "email" | "qr";
@@ -455,6 +507,85 @@ export function deleteHeldAttestation(
     method: "DELETE",
     signal,
   });
+}
+
+export function getCredentialOffers(
+  slug: string,
+  signal?: AbortSignal,
+): Promise<CredentialOffer[]> {
+  return request(`${base(slug)}/offers`, {
+    schema: credentialOfferListSchema,
+    signal,
+  });
+}
+
+export function acceptCredentialOffer(
+  slug: string,
+  offerId: string,
+  signal?: AbortSignal,
+): Promise<HeldAttestation> {
+  return request(`${base(slug)}/offers/${encodeURIComponent(offerId)}/accept`, {
+    schema: heldAttestationSchema,
+    method: "POST",
+    signal,
+  });
+}
+
+export function declineCredentialOffer(
+  slug: string,
+  offerId: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  return request(
+    `${base(slug)}/offers/${encodeURIComponent(offerId)}/decline`,
+    {
+      schema: z.void(),
+      method: "POST",
+      signal,
+    },
+  );
+}
+
+// A WE BUILD attestation rulebook a schema can be imported from, with a sample
+// of valid claims the issue form starts from.
+export const attestationRulebookSchema = z.object({
+  id: z.string(),
+  vct: z.string(),
+  name: z.string(),
+  subjectType: attestationSubjectTypeSchema,
+  upstream: z.string(),
+  attributes: z.array(attestationAttributeSchema),
+  sample: z.record(z.string(), z.unknown()),
+});
+
+export type AttestationRulebook = z.infer<typeof attestationRulebookSchema>;
+
+const attestationRulebookListSchema = z.array(attestationRulebookSchema);
+
+export function getAttestationRulebooks(
+  slug: string,
+  signal?: AbortSignal,
+): Promise<AttestationRulebook[]> {
+  return request(`${base(slug)}/rulebooks`, {
+    schema: attestationRulebookListSchema,
+    signal,
+  });
+}
+
+export async function importAttestationRulebook(
+  slug: string,
+  rulebookId: string,
+  signal?: AbortSignal,
+): Promise<AttestationSchema> {
+  const schema = await request(
+    `${base(slug)}/rulebooks/${encodeURIComponent(rulebookId)}/import`,
+    {
+      schema: attestationSchemaSchema,
+      method: "POST",
+      signal,
+    },
+  );
+  return withAbsoluteLogo(schema);
 }
 
 function base(slug: string): string {
@@ -783,6 +914,36 @@ export function getAttestationClaim(
 ): Promise<AttestationClaim> {
   return request(`/api/v1/attestations/claim/${encodeURIComponent(token)}`, {
     schema: attestationClaimSchema,
+    signal,
+  });
+}
+
+// A held credential's trail, oldest first: received and status changes. A
+// removed credential is not found, so its removal is never in it.
+export function getHeldAttestationHistory(
+  slug: string,
+  heldId: string,
+  signal?: AbortSignal,
+): Promise<AuditEvent[]> {
+  return request(`${base(slug)}/held/${encodeURIComponent(heldId)}/history`, {
+    schema: z
+      .object({ events: z.array(auditEventSchema) })
+      .transform((page) => page.events),
+    signal,
+  });
+}
+
+// Re-reads this credential's issuer status list; answers whether it changed
+// state.
+export function recheckHeldAttestation(
+  slug: string,
+  heldId: string,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  return request(`${base(slug)}/held/${encodeURIComponent(heldId)}/recheck`, {
+    schema: z.object({ changed: z.boolean() }).transform((r) => r.changed),
+    method: "POST",
+    body: {},
     signal,
   });
 }

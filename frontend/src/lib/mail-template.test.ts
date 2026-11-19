@@ -171,6 +171,28 @@ describe("validateMailTemplate", () => {
     ]);
   });
 
+  it("accepts a QR block on a link variable without a caption", () => {
+    const withQr = template();
+    withQr.blocks.splice(3, 0, {
+      ...newMailBlock("qr"),
+      url: "{{acceptUrl}}",
+    });
+    expect(validateMailTemplate(withQr, INVITATION_VARIABLES)).toEqual([]);
+  });
+
+  it("holds a QR block's link to the button's rules", () => {
+    const broken = template();
+    broken.blocks.splice(3, 0, { ...newMailBlock("qr"), url: "{{orgName}}" });
+    expect(validateMailTemplate(broken, INVITATION_VARIABLES)).toEqual([
+      {
+        field: "blocks",
+        issue: "buttonUrlShape",
+        blockIndex: 3,
+        blockField: "url",
+      },
+    ]);
+  });
+
   it("flags a malformed placeholder in the subject", () => {
     const problems = validateMailTemplate(
       template({ subject: "Code: {{ tx code }}" }),

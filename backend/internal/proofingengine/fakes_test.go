@@ -1,0 +1,161 @@
+package proofingengine
+
+import (
+	"context"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/regula"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/regulasweep"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/session"
+)
+
+// memSessions is an in-memory session.Interface: Update works on a copy and
+// stores it only when fn succeeds, as the Postgres store's transaction does.
+type memSessions struct {
+	mu   sync.Mutex
+	byID map[string]session.Session
+	// writes counts each session's writes, standing in for updated_at;
+	// gets counts the reads that unseal (Get).
+	writes map[string]int
+	gets   atomic.Int64
+}
+
+func newMemSessions(sessions ...session.Session) *memSessions {
+	m := &memSessions{byID: map[string]session.Session{}, writes: map[string]int{}}
+	for _, s := range sessions {
+		m.byID[s.ID] = s
+	}
+	return m
+}
+
+func (m *memSessions) Create(sess session.Session) (session.Session, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.byID[sess.ID] = sess
+	return sess, nil
+}
+
+func (m *memSessions) ChangedAt(_, id string) (time.Time, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.byID[id]; !ok {
+		return time.Time{}, session.ErrNotFound
+	}
+	return time.Unix(int64(m.writes[id]), 0), nil
+}
+
+func (m *memSessions) Get(_, id string) (session.Session, error) {
+	m.gets.Add(1)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	sess, ok := m.byID[id]
+	if !ok {
+		return session.Session{}, session.ErrNotFound
+	}
+	return sess, nil
+}
+
+func (m *memSessions) Authenticate(token string) (session.Session, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, sess := range m.byID {
+		if sess.Token == token {
+			return sess, nil
+		}
+	}
+	return session.Session{}, session.ErrNotFound
+}
+
+func (m *memSessions) AuthenticateSession(tenantID, id, token string) (session.Session, error) {
+	sess, err := m.Get(tenantID, id)
+	if err != nil || sess.Token != token {
+		return session.Session{}, session.ErrNotFound
+	}
+	return sess, nil
+}
+
+func (m *memSessions) FindByHandover(string) (session.Session, error) {
+	return session.Session{}, session.ErrNotFound
+}
+
+func (m *memSessions) Update(_, id string, fn func(*session.Session) error) (session.Session, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	stored, ok := m.byID[id]
+	if !ok {
+		return session.Session{}, session.ErrNotFound
+	}
+	sess := stored
+	if err := fn(&sess); err != nil {
+		return session.Session{}, err
+	}
+	m.byID[id] = sess
+	m.writes[id]++
+	return sess, nil
+}
+
+func (m *memSessions) Delete(_, id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.byID, id)
+	return nil
+}
+
+func (m *memSessions) SetRetention(_ string, ids []string, retention time.Duration) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, id := range ids {
+		sess, ok := m.byID[id]
+		if !ok {
+			continue
+		}
+		sess.RetentionOverride = retention
+		m.byID[id] = sess
+	}
+	return nil
+}
+
+func (m *memSessions) Purge(time.Duration, time.Time) ([]session.Session, error) { return nil, nil }
+
+func (m *memSessions) SetOnExpire(func(session.Session)) {}
+
+// settledQueue records Settle; the rest of regulasweep.Queue is unused here.
+type settledQueue struct {
+	regulasweep.Queue
+	tag   string
+	dueAt time.Time
+}
+
+func (q *settledQueue) Settle(_ context.Context, tag string, dueAt time.Time) error {
+	q.tag, q.dueAt = tag, dueAt
+	return nil
+}
+
+// facelessRegula finds no face in any frame and counts its calls; it is safe
+// for concurrent frames. hold keeps each call in flight that long.
+type facelessRegula struct {
+	calls atomic.Int64
+	hold  time.Duration
+}
+
+func (*facelessRegula) GetLiveness(context.Context, string) (regula.LivenessTransaction, error) {
+	return regula.LivenessTransaction{}, regula.ErrTransactionNotFound
+}
+
+func (*facelessRegula) Match(context.Context, string, string) (regula.MatchResult, error) {
+	return regula.MatchResult{}, nil
+}
+
+func (f *facelessRegula) MatchImages(context.Context, string, string) (regula.ImageMatch, error) {
+	f.calls.Add(1)
+	time.Sleep(f.hold)
+	return regula.ImageMatch{}, nil
+}
+
+func (*facelessRegula) DeleteLiveness(context.Context, string) error { return nil }
+
+func inProgress(id string) session.Session {
+	return session.Session{ID: id, TenantID: "org", Token: "tok-" + id, Status: session.StatusInProgress, TenantReference: "ref-" + id}
+}

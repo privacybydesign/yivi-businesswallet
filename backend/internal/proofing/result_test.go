@@ -1,0 +1,134 @@
+package proofing
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"testing"
+	"time"
+
+	"github.com/google/uuid"
+
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingprovider"
+)
+
+// An admin reads an external request's identity in the wallet, audited each
+// time; a member's request has no identity to show.
+func TestAdminRequestResult(t *testing.T) {
+	f := newFixture()
+	ctx := context.Background()
+	sent, err := f.svc.CreateRequest(ctx, testOrg, sam,
+		NewRequest{SubjectEmail: "a@example.org", FlowID: chipFlow.ID})
+	if err != nil {
+		t.Fatalf("CreateRequest: %v", err)
+	}
+	if _, _, err := f.svc.AdminRequestResult(ctx, testOrg.ID, sent.Request.ID, ReviewScopeAll); !errors.Is(err, ErrResultNotReady) {
+		t.Errorf("AdminRequestResult while pending = %v, want %v", err, ErrResultNotReady)
+	}
+	f.requests.stored.Status = StatusApproved
+	f.ips.result = proofingprovider.Result{Status: proofingprovider.StatusApproved}
+	_, identity, err := f.svc.AdminRequestResult(ctx, testOrg.ID, sent.Request.ID, ReviewScopeAll)
+	if err != nil || identity.FamilyName != "Jansen" || f.requests.resultReads != 1 {
+		t.Fatalf("AdminRequestResult = %+v, %v (%d audited); want IPS's identity, audited", identity, err, f.requests.resultReads)
+	}
+
+	f.requests.stored.SubjectKind = SubjectMember
+	if _, _, err := f.svc.AdminRequestResult(ctx, testOrg.ID, sent.Request.ID, ReviewScopeAll); !errors.Is(err, ErrRequestNotFound) {
+		t.Errorf("AdminRequestResult on a member's request = %v, want %v", err, ErrRequestNotFound)
+	}
+	if f.requests.resultReads != 1 {
+		t.Errorf("a refused read was audited: %d reads, want 1", f.requests.resultReads)
+	}
+}
+
+// A statement in review leaves the identity's approval: the API result shows
+// the approved identity, with the employment step in review beside it.
+func TestEmploymentReviewResult(t *testing.T) {
+	f := newFixture()
+	ctx := context.Background()
+	sent, err := f.svc.CreateRequest(ctx, testOrg, sam,
+		NewRequest{SubjectEmail: "a@example.org", FlowID: chipFlow.ID})
+	if err != nil {
+		t.Fatalf("CreateRequest: %v", err)
+	}
+	checked := time.Now()
+	f.requests.stored.Status, f.requests.stored.CheckedAt, f.requests.stored.Employment = StatusApproved, &checked, EmploymentRequired
+	f.requests.stored.ReviewReason, f.requests.stored.EmploymentReview = ReviewNoCurrentEmployment, ReviewPending
+	f.ips.result = proofingprovider.Result{Status: proofingprovider.StatusApproved}
+	req, identity, err := f.svc.AdminRequestResult(ctx, testOrg.ID, sent.Request.ID, ReviewScopeAll)
+	if err != nil || identity.Status != proofingprovider.StatusApproved || identity.FamilyName != "Jansen" {
+		t.Fatalf("AdminRequestResult = %+v, %v; want IPS's approved identity", identity, err)
+	}
+	out := newAPIResultResponse(req, identity, time.Now())
+	if out.Identity == nil || out.Status != StatusApproved || len(out.Steps) != 1 || out.Steps[0].State != StepInReview {
+		t.Errorf("API result = %s, %+v, steps %+v; want approved with the identity, the employment step in review",
+			out.Status, out.Identity, out.Steps)
+	}
+}
+
+// An age_over flow's approval carries the age answer in the identity, and a
+// rejection carries no identity at all.
+func TestAPIResultAgeOver(t *testing.T) {
+	req := Request{ID: uuid.New(), Status: StatusApproved}
+	identity := proofingprovider.Identity{
+		Result:  proofingprovider.Result{Status: proofingprovider.StatusApproved},
+		AgeOver: &proofingprovider.AgeOver{Age: 18, Over: true},
+	}
+	out := newAPIResultResponse(req, identity, time.Now())
+	if out.Identity == nil || out.Identity.AgeOver == nil || *out.Identity.AgeOver != (apiAgeOver{Age: 18, Over: true}) {
+		t.Fatalf("identity = %+v, want ageOver 18, over", out.Identity)
+	}
+	if out.Identity.BirthDate != "" {
+		t.Errorf("birthDate = %q, want none", out.Identity.BirthDate)
+	}
+
+	identity.Status = proofingprovider.StatusRejected
+	if out := newAPIResultResponse(req, identity, time.Now()); out.Identity != nil {
+		t.Errorf("rejected identity = %+v, want none", out.Identity)
+	}
+
+	// A check waiting for review shows its reviewer the same identity.
+	if got := newAPIIdentity(identity); got.AgeOver == nil || *got.AgeOver != (apiAgeOver{Age: 18, Over: true}) {
+		t.Errorf("identity in review = %+v, want ageOver 18, over", got)
+	}
+}
+
+// A result carries only what the flow produced: no empty steps or diplomas,
+// and chip checks only on a chip read.
+func TestAPIResultLeavesOutWhatTheFlowHasNot(t *testing.T) {
+	req := Request{ID: uuid.New(), Status: StatusApproved}
+	for evidenceType, wantChip := range map[string]bool{
+		proofingprovider.EvidenceEMRTD:         true,
+		proofingprovider.EvidenceYivi:          false,
+		proofingprovider.EvidenceDocumentPhoto: false,
+	} {
+		identity := proofingprovider.Identity{
+			Result: proofingprovider.Result{Status: proofingprovider.StatusApproved},
+			Evidence: &proofingprovider.Evidence{
+				Type: evidenceType, PassiveAuth: proofingprovider.CheckNotPerformed, ActiveAuth: proofingprovider.CheckNotPerformed,
+			},
+		}
+		out := newAPIResultResponse(req, identity, time.Now())
+		out.Diplomas = newDiplomaResponses(nil)
+		raw, err := json.Marshal(out)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got map[string]any
+		if err := json.Unmarshal(raw, &got); err != nil {
+			t.Fatal(err)
+		}
+		for _, key := range []string{"steps", "diplomas"} {
+			if _, ok := got[key]; ok {
+				t.Errorf("%s: result carries an empty %s", evidenceType, key)
+			}
+		}
+		entry := got["evidence"].([]any)[0].(map[string]any)
+		if _, ok := entry["passiveAuth"]; ok != wantChip {
+			t.Errorf("%s: passiveAuth present = %v, want %v", evidenceType, ok, wantChip)
+		}
+		if _, ok := entry["activeAuth"]; ok != wantChip {
+			t.Errorf("%s: activeAuth present = %v, want %v", evidenceType, ok, wantChip)
+		}
+	}
+}

@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"net/url"
+
+	"github.com/google/uuid"
 )
 
 // The external-signee flow. An external signee is a party outside the organisation
@@ -14,6 +16,16 @@ import (
 // they run exactly the ceremonies a member runs — link a QTSP credential with their
 // own EUDI wallet, then sign the current document — which is what makes the finished
 // PDF carry one incremental PAdES signature per signer regardless of kind.
+
+// ExternalRequestID is the request an external signee's token signs, for
+// following its changes.
+func (s *Service) ExternalRequestID(ctx context.Context, token string) (uuid.UUID, error) {
+	_, req, err := s.externalSigner(ctx, token)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	return req.ID, nil
+}
 
 // ExternalView returns what the external signing page shows behind an invitation
 // link, or ErrInvalidToken when the link is unknown or expired.
@@ -37,6 +49,7 @@ func (s *Service) ExternalView(ctx context.Context, token string) (ExternalView,
 		Mode:         req.Mode,
 		SignerCount:  len(req.Signers),
 		CreatedAt:    req.CreatedAt,
+		ReturnURL:    returnLink(req, *me),
 	}
 	for _, sg := range req.Signers {
 		if sg.Status == SignerSigned {
@@ -54,7 +67,7 @@ func (s *Service) ExternalView(ctx context.Context, token string) (ExternalView,
 		}
 		view.OrgName = name
 	}
-	if _, err := s.store.GetCredential(ctx, ext.OrgID, externalSubject(me.Email)); err == nil {
+	if _, err := s.linkedCredential(ctx, ext.OrgID, externalSubject(me.Email)); err == nil {
 		view.HasCredential = true
 	} else if !errors.Is(err, ErrNoCredential) {
 		return ExternalView{}, err

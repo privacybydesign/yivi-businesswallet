@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { absoluteApiUrl, request } from "./http";
+import { absoluteApiUrl, ApiError, request } from "./http";
 
 export const departmentSchema = z.object({
   id: z.string(),
@@ -25,6 +25,9 @@ export const organizationSchema = z.object({
   // Only the list endpoints carry the org's theme logo path (absent when the org
   // has no logo, or on single-org endpoints), so the org switcher can show it.
   logoUri: z.string().optional(),
+  // A platform admin put the org in test mode: its identity proofing runs as
+  // test sessions, kept apart from its real ones.
+  testMode: z.boolean(),
 });
 
 export type Organization = z.infer<typeof organizationSchema>;
@@ -49,11 +52,81 @@ function withAbsoluteAvatar<T extends { avatarUri: string }>(subject: T): T {
     : subject;
 }
 
+// The caller's own re-identification state in this organisation. It rides on
+// the org detail because a plain member cannot read the member list, and it is
+// what the in-app banner is driven from.
+export const ownIdentityStateSchema = z.object({
+  status: z.string(),
+  dueAt: z.string().nullable(),
+});
+
+export type OwnIdentityState = z.infer<typeof ownIdentityStateSchema>;
+
+// The caller's own VOG screening state in this organisation, mirroring
+// ownIdentityStateSchema for the same reason: it rides on the org detail
+// because a plain member cannot read the member list.
+export const ownVogStateSchema = z.object({
+  status: z.string(),
+  validUntil: z.string().nullable(),
+  acceptCredential: z.boolean(),
+  // No date of birth on file yet: a VOG cannot be matched until the member
+  // identifies (on the VOG page, or combined with the credential disclosure).
+  needsIdentity: z.boolean(),
+});
+
+export type OwnVogState = z.infer<typeof ownVogStateSchema>;
+
 export const organizationDetailSchema = organizationSchema.extend({
   role: z.string(),
+  // Whether the caller decides identity checks and data requests: an admin, or
+  // a member an admin gave the reviewer right.
+  canReview: z.boolean(),
+  // Absent for a platform admin who is not a member of the org.
+  identity: ownIdentityStateSchema.optional(),
+  vog: ownVogStateSchema.optional(),
 });
 
 export type OrganizationDetail = z.infer<typeof organizationDetailSchema>;
+
+// Member type and re-identification status, mirrored from the backend
+// (internal/organization/organization.go). Status is derived server-side from
+// the identity timestamps, never stored, so it is read-only here.
+export const MEMBER_TYPES = ["employee", "external"] as const;
+
+export type MemberType = (typeof MEMBER_TYPES)[number];
+
+export const IDENTITY_STATUSES = [
+  "never",
+  "verified",
+  "due_soon",
+  "overdue",
+  "requested",
+] as const;
+
+export type IdentityStatus = (typeof IDENTITY_STATUSES)[number];
+
+// A status the backend adds and this list omits must not fail the whole member
+// list, so the schema falls back to the value verbatim and the UI renders it as
+// a neutral badge (see identityStatusTone).
+const identityStatusSchema = z.string();
+
+const memberIdentityFields = {
+  memberType: z.string(),
+  externalOrganisation: z.string().nullable(),
+  identityStatus: identityStatusSchema,
+  identityDueAt: z.string().nullable(),
+  identityRequestedAt: z.string().nullable(),
+};
+
+// A status the backend adds and this list omits must not fail the whole member
+// list, same reasoning as identityStatusSchema.
+const vogStatusSchema = z.string();
+
+const memberVogFields = {
+  vogStatus: vogStatusSchema,
+  vogValidUntil: z.string().nullable(),
+  vogRequestedAt: z.string().nullable(),
+};
 
 export const memberSchema = z.object({
   userId: z.string(),
@@ -66,7 +139,13 @@ export const memberSchema = z.object({
   departmentId: z.string().nullable(),
   departmentName: z.string().nullable(),
   phone: z.string().nullable(),
+  canReview: z.boolean(),
   verified: z.boolean(),
+  identityVerifiedAt: z.string().nullable(),
+  identityRequestedBy: z.string().nullable(),
+  ...memberIdentityFields,
+  ...memberVogFields,
+  vogRequestedBy: z.string().nullable(),
   avatarUri: z.string(),
 });
 
@@ -88,7 +167,11 @@ export const memberListEntrySchema = z.object({
   expiresAt: z.string().nullable(),
   invitedBy: z.string().nullable(),
   phone: z.string().nullable(),
+  canReview: z.boolean(),
   verified: z.boolean(),
+  identityVerifiedAt: z.string().nullable(),
+  ...memberIdentityFields,
+  ...memberVogFields,
   avatarUri: z.string(),
 });
 
@@ -97,6 +180,9 @@ export type MemberListEntry = z.infer<typeof memberListEntrySchema>;
 export const memberListPageSchema = z.object({
   entries: z.array(memberListEntrySchema),
   total: z.number(),
+  // The org's totals per status, whatever the list is narrowed to.
+  activeTotal: z.number(),
+  invitedTotal: z.number(),
 });
 
 export type MemberListPage = z.infer<typeof memberListPageSchema>;
@@ -150,6 +236,23 @@ export function deleteOrganization(
     method: "DELETE",
     signal,
   });
+}
+
+// setOrganizationTestMode moves an org into or out of test mode (platform-admin only).
+export function setOrganizationTestMode(
+  id: string,
+  testMode: boolean,
+  signal?: AbortSignal,
+): Promise<Organization> {
+  return request(
+    `/api/v1/admin/organizations/${encodeURIComponent(id)}/test-mode`,
+    {
+      schema: organizationSchema,
+      method: "PUT",
+      body: { testMode },
+      signal,
+    },
+  );
 }
 
 export function getOrganization(
@@ -225,6 +328,8 @@ export function inviteMember(
     role?: string;
     jobTitle?: string;
     departmentId?: string;
+    memberType?: MemberType;
+    externalOrganisation?: string;
   },
   signal?: AbortSignal,
 ): Promise<void> {
@@ -290,6 +395,382 @@ export function revokeInvitation(
     `/api/v1/orgs/${encodeURIComponent(slug)}/invitations/${encodeURIComponent(invitationId)}`,
     { schema: z.void(), method: "DELETE", signal },
   );
+}
+
+// --- Re-identification lifecycle (#240) ---
+
+// An org's re-identification policy. `configured` is false until an admin saves
+// one, in which case the feature is off: no due dates, no reminders.
+export const identitySettingsSchema = z.object({
+  configured: z.boolean(),
+  employeeIntervalMonths: z.number().nullable(),
+  externalIntervalMonths: z.number().nullable(),
+  reminderDaysBefore: z.array(z.number()),
+  overdueReminderIntervalDays: z.number(),
+  overdueReminderMaxCount: z.number(),
+  credentialMaxAgeDays: z.number().nullable(),
+  overdueConsequence: z.string(),
+  updatedAt: z.string().optional(),
+});
+
+export type IdentitySettings = z.infer<typeof identitySettingsSchema>;
+
+export const OVERDUE_CONSEQUENCES = ["flag", "block"] as const;
+
+export type OverdueConsequence = (typeof OVERDUE_CONSEQUENCES)[number];
+
+export interface IdentitySettingsInput {
+  employeeIntervalMonths: number | null;
+  externalIntervalMonths: number | null;
+  reminderDaysBefore: number[];
+  overdueReminderIntervalDays: number;
+  overdueReminderMaxCount: number;
+  credentialMaxAgeDays: number | null;
+  overdueConsequence: OverdueConsequence;
+}
+
+export function getIdentitySettings(
+  slug: string,
+  signal?: AbortSignal,
+): Promise<IdentitySettings> {
+  return request(`/api/v1/orgs/${encodeURIComponent(slug)}/identity-settings`, {
+    schema: identitySettingsSchema,
+    signal,
+  });
+}
+
+export function saveIdentitySettings(
+  slug: string,
+  input: IdentitySettingsInput,
+  signal?: AbortSignal,
+): Promise<IdentitySettings> {
+  return request(`/api/v1/orgs/${encodeURIComponent(slug)}/identity-settings`, {
+    schema: identitySettingsSchema,
+    method: "PUT",
+    body: input,
+    signal,
+  });
+}
+
+const requestIdentificationResultSchema = z.object({
+  requested: z.number(),
+});
+
+export type RequestIdentificationResult = z.infer<
+  typeof requestIdentificationResultSchema
+>;
+
+// requestIdentification asks one or several members to re-confirm their
+// identity now: it flips their status to `requested` and mails each of them a
+// re-identification link. The bulk route is used for more than one member so a
+// selection is one call and one audited action per member.
+export function requestIdentification(
+  slug: string,
+  userIds: string[],
+  reason?: string,
+  signal?: AbortSignal,
+): Promise<RequestIdentificationResult> {
+  const base = `/api/v1/orgs/${encodeURIComponent(slug)}/members`;
+  const single = userIds.length === 1;
+  return request(
+    single
+      ? `${base}/${encodeURIComponent(userIds[0])}/request-identification`
+      : `${base}/request-identification`,
+    {
+      schema: requestIdentificationResultSchema,
+      method: "POST",
+      body: single ? { reason } : { userIds, reason },
+      signal,
+    },
+  );
+}
+
+export function updateMemberType(
+  slug: string,
+  userId: string,
+  input: { memberType: MemberType; externalOrganisation: string | null },
+  signal?: AbortSignal,
+): Promise<Member> {
+  return request(
+    `/api/v1/orgs/${encodeURIComponent(slug)}/members/${encodeURIComponent(userId)}/type`,
+    {
+      schema: memberSchema,
+      method: "PATCH",
+      body: input,
+      signal,
+    },
+  );
+}
+
+// Gives a member the reviewer right or takes it away. Admin only.
+export function setMemberReviewRight(
+  slug: string,
+  userId: string,
+  input: { canReview: boolean },
+  signal?: AbortSignal,
+): Promise<Member> {
+  return request(
+    `/api/v1/orgs/${encodeURIComponent(slug)}/members/${encodeURIComponent(userId)}/review-right`,
+    {
+      schema: memberSchema,
+      method: "PUT",
+      body: input,
+      signal,
+    },
+  );
+}
+
+const reidentifyLinkSchema = z.object({ reidentifyUrl: z.string() });
+
+// mintOwnReidentifyLink is the in-app banner's entry point: the caller mints a
+// re-identification link for their own membership rather than waiting for the
+// e-mail, through the same token mechanism.
+export async function mintOwnReidentifyLink(
+  slug: string,
+  signal?: AbortSignal,
+): Promise<string> {
+  const { reidentifyUrl } = await request(
+    `/api/v1/orgs/${encodeURIComponent(slug)}/me/reidentify-token`,
+    { schema: reidentifyLinkSchema, method: "POST", signal },
+  );
+  return reidentifyUrl;
+}
+
+// --- Member screening / VOG (#242) ---
+
+export const SCREENING_REQUIRED_FOR = [
+  "nobody",
+  "employees",
+  "externals",
+  "both",
+] as const;
+
+export type ScreeningRequiredFor = (typeof SCREENING_REQUIRED_FOR)[number];
+
+export const RECHECK_ANCHORS = ["issue_date", "checked_at"] as const;
+
+export type RecheckAnchor = (typeof RECHECK_ANCHORS)[number];
+
+// An org's VOG screening policy. `configured` is false until an admin saves
+// one, in which case requiredFor is "nobody" - off, not defaulting to a
+// requirement no admin chose.
+export const screeningSettingsSchema = z.object({
+  configured: z.boolean(),
+  requiredFor: z.string(),
+  requiredCodes: z.array(z.string()),
+  maxAgeAtUploadDays: z.number().nullable(),
+  employeeRecheckIntervalMonths: z.number().nullable(),
+  externalRecheckIntervalMonths: z.number().nullable(),
+  recheckAnchor: z.string(),
+  reminderDaysBefore: z.array(z.number()),
+  overdueReminderIntervalDays: z.number(),
+  overdueReminderMaxCount: z.number(),
+  overdueConsequence: z.string(),
+  acceptYiviCredential: z.boolean(),
+  updatedAt: z.string().optional(),
+});
+
+export type ScreeningSettings = z.infer<typeof screeningSettingsSchema>;
+
+export interface ScreeningSettingsInput {
+  requiredFor: ScreeningRequiredFor;
+  requiredCodes: string[];
+  maxAgeAtUploadDays: number | null;
+  employeeRecheckIntervalMonths: number | null;
+  externalRecheckIntervalMonths: number | null;
+  recheckAnchor: RecheckAnchor;
+  reminderDaysBefore: number[];
+  overdueReminderIntervalDays: number;
+  overdueReminderMaxCount: number;
+  overdueConsequence: OverdueConsequence;
+  acceptYiviCredential: boolean;
+}
+
+export function getScreeningSettings(
+  slug: string,
+  signal?: AbortSignal,
+): Promise<ScreeningSettings> {
+  return request(
+    `/api/v1/orgs/${encodeURIComponent(slug)}/screening-settings`,
+    {
+      schema: screeningSettingsSchema,
+      signal,
+    },
+  );
+}
+
+export function saveScreeningSettings(
+  slug: string,
+  input: ScreeningSettingsInput,
+  signal?: AbortSignal,
+): Promise<ScreeningSettings> {
+  return request(
+    `/api/v1/orgs/${encodeURIComponent(slug)}/screening-settings`,
+    {
+      schema: screeningSettingsSchema,
+      method: "PUT",
+      body: input,
+      signal,
+    },
+  );
+}
+
+const requestVogResultSchema = z.object({ requested: z.number() });
+
+export type RequestVogResult = z.infer<typeof requestVogResultSchema>;
+
+// requestVog asks one or several members to submit a VOG now: it flips their
+// status to `requested` and mails each of them a VOG link (/vog/<token>). The bulk
+// route is used for more than one member, mirroring requestIdentification.
+export function requestVog(
+  slug: string,
+  userIds: string[],
+  reason?: string,
+  signal?: AbortSignal,
+): Promise<RequestVogResult> {
+  const base = `/api/v1/orgs/${encodeURIComponent(slug)}/members`;
+  const single = userIds.length === 1;
+  return request(
+    single
+      ? `${base}/${encodeURIComponent(userIds[0])}/request-vog`
+      : `${base}/request-vog`,
+    {
+      schema: requestVogResultSchema,
+      method: "POST",
+      body: single ? { reason } : { userIds, reason },
+      signal,
+    },
+  );
+}
+
+export const uploadVogResultSchema = z.object({
+  result: z.string(),
+  missingCodes: z.array(z.string()).optional(),
+  rejectionReason: z.string().optional(),
+});
+
+export type UploadVogResult = z.infer<typeof uploadVogResultSchema>;
+
+// The backend answers a rejected check with 422 and the same body shape a
+// passing one returns 200 with (organization/screening_upload_handler.go's
+// vogUploadStatus) - a completed check, not a failed request. `request` throws
+// on any non-2xx, so vogOutcomeFromError recovers that one expected shape;
+// anything else (network failure, 500, an unparseable body) stays a genuine
+// error for the caller to handle.
+const VOG_REJECTED_STATUS = 422;
+
+export function vogOutcomeFromError(error: unknown): UploadVogResult | null {
+  if (!(error instanceof ApiError) || error.status !== VOG_REJECTED_STATUS) {
+    return null;
+  }
+  const parsed = uploadVogResultSchema.safeParse(error.body);
+  return parsed.success ? parsed.data : null;
+}
+
+export async function resolveVogOutcome(
+  run: () => Promise<UploadVogResult>,
+): Promise<UploadVogResult> {
+  try {
+    return await run();
+  } catch (error) {
+    const outcome = vogOutcomeFromError(error);
+    if (outcome) return outcome;
+    throw error;
+  }
+}
+
+// uploadVog is an admin uploading a VOG PDF on a member's behalf; a member
+// submits their own through the VOG link (api/vog-link.ts). `result` says
+// whether it passed; a rejection is a completed check, not a thrown error.
+export function uploadVog(
+  slug: string,
+  userId: string,
+  file: File,
+  signal?: AbortSignal,
+): Promise<UploadVogResult> {
+  return resolveVogOutcome(() => {
+    const body = new FormData();
+    body.append("file", file);
+    return request(
+      `/api/v1/orgs/${encodeURIComponent(slug)}/members/${encodeURIComponent(userId)}/vog`,
+      {
+        schema: uploadVogResultSchema,
+        method: "POST",
+        body,
+        signal,
+      },
+    );
+  });
+}
+
+const vogLinkSchema = z.object({ vogUrl: z.string() });
+
+// mintOwnVogLink is the dashboard banner's entry point: the caller mints a VOG
+// link for their own membership rather than waiting for the e-mail, through
+// the same token mechanism.
+export async function mintOwnVogLink(
+  slug: string,
+  signal?: AbortSignal,
+): Promise<string> {
+  const { vogUrl } = await request(
+    `/api/v1/orgs/${encodeURIComponent(slug)}/me/vog-token`,
+    { schema: vogLinkSchema, method: "POST", signal },
+  );
+  return vogUrl;
+}
+
+export const screeningRecordSchema = z.object({
+  id: z.string(),
+  method: z.string(),
+  result: z.string(),
+  checkedAt: z.string(),
+  vogIssueDate: z.string().nullable(),
+  validUntil: z.string().nullable(),
+  coveredCodes: z.array(z.string()),
+  missingCodes: z.array(z.string()),
+  checkedBy: z.string(),
+  checkedByUserId: z.string().nullable(),
+});
+
+export type ScreeningRecord = z.infer<typeof screeningRecordSchema>;
+
+const screeningHistorySchema = z.object({
+  history: z.array(screeningRecordSchema),
+});
+
+export function getScreeningHistory(
+  slug: string,
+  userId: string,
+  signal?: AbortSignal,
+): Promise<ScreeningRecord[]> {
+  return request(
+    `/api/v1/orgs/${encodeURIComponent(slug)}/members/${encodeURIComponent(userId)}/vog/history`,
+    { schema: screeningHistorySchema, signal },
+  ).then((r) => r.history);
+}
+
+// memberInsightsSchema mirrors organization.MemberInsights: the org-wide count
+// of active members per derived identity and screening status. Keys are the
+// backend's status strings; the record shape lets a status the backend adds
+// later flow through untouched.
+export const memberInsightsSchema = z.object({
+  members: z.number(),
+  identity: z.record(z.string(), z.number()),
+  screening: z.record(z.string(), z.number()),
+});
+
+export type MemberInsights = z.infer<typeof memberInsightsSchema>;
+
+// getMemberInsights is admin-only and counts server-side: the member list is
+// paged, so tallying it in the client would undercount any org past one page.
+export function getMemberInsights(
+  slug: string,
+  signal?: AbortSignal,
+): Promise<MemberInsights> {
+  return request(`/api/v1/orgs/${encodeURIComponent(slug)}/member-insights`, {
+    schema: memberInsightsSchema,
+    signal,
+  });
 }
 
 export function getOrganizationDepartments(
@@ -365,6 +846,13 @@ export const auditEventSchema = z.object({
   targetId: z.string(),
   metadata: z.record(z.string(), z.unknown()),
   actor: auditActorSchema.nullable(),
+  // A non-user actor, e.g. `api_key:<prefix>` for an API key.
+  actorLabel: z.string().nullable().optional(),
+  // Set for an ordinary member: actor, target id and metadata are withheld,
+  // so who acted, on whom and what changed is visible to admins only.
+  detailHidden: z.boolean().optional(),
+  // An event about a test proofing session.
+  test: z.boolean().optional(),
 });
 
 export type AuditEvent = z.infer<typeof auditEventSchema>;

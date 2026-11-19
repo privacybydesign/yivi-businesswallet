@@ -8,8 +8,10 @@
 package attestation
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -25,12 +27,20 @@ var (
 	ErrNotOfferable          = errors.New("attestation: attestation is not in an offerable state")
 	ErrClaimNotFound         = errors.New("attestation: claim not found")
 	ErrHeldNotFound          = errors.New("attestation: held attestation not found")
+	ErrOfferNotFound         = errors.New("attestation: credential offer not found")
 	ErrRecipientKindMismatch = errors.New("attestation: recipient kind does not match the schema subject type")
 
 	// ErrUnknownAttribute and ErrMissingAttribute enforce data minimisation
 	// (Art 5(1)(b)): the schema's attribute list is the allow-list.
 	ErrUnknownAttribute = errors.New("attestation: attribute not declared by the schema")
 	ErrMissingAttribute = errors.New("attestation: required attribute missing")
+	// ErrInvalidAttribute rejects a non-string value for an organization-defined
+	// schema, whose attributes are all strings on the wire.
+	ErrInvalidAttribute = errors.New("attestation: attribute value must be a string")
+
+	// ErrUnknownRulebook rejects importing, or issuing from, a rulebook the
+	// catalogue does not carry.
+	ErrUnknownRulebook = errors.New("attestation: unknown rulebook")
 
 	// ErrUnknownAttributeSource guards template attribute-source bindings: a bound
 	// value must be a source token valid for the schema's subject type.
@@ -40,6 +50,9 @@ var (
 	// onboarding auto-issue set: onboarding issues to the accepting member (a
 	// natural person), so an organization-subject template can never apply.
 	ErrOnboardingSubject = errors.New("attestation: onboarding auto-issue is only supported for natural-person templates")
+	// ErrOnboardingRulebook rejects a rulebook template from the onboarding set:
+	// its claims are a full rulebook payload, which no member data can fill.
+	ErrOnboardingRulebook = errors.New("attestation: onboarding auto-issue does not support rulebook templates")
 )
 
 // LocalizedName and LocalizedLabel model the SD-JWT VC type metadata `display`
@@ -74,6 +87,10 @@ const (
 	AttributeTypeNumber  = "number"
 	AttributeTypeBoolean = "boolean"
 	AttributeTypeDate    = "date"
+	// Object and array claims only come from rulebook schemas (see the rulebook
+	// package); the schema editor does not offer them.
+	AttributeTypeObject = "object"
+	AttributeTypeArray  = "array"
 )
 
 // SupportedAttributeTypes is the allow-list for AttributeDef.Type, in the order
@@ -87,12 +104,7 @@ var SupportedAttributeTypes = []string{
 }
 
 func isSupportedAttributeType(t string) bool {
-	for _, s := range SupportedAttributeTypes {
-		if s == t {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(SupportedAttributeTypes, t)
 }
 
 // Schema is a credential-type definition an organization can issue.
@@ -113,10 +125,13 @@ type Schema struct {
 	Display            []LocalizedName `json:"display,omitempty"`
 	Qualified          bool            `json:"qualified"`
 	Status             string          `json:"status"`
-	LogoURI            string          `json:"logoUri"`
-	HasLogo            bool            `json:"-"`
-	CreatedAt          time.Time       `json:"createdAt"`
-	UpdatedAt          time.Time       `json:"updatedAt"`
+	// Rulebook is the WE BUILD rulebook id the schema was imported from; empty for
+	// an organization-defined schema.
+	Rulebook  string    `json:"rulebook,omitempty"`
+	LogoURI   string    `json:"logoUri"`
+	HasLogo   bool      `json:"-"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
 }
 
 // Logo is an uploaded credential image held in the store.
@@ -142,8 +157,11 @@ type Key struct {
 	Label          string    `json:"label"`
 	ProviderRef    string    `json:"providerRef,omitempty"`
 	Status         string    `json:"status"`
-	CreatedAt      time.Time `json:"createdAt"`
-	UpdatedAt      time.Time `json:"updatedAt"`
+	// WalletUnitAttestation names the wallet unit attesting a wallet_managed key;
+	// nil for a qualified_certificate key.
+	WalletUnitAttestation json.RawMessage `json:"walletUnitAttestation,omitempty"`
+	CreatedAt             time.Time       `json:"createdAt"`
+	UpdatedAt             time.Time       `json:"updatedAt"`
 }
 
 // Template is a named issuance preset over a schema, enriched for the list view
@@ -171,6 +189,7 @@ type Template struct {
 	SubjectType string         `json:"subjectType"`
 	Attributes  []AttributeDef `json:"attributes"`
 	Qualified   bool           `json:"qualified"`
+	Rulebook    string         `json:"rulebook,omitempty"`
 	IssuedCount int            `json:"issuedCount"`
 }
 
@@ -186,6 +205,7 @@ type TemplateDetail struct {
 	CredentialConfigID string
 	SubjectType        string
 	SchemaAttributes   []AttributeDef
+	SchemaRulebook     string
 	Qualified          bool
 }
 
@@ -205,18 +225,18 @@ type OnboardingAttestation struct {
 
 // Issued is one row of the issuance ledger (the Issued tab / Art 5(1)(m) log).
 type Issued struct {
-	ID              uuid.UUID         `json:"id"`
-	OrganizationID  uuid.UUID         `json:"organizationId"`
-	TemplateID      *uuid.UUID        `json:"templateId,omitempty"`
-	SchemaVCT       string            `json:"schemaVct"`
-	RecipientKind   string            `json:"recipientKind"`
-	RecipientUserID *uuid.UUID        `json:"recipientUserId,omitempty"`
-	RecipientRef    string            `json:"recipientRef"`
-	Attributes      map[string]string `json:"attributes"`
-	Qualified       bool              `json:"qualified"`
-	Status          string            `json:"status"`
-	Delivery        string            `json:"delivery"`
-	IssuanceID      string            `json:"-"`
+	ID              uuid.UUID      `json:"id"`
+	OrganizationID  uuid.UUID      `json:"organizationId"`
+	TemplateID      *uuid.UUID     `json:"templateId,omitempty"`
+	SchemaVCT       string         `json:"schemaVct"`
+	RecipientKind   string         `json:"recipientKind"`
+	RecipientUserID *uuid.UUID     `json:"recipientUserId,omitempty"`
+	RecipientRef    string         `json:"recipientRef"`
+	Attributes      map[string]any `json:"attributes"`
+	Qualified       bool           `json:"qualified"`
+	Status          string         `json:"status"`
+	Delivery        string         `json:"delivery"`
+	IssuanceID      string         `json:"-"`
 	// CredentialUUID is the hosted issuer's handle for the minted credential,
 	// captured on claim. It keys the issuer's status-list revocation and never
 	// leaves the backend.
@@ -241,7 +261,7 @@ type Recipient struct {
 type IssueInput struct {
 	TemplateID uuid.UUID
 	Recipient  Recipient
-	Attributes map[string]string
+	Attributes map[string]any
 	// DeliveryMethod is how a natural-person offer reaches the recipient:
 	// DeliveryMethodEmail sends a claim link by e-mail; DeliveryMethodQR shows the
 	// QR directly in the issuing UI and sends nothing. Ignored for organizations

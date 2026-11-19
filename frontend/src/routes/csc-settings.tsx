@@ -6,18 +6,24 @@ import {
   useTestCscConnectionMutation,
   useUpdateCscSettingsMutation,
 } from "../api/csc.queries";
+import { CSC_PROVIDER_KIND_BUILT_IN } from "../api/csc";
 import type { CscSettings } from "../api/csc";
 import { ApiError } from "../api/http";
-import { Button, Card, Input } from "../ui";
+import {
+  canEnableCsc,
+  cscSettingsInput,
+  initialCscBaseUrl,
+  isBuiltInCscKind,
+} from "../lib/csc-settings";
+import { Button, Card, Input, Select } from "../ui";
 import * as React from "react";
+import { draftChanged } from "../lib/form-draft";
+import { UnsavedChanges } from "./unsaved-changes";
 
 const CONFLICT_STATUS = 409;
 const BAD_GATEWAY_STATUS = 502;
 const LABEL = "text-ink-soft text-[12px] font-semibold";
 const HINT = "text-ink-soft text-[12px]";
-// Mirrors the Input base so the provider-kind select reads as the same field.
-const SELECT_CLASS =
-  "rounded-yivi border-line-strong bg-surface text-ink w-full border px-3 py-2 text-[13.5px] leading-relaxed transition-colors outline-none focus:border-ink focus:ring-ink/10 focus:ring-3 h-10";
 
 function apiMessage(error: Error): string {
   if (
@@ -46,12 +52,14 @@ function errorCode(error: unknown): string | null {
 }
 
 function saveError(error: Error, t: TFunction): string {
-  if (
-    error instanceof ApiError &&
-    error.status === CONFLICT_STATUS &&
-    errorCode(error) === "no_encryption_key"
-  ) {
-    return t("cscSettings.noEncryptionKey");
+  if (error instanceof ApiError && error.status === CONFLICT_STATUS) {
+    const code = errorCode(error);
+    if (code === "no_encryption_key") {
+      return t("cscSettings.noEncryptionKey");
+    }
+    if (code === "built_in_unavailable") {
+      return t("cscSettings.builtInUnavailable");
+    }
   }
   return t("cscSettings.saveError", { message: apiMessage(error) });
 }
@@ -71,6 +79,8 @@ function testError(error: Error, t: TFunction): string {
 // (not a computed path) keep the typed `t()` happy.
 function providerKindLabel(id: string, t: TFunction): string {
   switch (id) {
+    case CSC_PROVIDER_KIND_BUILT_IN:
+      return t("cscSettings.kinds.yivi");
     case "sample":
       return t("cscSettings.kinds.sample");
     case "custom":
@@ -83,53 +93,75 @@ function providerKindLabel(id: string, t: TFunction): string {
 // The config form seeds its state from the stored settings and is remounted (via
 // a `key` on updatedAt) whenever a save refreshes the data. The client-secret
 // field always starts empty: a stored secret is never sent back to the browser.
+// The built-in signing service has nothing to enter, so its endpoint and OAuth
+// fields give way to a line on what it is.
 function ConfigForm({
   slug,
   initial,
-}: {
+}: Readonly<{
   slug: string;
   initial: CscSettings;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const save = useUpdateCscSettingsMutation(slug);
 
   const [providerKind, setProviderKind] = useState(initial.providerKind);
-  const [baseUrl, setBaseUrl] = useState(initial.baseUrl);
+  const [baseUrl, setBaseUrl] = useState(
+    initialCscBaseUrl(initial.providerKind, initial.baseUrl),
+  );
   const [clientId, setClientId] = useState(initial.clientId);
   const [clientSecret, setClientSecret] = useState("");
   const [enabled, setEnabled] = useState(initial.enabled);
+  const builtIn = isBuiltInCscKind(providerKind);
 
   // Picking a kind pre-fills its default base URL, but only into an empty field
-  // so a typed custom endpoint is never clobbered.
+  // so a typed custom endpoint is never clobbered. The built-in service has no
+  // field to fill.
   function handleKindChange(nextKind: string): void {
     setProviderKind(nextKind);
+    if (isBuiltInCscKind(nextKind)) {
+      return;
+    }
     const preset = initial.providerKinds.find((k) => k.id === nextKind);
     if (preset && preset.defaultBaseUrl !== "" && baseUrl.trim() === "") {
       setBaseUrl(preset.defaultBaseUrl);
     }
   }
 
-  // A provider with no endpoint cannot be reached, so enabling waits for a URL.
-  const canEnable = baseUrl.trim() !== "";
+  // A remote provider with no endpoint cannot be reached, so enabling one waits
+  // for a URL.
+  const canEnable = canEnableCsc(providerKind, baseUrl);
 
   function handleSave(event: React.FormEvent<HTMLFormElement>): void {
     event.preventDefault();
     if (save.isPending) {
       return;
     }
-    const typedSecret = clientSecret.trim();
-    save.mutate({
-      enabled: canEnable && enabled,
-      providerKind,
-      baseUrl: baseUrl.trim(),
-      clientId: clientId.trim(),
-      // Blank keeps the stored secret; a typed value replaces it.
-      clientSecret: typedSecret === "" ? null : typedSecret,
-    });
+    save.mutate(
+      cscSettingsInput({
+        enabled,
+        providerKind,
+        baseUrl,
+        clientId,
+        clientSecret,
+      }),
+    );
   }
+
+  const dirty = draftChanged(
+    { providerKind, baseUrl, clientId, clientSecret, enabled },
+    {
+      providerKind: initial.providerKind,
+      baseUrl: initial.baseUrl,
+      clientId: initial.clientId,
+      clientSecret: "",
+      enabled: initial.enabled,
+    },
+  );
 
   return (
     <Card className="max-w-2xl p-7">
+      <UnsavedChanges dirty={dirty && !save.isPending} />
       <h2 className="text-[16px] font-semibold">{t("cscSettings.heading")}</h2>
       <p className="text-ink-soft mt-1 text-[13px]">
         {t("cscSettings.description")}
@@ -140,9 +172,8 @@ function ConfigForm({
           <label htmlFor="csc-provider-kind" className={LABEL}>
             {t("cscSettings.providerKind")}
           </label>
-          <select
+          <Select
             id="csc-provider-kind"
-            className={SELECT_CLASS}
             value={providerKind}
             onChange={(event) => handleKindChange(event.target.value)}
           >
@@ -151,63 +182,71 @@ function ConfigForm({
                 {providerKindLabel(kind.id, t)}
               </option>
             ))}
-          </select>
-          <p className={HINT}>{t("cscSettings.sampleHint")}</p>
-        </div>
-
-        <div className="flex flex-col gap-1">
-          <label htmlFor="csc-base-url" className={LABEL}>
-            {t("cscSettings.baseUrl")}
-          </label>
-          <Input
-            id="csc-base-url"
-            type="url"
-            value={baseUrl}
-            onChange={(event) => setBaseUrl(event.target.value)}
-            placeholder={t("cscSettings.baseUrlPlaceholder")}
-            autoComplete="off"
-            spellCheck={false}
-          />
-        </div>
-
-        <div className="flex flex-col gap-1">
-          <label htmlFor="csc-client-id" className={LABEL}>
-            {t("cscSettings.clientId")}
-          </label>
-          <Input
-            id="csc-client-id"
-            value={clientId}
-            onChange={(event) => setClientId(event.target.value)}
-            placeholder={t("cscSettings.clientIdPlaceholder")}
-            autoComplete="off"
-            spellCheck={false}
-          />
-          <p className={HINT}>{t("cscSettings.clientIdHint")}</p>
-        </div>
-
-        <div className="flex flex-col gap-1">
-          <label htmlFor="csc-client-secret" className={LABEL}>
-            {t("cscSettings.clientSecret")}
-          </label>
-          <Input
-            id="csc-client-secret"
-            type="password"
-            value={clientSecret}
-            onChange={(event) => setClientSecret(event.target.value)}
-            placeholder={
-              initial.hasClientSecret
-                ? t("cscSettings.secretUnchanged")
-                : t("cscSettings.secretPlaceholder")
-            }
-            autoComplete="off"
-            spellCheck={false}
-          />
+          </Select>
           <p className={HINT}>
-            {initial.hasClientSecret
-              ? t("cscSettings.secretStored")
-              : t("cscSettings.secretHint")}
+            {builtIn
+              ? t("cscSettings.builtInHint")
+              : t("cscSettings.sampleHint")}
           </p>
         </div>
+
+        {!builtIn && (
+          <>
+            <div className="flex flex-col gap-1">
+              <label htmlFor="csc-base-url" className={LABEL}>
+                {t("cscSettings.baseUrl")}
+              </label>
+              <Input
+                id="csc-base-url"
+                type="url"
+                value={baseUrl}
+                onChange={(event) => setBaseUrl(event.target.value)}
+                placeholder={t("cscSettings.baseUrlPlaceholder")}
+                autoComplete="off"
+                spellCheck={false}
+              />
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <label htmlFor="csc-client-id" className={LABEL}>
+                {t("cscSettings.clientId")}
+              </label>
+              <Input
+                id="csc-client-id"
+                value={clientId}
+                onChange={(event) => setClientId(event.target.value)}
+                placeholder={t("cscSettings.clientIdPlaceholder")}
+                autoComplete="off"
+                spellCheck={false}
+              />
+              <p className={HINT}>{t("cscSettings.clientIdHint")}</p>
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <label htmlFor="csc-client-secret" className={LABEL}>
+                {t("cscSettings.clientSecret")}
+              </label>
+              <Input
+                id="csc-client-secret"
+                type="password"
+                value={clientSecret}
+                onChange={(event) => setClientSecret(event.target.value)}
+                placeholder={
+                  initial.hasClientSecret
+                    ? t("cscSettings.secretUnchanged")
+                    : t("cscSettings.secretPlaceholder")
+                }
+                autoComplete="off"
+                spellCheck={false}
+              />
+              <p className={HINT}>
+                {initial.hasClientSecret
+                  ? t("cscSettings.secretStored")
+                  : t("cscSettings.secretHint")}
+              </p>
+            </div>
+          </>
+        )}
 
         <label
           className={[
@@ -246,10 +285,10 @@ function ConfigForm({
 function TestCard({
   slug,
   ready,
-}: {
+}: Readonly<{
   slug: string;
   ready: boolean;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const test = useTestCscConnectionMutation(slug);
 
@@ -292,15 +331,14 @@ function TestCard({
   );
 }
 
-// CscSettingsPanel is the org's CSC signing-provider connection settings,
-// rendered as a tab on the Settings page. The caller (Settings) has already
-// resolved the org and gated on admin, so the panel only owns the settings query
-// and its forms.
+// CscSettingsPanel is the org's signing-provider settings, rendered as a tab on
+// the Settings page. The caller (Settings) has already resolved the org and
+// gated on admin, so the panel only owns the settings query and its forms.
 export function CscSettingsPanel({
   slug,
-}: {
+}: Readonly<{
   slug: string;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const settings = useCscSettingsQuery(slug, true);
 
@@ -328,7 +366,13 @@ export function CscSettingsPanel({
         slug={slug}
         initial={settings.data}
       />
-      <TestCard slug={slug} ready={settings.data.baseUrl !== ""} />
+      <TestCard
+        slug={slug}
+        ready={
+          isBuiltInCscKind(settings.data.providerKind) ||
+          settings.data.baseUrl !== ""
+        }
+      />
     </div>
   );
 }

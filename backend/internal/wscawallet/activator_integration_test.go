@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/crypto"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/testdb"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/wsca"
@@ -20,7 +21,7 @@ func seedOrg(t *testing.T, ctx context.Context, pool *pgxpool.Pool, slug string)
 	var id uuid.UUID
 	err := pool.QueryRow(ctx, `INSERT INTO organizations (name, slug, kvk_number, euid, digital_address)
 		VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-		slug, slug, "kvk-"+slug, "NL.KVK."+slug, slug+"@qerds.localhost").Scan(&id)
+		slug, slug, "kvk-"+slug, "NLNHR."+slug, slug+"@qerds.localhost").Scan(&id)
 	if err != nil {
 		t.Fatalf("create org %q: %v", slug, err)
 	}
@@ -40,7 +41,7 @@ func TestActivatorActivateRotate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cipher: %v", err)
 	}
-	store := wsca.NewStore(pool, cipher)
+	store := wsca.NewStore(pool, cipher, audit.NopRecorder{})
 	fake := &fakeWallet{}
 	a := NewActivator(true, func(uuid.UUID) (WalletClient, error) { return fake, nil }, store)
 
@@ -97,7 +98,7 @@ func TestActivatorRotateNotActivated(t *testing.T) {
 		t.Fatalf("cipher: %v", err)
 	}
 	fake := &fakeWallet{}
-	a := NewActivator(true, func(uuid.UUID) (WalletClient, error) { return fake, nil }, wsca.NewStore(pool, cipher))
+	a := NewActivator(true, func(uuid.UUID) (WalletClient, error) { return fake, nil }, wsca.NewStore(pool, cipher, audit.NopRecorder{}))
 
 	if _, err := a.Rotate(ctx, org, "123456", "654321"); !errors.Is(err, wsca.ErrNotActivated) {
 		t.Fatalf("Rotate before activate = %v, want ErrNotActivated", err)

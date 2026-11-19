@@ -11,10 +11,12 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/privacybydesign/irmago/eudi"
@@ -25,6 +27,8 @@ import (
 	"gorm.io/datatypes"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/safehttp"
 )
 
 const (
@@ -38,6 +42,11 @@ const (
 	// engineMaxOpenConns bounds each per-org engine's pool so many orgs don't
 	// exhaust Postgres connections (the per-org-engine isolation trade-off).
 	engineMaxOpenConns = 4
+	// engineConnMaxIdleTime closes a per-org engine's idle connections. Engines
+	// stay cached for the life of the process, and the held status sweep opens
+	// one for every holder org, so without it each would keep its idle
+	// connections open until shutdown.
+	engineConnMaxIdleTime = time.Minute
 	// fsKeyLabel domain-separates the per-org filesystem key derivation.
 	fsKeyLabel = "ybw-eudiholder-fs-key-v1:"
 	// emptyJSONPayload is the not-null default for a credential with no processed
@@ -68,7 +77,7 @@ type Engine struct {
 	engines map[uuid.UUID]irmastorage.Storage
 	// opening holds a per-org lock that serializes concurrent cold opens of the
 	// same org (so two callers don't both AutoMigrate it). One entry per org ever
-	// seen — bounded by org count, so it is never pruned.
+	// seen — bounded by org count, pruned only by DropOrganization.
 	opening map[uuid.UUID]*sync.Mutex
 
 	// redeem configures the OpenID4VCI holder-redemption path (QERDS receive).
@@ -76,6 +85,9 @@ type Engine struct {
 	// httpClient is the client the holder uses to reach the issuer's token and
 	// credential endpoints.
 	httpClient *http.Client
+	// statusClient fetches Token Status Lists: their URIs come from the
+	// credentials, so it is held to redeem's safehttp policy.
+	statusClient *http.Client
 	// sessionCounter yields a unique session id per redemption.
 	sessionCounter atomic.Uint64
 	// wsca, when set, backs holder binding keys with the wallet-provider WSCA/HSM
@@ -88,12 +100,16 @@ type Engine struct {
 // received credentials against irmago's built-in production trust anchors only
 // and requires HTTPS issuer endpoints.
 type RedeemConfig struct {
-	// TrustChainPEM, when set, is the trusted-issuer CA chain received credentials
-	// are verified against — the holder analogue of the verifier's
-	// EUDI_ISSUER_CHAIN. When empty, irmago's built-in trust model is used.
+	// TrustChainPEM, when set, holds extra trusted-issuer CAs received credentials
+	// may chain to — the holder analogue of the verifier's EUDI_ISSUER_CHAIN, used
+	// to trust a partner issuer such as ver.iD. It is *added* to irmago's built-in
+	// trust model rather than replacing it, so the anchors below keep working
+	// alongside it. Concatenate to trust several partners; each self-signed
+	// certificate is taken as a root and everything else as an intermediate, so
+	// order does not matter (see mergeTrustChain).
 	TrustChainPEM []byte
 	// StagingTrustAnchors adds irmago's staging trust anchors, for dev/staging
-	// issuers (e.g. the Yivi staging Veramo issuer). Ignored when TrustChainPEM set.
+	// issuers (e.g. the Yivi staging Veramo issuer).
 	StagingTrustAnchors bool
 	// AllowInsecureHTTP permits http:// issuer endpoints; tests / local dev only.
 	AllowInsecureHTTP bool
@@ -114,13 +130,14 @@ func NewEngine(dsn, storageDir string, masterKey [32]byte, redeem RedeemConfig) 
 		eudi.Logger = logrus.New()
 	}
 	return &Engine{
-		dsn:        dsn,
-		storageDir: storageDir,
-		masterKey:  masterKey,
-		engines:    make(map[uuid.UUID]irmastorage.Storage),
-		opening:    make(map[uuid.UUID]*sync.Mutex),
-		redeem:     redeem,
-		httpClient: &http.Client{},
+		dsn:          dsn,
+		storageDir:   storageDir,
+		masterKey:    masterKey,
+		engines:      make(map[uuid.UUID]irmastorage.Storage),
+		opening:      make(map[uuid.UUID]*sync.Mutex),
+		redeem:       redeem,
+		httpClient:   &http.Client{},
+		statusClient: newStatusClient(safehttp.Policy{AllowInsecureHTTP: redeem.AllowInsecureHTTP}),
 	}
 }
 
@@ -218,6 +235,10 @@ func (e *Engine) Claims(ctx context.Context, orgID uuid.UUID, ref, vct, lang str
 	if err != nil {
 		return HeldCredential{}, err
 	}
+	nested := nestedClaimLabels(batch.CredentialMetadata, lang)
+	for i := range attributes {
+		attributes[i].NestedLabels = nested[attributes[i].Key]
+	}
 	name, logoURI := credentialDisplay(batch.CredentialMetadata, lang)
 	// The logo is the credential type's own image, not the issuer's. An issuer may
 	// have added it to newer batches only, so when this credential's own batch
@@ -296,29 +317,81 @@ func (e *Engine) Validities(ctx context.Context, orgID uuid.UUID) (map[string]He
 	if err != nil {
 		return nil, err
 	}
-	// One row per credential instance: its own id (the ref) and status bit, plus its
-	// batch's expiry — expiry is a property of the batch, revocation of the instance.
+	// One row per credential instance: its own id (the ref), its batch, its status
+	// reference and bit, plus its batch's claims. A status refresh writes back only
+	// one representative instance per batch (irmago's RevocationService), so the
+	// status facts are aggregated per batch below: a batch is revoked together.
+	// irmago picks that representative from an unordered query, so a later sweep
+	// may write a different instance than the one an earlier sweep marked
+	// suspended; the most recently checked instance is therefore the batch's
+	// status, and an OR over every instance only applies while none was checked.
 	var rows []struct {
-		ID              datatypes.UUID
-		ExpiresAt       datatypes.NullTime
-		LastKnownStatus uint8
+		ID                datatypes.UUID
+		CredentialBatchID datatypes.UUID
+		ExpiresAt         datatypes.NullTime
+		IssuedAt          datatypes.NullTime
+		Format            string
+		HasStatusList     bool
+		LastKnownStatus   uint8
+		LastStatusCheckAt *time.Time
 	}
 	if err := eng.Db().WithContext(ctx).
 		Model(&models.IssuedCredentialInstance{}).
 		Select(`issued_credential_instances.id,
+			issued_credential_instances.credential_batch_id,
 			credential_batches.expires_at,
-			issued_credential_instances.last_known_status`).
+			credential_batches.issued_at,
+			credential_batches.format,
+			issued_credential_instances.status_list_uri IS NOT NULL AS has_status_list,
+			issued_credential_instances.last_known_status,
+			issued_credential_instances.last_status_check_at`).
 		Joins(`JOIN credential_batches
 			ON credential_batches.id = issued_credential_instances.credential_batch_id`).
 		Scan(&rows).Error; err != nil {
 		return nil, fmt.Errorf("eudiholder: validities org %s: %w", orgID, err)
 	}
+	type batchStatus struct {
+		revoked, hasStatusList bool
+		// uncheckedRevoked is the OR over instances never checked, the fallback
+		// while no sweep has written any instance of the batch.
+		uncheckedRevoked bool
+		checkedAt        *time.Time
+	}
+	batches := map[datatypes.UUID]batchStatus{}
+	for _, row := range rows {
+		b := batches[row.CredentialBatchID]
+		b.hasStatusList = b.hasStatusList || row.HasStatusList
+		rowRevoked := statusRevoked(row.LastKnownStatus)
+		switch {
+		case row.LastStatusCheckAt == nil:
+			b.uncheckedRevoked = b.uncheckedRevoked || rowRevoked
+		case b.checkedAt == nil || row.LastStatusCheckAt.After(*b.checkedAt):
+			b.checkedAt = row.LastStatusCheckAt
+			b.revoked = rowRevoked
+		case row.LastStatusCheckAt.Equal(*b.checkedAt):
+			b.revoked = b.revoked || rowRevoked
+		}
+		batches[row.CredentialBatchID] = b
+	}
+	for id, b := range batches {
+		if b.checkedAt == nil {
+			b.revoked = b.uncheckedRevoked
+			batches[id] = b
+		}
+	}
 	validities := make(map[string]HeldValidity, len(rows))
 	for _, row := range rows {
-		validity := HeldValidity{Revoked: statusRevoked(row.LastKnownStatus)}
+		b := batches[row.CredentialBatchID]
+		validity := HeldValidity{
+			Format: row.Format, Revoked: b.revoked, HasStatusList: b.hasStatusList, StatusCheckedAt: b.checkedAt,
+		}
 		if row.ExpiresAt.Valid {
 			expiresAt := row.ExpiresAt.V
 			validity.ExpiresAt = &expiresAt
+		}
+		if row.IssuedAt.Valid {
+			issuedAt := row.IssuedAt.V
+			validity.IssuedAt = &issuedAt
 		}
 		validities[row.ID.String()] = validity
 	}
@@ -404,7 +477,7 @@ func (e *Engine) batchByUniqueVCT(ctx context.Context, orgID uuid.UUID, vct stri
 // claimLabels extracts, from a credential's stored issuer metadata, a map of
 // top-level payload key → display label and the metadata's claim order. It handles
 // single-segment claim paths (the flat top-level attributes the detail view shows);
-// nested-path claims are skipped (their values render as JSON under the parent).
+// nestedClaimLabels handles the longer ones.
 // Returns empty results when meta is nil (the credential carried no metadata).
 // Labels are resolved in the requested language (see pickLocaleName).
 func claimLabels(meta *models.CredentialMetadata, lang string) (map[string]string, []string) {
@@ -433,6 +506,61 @@ func claimLabels(meta *models.CredentialMetadata, lang string) (map[string]strin
 		labels[key] = pickLocaleName(names, lang)
 	}
 	return labels, order
+}
+
+// nestedClaimLabels maps each top-level key to the labels of the claims below it,
+// keyed by the rest of the path joined with "." and "[]" for an array element.
+func nestedClaimLabels(meta *models.CredentialMetadata, lang string) map[string]map[string]string {
+	out := map[string]map[string]string{}
+	if meta == nil {
+		return out
+	}
+	for _, claim := range meta.Claims {
+		key, sub, ok := nestedClaimPath(claim.Path)
+		if !ok {
+			continue
+		}
+		label := claimDisplayName(claim.Display, lang)
+		if label == "" {
+			continue
+		}
+		if out[key] == nil {
+			out[key] = map[string]string{}
+		}
+		out[key][sub] = label
+	}
+	return out
+}
+
+// nestedClaimPath splits a claim path of two or more segments into its top-level
+// key and the rest, with "[]" for an array element.
+func nestedClaimPath(raw []byte) (key, sub string, ok bool) {
+	var path []any
+	if err := json.Unmarshal(raw, &path); err != nil || len(path) < 2 {
+		return "", "", false
+	}
+	key, ok = path[0].(string)
+	if !ok || key == "" {
+		return "", "", false
+	}
+	segments := make([]string, 0, len(path)-1)
+	for _, seg := range path[1:] {
+		switch v := seg.(type) {
+		case nil, float64:
+			segments = append(segments, "[]")
+		case string:
+			segments = append(segments, v)
+		}
+	}
+	return key, strings.Join(segments, "."), true
+}
+
+func claimDisplayName(displays []models.ClaimDisplay, lang string) string {
+	names := make([]localeName, len(displays))
+	for i, d := range displays {
+		names[i] = localeName{name: d.Name, locale: d.Locale}
+	}
+	return pickLocaleName(names, lang)
 }
 
 // issuerDisplayName resolves a credential's issuer metadata display name in the
@@ -609,6 +737,37 @@ func (e *Engine) engineFor(ctx context.Context, orgID uuid.UUID) (irmastorage.St
 	return st, nil
 }
 
+// DropOrganization closes and evicts the org's cached engine, then drops its
+// schema and its filesystem storage.
+func (e *Engine) DropOrganization(ctx context.Context, orgID uuid.UUID) error {
+	e.mu.Lock()
+	lock := e.openLock(orgID)
+	e.mu.Unlock()
+	lock.Lock()
+	defer lock.Unlock()
+
+	e.mu.Lock()
+	st, ok := e.engines[orgID]
+	delete(e.engines, orgID)
+	e.mu.Unlock()
+	if ok {
+		if err := st.Close(); err != nil {
+			return fmt.Errorf("eudiholder: close engine org %s: %w", orgID, err)
+		}
+	}
+	schema := e.schemaFor(orgID)
+	if err := e.execOnDefault(ctx, `DROP SCHEMA IF EXISTS "`+schema+`" CASCADE`); err != nil {
+		return fmt.Errorf("eudiholder: drop schema %s: %w", schema, err)
+	}
+	if err := os.RemoveAll(filepath.Join(e.storageDir, schema)); err != nil {
+		return fmt.Errorf("eudiholder: remove storage org %s: %w", orgID, err)
+	}
+	e.mu.Lock()
+	delete(e.opening, orgID)
+	e.mu.Unlock()
+	return nil
+}
+
 // openLock returns the per-org open lock, creating it on first use. The caller
 // must hold e.mu.
 func (e *Engine) openLock(orgID uuid.UUID) *sync.Mutex {
@@ -637,6 +796,7 @@ func (e *Engine) open(ctx context.Context, schema string, key [32]byte) (irmasto
 	}
 	if sqlDB, err := st.Db().DB(); err == nil {
 		sqlDB.SetMaxOpenConns(engineMaxOpenConns)
+		sqlDB.SetConnMaxIdleTime(engineConnMaxIdleTime)
 	}
 	return st, nil
 }
@@ -645,19 +805,24 @@ func (e *Engine) open(ctx context.Context, schema string, key [32]byte) (irmasto
 // the default schema (irmago's AutoMigrate can only create tables in a schema
 // that already exists).
 func (e *Engine) ensureSchema(ctx context.Context, schema string) error {
+	if err := e.execOnDefault(ctx, `CREATE SCHEMA IF NOT EXISTS "`+schema+`"`); err != nil {
+		return fmt.Errorf("eudiholder: create schema %s: %w", schema, err)
+	}
+	return nil
+}
+
+// execOnDefault runs one statement on a short-lived connection to the default schema.
+func (e *Engine) execOnDefault(ctx context.Context, stmt string) error {
 	db, err := gorm.Open(postgres.Open(e.dsn), &gorm.Config{})
 	if err != nil {
-		return fmt.Errorf("eudiholder: open for schema create: %w", err)
+		return fmt.Errorf("eudiholder: open default schema: %w", err)
 	}
 	defer func() {
 		if sqlDB, err := db.DB(); err == nil {
 			_ = sqlDB.Close()
 		}
 	}()
-	if err := db.WithContext(ctx).Exec(`CREATE SCHEMA IF NOT EXISTS "` + schema + `"`).Error; err != nil {
-		return fmt.Errorf("eudiholder: create schema %s: %w", schema, err)
-	}
-	return nil
+	return db.WithContext(ctx).Exec(stmt).Error
 }
 
 // schemaFor is the per-org schema name: holder_<orgid-hex-without-hyphens>, a

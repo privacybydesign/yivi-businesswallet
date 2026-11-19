@@ -13,8 +13,8 @@ import {
   useMyInvitationsQuery,
 } from "../api/invitations.queries";
 import {
-  myOrganizationsQueryKey,
-  organizationsQueryKey,
+  invalidateOrganizationLists,
+  organizationQueryKey,
 } from "../api/organization.queries";
 import {
   Avatar,
@@ -54,11 +54,10 @@ export default function MyInvitations(): React.JSX.Element {
       {
         onSuccess: (result) => {
           if (result.status === "accepted") {
+            void invalidateOrganizationLists(queryClient);
             void queryClient.invalidateQueries({
-              queryKey: myOrganizationsQueryKey,
-            });
-            void queryClient.invalidateQueries({
-              queryKey: organizationsQueryKey,
+              queryKey: organizationQueryKey(result.organizationSlug),
+              exact: true,
             });
             void navigate(`/${result.organizationSlug}`);
             return;
@@ -134,7 +133,7 @@ export default function MyInvitations(): React.JSX.Element {
         title={t("myInvitations.title")}
         subtitle={t("myInvitations.subtitle")}
       />
-      <div className="p-8">
+      <div className="p-4 sm:p-8">
         {invitations.isPending ? (
           <p className="text-ink-soft text-[14px]">{t("common.loading")}</p>
         ) : invitations.isError ? (
@@ -146,7 +145,7 @@ export default function MyInvitations(): React.JSX.Element {
             </p>
           </Card>
         ) : invitations.data.length === 0 ? (
-          <Card className="p-8 text-center">
+          <Card className="p-6 text-center sm:p-8">
             <p className="text-ink-soft text-[14px]">
               {t("myInvitations.empty")}
             </p>
@@ -210,9 +209,9 @@ export default function MyInvitations(): React.JSX.Element {
 
 function InvitationsShell({
   children,
-}: {
+}: Readonly<{
   children: React.ReactNode;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   return (
     <>
@@ -220,8 +219,8 @@ function InvitationsShell({
         title={t("myInvitations.title")}
         subtitle={t("myInvitations.subtitle")}
       />
-      <div className="flex justify-center p-8">
-        <Card className="w-full max-w-md p-8">{children}</Card>
+      <div className="flex justify-center p-4 sm:p-8">
+        <Card className="w-full max-w-md p-6 sm:p-8">{children}</Card>
       </div>
     </>
   );

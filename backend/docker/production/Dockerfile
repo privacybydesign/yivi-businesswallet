@@ -28,7 +28,7 @@ ENV CGO_ENABLED=0
 # ATTESTATION_HOLDER_WSCA_URL boots (the default build fails that guard at
 # startup). The tag links in the private wallet-provider (walletmobile) module,
 # resolved through a Go workspace against a clone of that repo — the same
-# approach as the backend-build-wsca CI job. Pin the commit so the image is
+# approach as the go-wsca CI job. Pin the commit so the image is
 # reproducible; keep WALLET_PROVIDER_REF in sync with that job.
 ARG WALLET_PROVIDER_REF=3f463ccc34aa617ce668cc2158de6e75b1e4967c
 
@@ -65,6 +65,11 @@ RUN go build -ldflags="-s -w" -o /bin/seed ./cmd/seed
 
 # ---------- Runtime ----------
 FROM alpine:3.22
+
+# Pull in the security fixes Alpine has published since the base image was
+# built. The Grype scan in delivery.yml gates the image on fixable critical
+# CVEs, and the stock base image lags the distro's patched libssl3/libcrypto3.
+RUN apk upgrade --no-cache
 
 COPY --from=build /bin/backend /backend
 COPY --from=build /bin/migrate /migrate

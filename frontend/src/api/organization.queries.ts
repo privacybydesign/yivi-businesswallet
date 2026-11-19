@@ -6,9 +6,12 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import type {
+  QueryClient,
+  QueryKey,
   InfiniteData,
   UseInfiniteQueryResult,
   UseMutationResult,
+  UseQueryOptions,
   UseQueryResult,
 } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
@@ -16,7 +19,10 @@ import {
   createDepartment,
   deleteDepartment,
   deleteOrganization,
+  setOrganizationTestMode,
+  getIdentitySettings,
   getMemberAuditEvents,
+  getMemberInsights,
   getMyOrganizations,
   getOrganization,
   getOrganizationAuditEvents,
@@ -24,23 +30,45 @@ import {
   getOrganizationMember,
   getOrganizationMembers,
   getOrganizations,
+  getScreeningHistory,
+  getScreeningSettings,
   inviteMember,
+  mintOwnReidentifyLink,
+  mintOwnVogLink,
   removeMember,
+  requestIdentification,
+  requestVog,
   resendInvitation,
   revokeInvitation,
+  saveIdentitySettings,
+  saveScreeningSettings,
+  setMemberReviewRight,
   updateDepartment,
+  updateMemberType,
   updateOrganization,
   updateOrganizationMember,
+  uploadVog,
 } from "./organization";
 import type {
   AuditEventsPage,
   Department,
+  IdentitySettings,
+  IdentitySettingsInput,
   Member,
+  MemberInsights,
   MemberListPage,
   MemberListParams,
+  MemberType,
   Organization,
   OrganizationDetail,
+  RequestIdentificationResult,
+  RequestVogResult,
+  ScreeningRecord,
+  ScreeningSettings,
+  ScreeningSettingsInput,
+  UploadVogResult,
 } from "./organization";
+import { RARELY_CHANGING_STALE_TIME_MS } from "./stale-time";
 import { toast } from "../lib/toast";
 
 export const organizationsQueryKey = ["organizations"] as const;
@@ -50,8 +78,51 @@ export function organizationQueryKey(slug: string): readonly string[] {
   return ["organizations", "detail", slug];
 }
 
+// Position of the resource name in ["organizations", "detail", slug, resource].
+const ORG_RESOURCE_KEY_INDEX = 3;
+
+// Matches the named resources of every org, for a change that is not tied to
+// one slug. Use it instead of invalidating the whole organizations prefix.
+export function orgResourceQueries(
+  ...resources: readonly string[]
+): (query: { queryKey: QueryKey }) => boolean {
+  return ({ queryKey }) =>
+    queryKey[0] === organizationsQueryKey[0] &&
+    typeof queryKey[ORG_RESOURCE_KEY_INDEX] === "string" &&
+    resources.includes(queryKey[ORG_RESOURCE_KEY_INDEX]);
+}
+
+// The org lists (all and mine) without the per-org queries under the prefix.
+export function invalidateOrganizationLists(
+  queryClient: QueryClient,
+): Promise<void[]> {
+  return Promise.all([
+    queryClient.invalidateQueries({
+      queryKey: organizationsQueryKey,
+      exact: true,
+    }),
+    queryClient.invalidateQueries({ queryKey: myOrganizationsQueryKey }),
+  ]);
+}
+
 export function organizationMembersQueryKey(slug: string): readonly string[] {
   return ["organizations", "detail", slug, "members"];
+}
+
+// A mutation that moves a member's identity or VOG status invalidates this key.
+export function memberInsightsQueryKey(slug: string): readonly string[] {
+  return ["organizations", "detail", slug, "member-insights"];
+}
+
+export function useMemberInsightsQuery(
+  slug: string,
+  enabled: boolean,
+): UseQueryResult<MemberInsights, Error> {
+  return useQuery({
+    queryKey: memberInsightsQueryKey(slug),
+    queryFn: ({ signal }) => getMemberInsights(slug, signal),
+    enabled: enabled && slug !== "",
+  });
 }
 
 export function organizationDepartmentsQueryKey(
@@ -124,8 +195,28 @@ export function useDeleteOrganizationMutation(): UseMutationResult<
     meta: { suppressErrorToast: true },
     onSuccess: () => {
       toast.success(t("toasts.organizationDeleted"));
-      void queryClient.invalidateQueries({ queryKey: organizationsQueryKey });
-      void queryClient.invalidateQueries({ queryKey: myOrganizationsQueryKey });
+      void invalidateOrganizationLists(queryClient);
+    },
+  });
+}
+
+export function useSetTestModeMutation(): UseMutationResult<
+  Organization,
+  Error,
+  { id: string; testMode: boolean }
+> {
+  const queryClient = useQueryClient();
+  const { t } = useTranslation();
+  return useMutation({
+    mutationFn: ({ id, testMode }) => setOrganizationTestMode(id, testMode),
+    onSuccess: (org) => {
+      toast.success(
+        t(org.testMode ? "toasts.testModeOn" : "toasts.testModeOff", {
+          name: org.name,
+        }),
+      );
+      // Everything the org shows changes with its mode.
+      void queryClient.invalidateQueries();
     },
   });
 }
@@ -140,10 +231,21 @@ export function useUpdateOrganizationMutation(
     meta: { suppressErrorToast: true },
     onSuccess: () => {
       toast.success(t("toasts.organizationUpdated"));
-      void queryClient.invalidateQueries({ queryKey: organizationsQueryKey });
       void queryClient.invalidateQueries({
         queryKey: organizationAuditEventsQueryKey(slug),
       });
+      // Returned so a caller's onSuccess runs once the new name has loaded.
+      return Promise.all([
+        invalidateOrganizationLists(queryClient),
+        queryClient.invalidateQueries({
+          queryKey: organizationQueryKey(slug),
+          exact: true,
+        }),
+        // The proofing mail preview is rendered with the org's name.
+        queryClient.invalidateQueries({
+          queryKey: [...organizationQueryKey(slug), "identity-proofing"],
+        }),
+      ]).then(() => undefined);
     },
   });
 }
@@ -155,17 +257,24 @@ export function useMyOrganizationsQuery(
     queryKey: myOrganizationsQueryKey,
     queryFn: ({ signal }) => getMyOrganizations(signal),
     enabled,
+    staleTime: RARELY_CHANGING_STALE_TIME_MS,
   });
+}
+
+// Shared by the hook and the route loader, so a prefetch fills the same entry.
+export function organizationQueryOptions(
+  slug: string,
+): UseQueryOptions<OrganizationDetail> {
+  return {
+    queryKey: organizationQueryKey(slug),
+    queryFn: ({ signal }) => getOrganization(slug, signal),
+  };
 }
 
 export function useOrganizationQuery(
   slug: string,
 ): UseQueryResult<OrganizationDetail, Error> {
-  return useQuery({
-    queryKey: organizationQueryKey(slug),
-    queryFn: ({ signal }) => getOrganization(slug, signal),
-    enabled: slug !== "",
-  });
+  return useQuery({ ...organizationQueryOptions(slug), enabled: slug !== "" });
 }
 
 export function useOrganizationMembersQuery(
@@ -286,6 +395,8 @@ export function useInviteMemberMutation(slug: string): UseMutationResult<
     role?: string;
     jobTitle?: string;
     departmentId?: string;
+    memberType?: MemberType;
+    externalOrganisation?: string;
   }
 > {
   const queryClient = useQueryClient();
@@ -397,5 +508,278 @@ export function useUpdateMemberMutation(slug: string): UseMutationResult<
         queryKey: memberAuditEventsQueryKey(slug, userId),
       });
     },
+  });
+}
+
+export function identitySettingsQueryKey(slug: string): readonly string[] {
+  return ["organizations", "detail", slug, "identity-settings"];
+}
+
+export function useIdentitySettingsQuery(
+  slug: string,
+  enabled: boolean,
+): UseQueryResult<IdentitySettings, Error> {
+  return useQuery({
+    queryKey: identitySettingsQueryKey(slug),
+    queryFn: ({ signal }) => getIdentitySettings(slug, signal),
+    enabled: enabled && slug !== "",
+  });
+}
+
+// Saving the policy recomputes every member's due date server-side, so the
+// member list and detail caches are invalidated alongside the settings.
+export function useSaveIdentitySettingsMutation(
+  slug: string,
+): UseMutationResult<IdentitySettings, Error, IdentitySettingsInput> {
+  const queryClient = useQueryClient();
+  const { t } = useTranslation();
+  return useMutation({
+    mutationFn: (input) => saveIdentitySettings(slug, input),
+    meta: { suppressErrorToast: true },
+    onSuccess: (settings) => {
+      toast.success(t("toasts.identitySettingsSaved"));
+      queryClient.setQueryData(identitySettingsQueryKey(slug), settings);
+      void queryClient.invalidateQueries({
+        queryKey: organizationMembersQueryKey(slug),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: organizationAuditEventsQueryKey(slug),
+      });
+    },
+  });
+}
+
+export function useRequestIdentificationMutation(
+  slug: string,
+): UseMutationResult<
+  RequestIdentificationResult,
+  Error,
+  { userIds: string[]; reason?: string }
+> {
+  const queryClient = useQueryClient();
+  const { t } = useTranslation();
+  return useMutation({
+    mutationFn: ({ userIds, reason }) =>
+      requestIdentification(slug, userIds, reason),
+    meta: { suppressErrorToast: true },
+    onSuccess: (result, { userIds }) => {
+      toast.success(
+        t("toasts.identificationRequested", { count: result.requested }),
+      );
+      void queryClient.invalidateQueries({
+        queryKey: organizationMembersQueryKey(slug),
+      });
+      for (const userId of userIds) {
+        void queryClient.invalidateQueries({
+          queryKey: organizationMemberQueryKey(slug, userId),
+        });
+      }
+      void queryClient.invalidateQueries({
+        queryKey: organizationAuditEventsQueryKey(slug),
+      });
+    },
+  });
+}
+
+// The save that follows the member's other fields: the form's first mutation
+// already toasts, so this one stays quiet on success.
+export function useSetReviewRightMutation(
+  slug: string,
+): UseMutationResult<Member, Error, { userId: string; canReview: boolean }> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ userId, canReview }) =>
+      setMemberReviewRight(slug, userId, { canReview }),
+    meta: { suppressErrorToast: true },
+    onSuccess: (member, { userId }) => {
+      queryClient.setQueryData(
+        organizationMemberQueryKey(slug, userId),
+        member,
+      );
+      void queryClient.invalidateQueries({
+        queryKey: organizationMembersQueryKey(slug),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: organizationAuditEventsQueryKey(slug),
+      });
+    },
+  });
+}
+
+export function useUpdateMemberTypeMutation(slug: string): UseMutationResult<
+  Member,
+  Error,
+  {
+    userId: string;
+    memberType: MemberType;
+    externalOrganisation: string | null;
+  }
+> {
+  const queryClient = useQueryClient();
+  const { t } = useTranslation();
+  return useMutation({
+    mutationFn: ({ userId, memberType, externalOrganisation }) =>
+      updateMemberType(slug, userId, { memberType, externalOrganisation }),
+    meta: { suppressErrorToast: true },
+    onSuccess: (member, { userId }) => {
+      toast.success(t("toasts.memberUpdated"));
+      queryClient.setQueryData(
+        organizationMemberQueryKey(slug, userId),
+        member,
+      );
+      void queryClient.invalidateQueries({
+        queryKey: organizationMembersQueryKey(slug),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: organizationAuditEventsQueryKey(slug),
+      });
+    },
+  });
+}
+
+// The member's own "re-identify now" action: it mints a link and the caller
+// navigates to it, so there is nothing to cache.
+export function useMintOwnReidentifyLinkMutation(
+  slug: string,
+): UseMutationResult<string, Error, void> {
+  return useMutation({
+    mutationFn: () => mintOwnReidentifyLink(slug),
+    meta: { suppressErrorToast: true },
+  });
+}
+
+// --- Member screening / VOG (#242) ---
+
+export function screeningSettingsQueryKey(slug: string): readonly string[] {
+  return ["organizations", "detail", slug, "screening-settings"];
+}
+
+export function useScreeningSettingsQuery(
+  slug: string,
+  enabled: boolean,
+): UseQueryResult<ScreeningSettings, Error> {
+  return useQuery({
+    queryKey: screeningSettingsQueryKey(slug),
+    queryFn: ({ signal }) => getScreeningSettings(slug, signal),
+    enabled: enabled && slug !== "",
+  });
+}
+
+// Saving the policy recomputes every member's VOG expiry server-side, so the
+// member list and detail caches are invalidated alongside the settings.
+export function useSaveScreeningSettingsMutation(
+  slug: string,
+): UseMutationResult<ScreeningSettings, Error, ScreeningSettingsInput> {
+  const queryClient = useQueryClient();
+  const { t } = useTranslation();
+  return useMutation({
+    mutationFn: (input) => saveScreeningSettings(slug, input),
+    meta: { suppressErrorToast: true },
+    onSuccess: (settings) => {
+      toast.success(t("toasts.screeningSettingsSaved"));
+      queryClient.setQueryData(screeningSettingsQueryKey(slug), settings);
+      void queryClient.invalidateQueries({
+        queryKey: organizationMembersQueryKey(slug),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: organizationAuditEventsQueryKey(slug),
+      });
+    },
+  });
+}
+
+export function useRequestVogMutation(
+  slug: string,
+): UseMutationResult<
+  RequestVogResult,
+  Error,
+  { userIds: string[]; reason?: string }
+> {
+  const queryClient = useQueryClient();
+  const { t } = useTranslation();
+  return useMutation({
+    mutationFn: ({ userIds, reason }) => requestVog(slug, userIds, reason),
+    meta: { suppressErrorToast: true },
+    onSuccess: (result, { userIds }) => {
+      toast.success(t("toasts.vogRequested", { count: result.requested }));
+      void queryClient.invalidateQueries({
+        queryKey: organizationMembersQueryKey(slug),
+      });
+      for (const userId of userIds) {
+        void queryClient.invalidateQueries({
+          queryKey: organizationMemberQueryKey(slug, userId),
+        });
+      }
+      void queryClient.invalidateQueries({
+        queryKey: organizationAuditEventsQueryKey(slug),
+      });
+    },
+  });
+}
+
+// useUploadVogMutation is an admin uploading a VOG on a member's behalf. A
+// rejection is a successful response (result !== "valid"), not a thrown
+// error, so onSuccess always invalidates - the point of uploading is exactly
+// that the status may have changed.
+export function useUploadVogMutation(
+  slug: string,
+  userId: string,
+): UseMutationResult<UploadVogResult, Error, File> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (file) => uploadVog(slug, userId, file),
+    meta: { suppressErrorToast: true },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: organizationMembersQueryKey(slug),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: organizationMemberQueryKey(slug, userId),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: screeningHistoryQueryKey(slug, userId),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: memberInsightsQueryKey(slug),
+      });
+      // The caller's own VOG state rides on the org detail.
+      void queryClient.invalidateQueries({
+        queryKey: organizationQueryKey(slug),
+        exact: true,
+      });
+      void queryClient.invalidateQueries({
+        queryKey: organizationAuditEventsQueryKey(slug),
+      });
+    },
+  });
+}
+
+// The member's own "submit VOG" action from the dashboard banner: it mints a
+// link and the caller navigates to it, so there is nothing to cache.
+export function useMintOwnVogLinkMutation(
+  slug: string,
+): UseMutationResult<string, Error, void> {
+  return useMutation({
+    mutationFn: () => mintOwnVogLink(slug),
+    meta: { suppressErrorToast: true },
+  });
+}
+
+export function screeningHistoryQueryKey(
+  slug: string,
+  userId: string,
+): readonly string[] {
+  return ["organizations", "detail", slug, "members", userId, "vog-history"];
+}
+
+export function useScreeningHistoryQuery(
+  slug: string,
+  userId: string,
+  enabled: boolean,
+): UseQueryResult<ScreeningRecord[], Error> {
+  return useQuery({
+    queryKey: screeningHistoryQueryKey(slug, userId),
+    queryFn: ({ signal }) => getScreeningHistory(slug, userId, signal),
+    enabled: enabled && slug !== "" && userId !== "",
   });
 }

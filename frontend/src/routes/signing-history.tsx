@@ -14,6 +14,7 @@ import {
   channelLabel,
   deliveryStatusLabel,
   requestStatusLabel,
+  requestedByLabel,
 } from "../lib/signing-labels";
 import { useWhenFormatter } from "../lib/format-when";
 import { toast } from "../lib/toast";
@@ -27,10 +28,10 @@ const COLUMN_COUNT = 6;
 export function SigningHistoryPanel({
   slug,
   enabled,
-}: {
+}: Readonly<{
   slug: string;
   enabled: boolean;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const history = useSigningRequestsQuery(slug, enabled);
   const requests = history.data?.pages.flatMap((p) => p.requests ?? []) ?? [];
@@ -96,7 +97,7 @@ export function SigningHistoryPanel({
                       {req.filename}
                     </span>
                     <span className="text-ink-soft text-[12px]">
-                      {t("signing.requestedBy", { name: req.createdByName })}
+                      {requestedByLabel(t, req)}
                     </span>
                   </Table.Cell>
                   <Table.Cell>
@@ -109,7 +110,14 @@ export function SigningHistoryPanel({
                               ? "green"
                               : s.status === SIGNER_STATUS.failed
                                 ? "red"
-                                : "default"
+                                : s.status === SIGNER_STATUS.declined
+                                  ? "amber"
+                                  : "default"
+                          }
+                          title={
+                            s.status === SIGNER_STATUS.declined
+                              ? s.declineReason
+                              : undefined
                           }
                         >
                           {s.name || s.email}
@@ -162,7 +170,9 @@ export function SigningHistoryPanel({
   );
 }
 
-function RecipientCell({ req }: { req: SigningRequest }): React.JSX.Element {
+function RecipientCell({
+  req,
+}: Readonly<{ req: SigningRequest }>): React.JSX.Element {
   const { t } = useTranslation();
   if (req.recipientChannel === RECIPIENT_CHANNEL.none) {
     return <span className="text-ink-soft text-[12.5px]">—</span>;
@@ -179,14 +189,18 @@ function RecipientCell({ req }: { req: SigningRequest }): React.JSX.Element {
   );
 }
 
-function StatusCell({ req }: { req: SigningRequest }): React.JSX.Element {
+function StatusCell({
+  req,
+}: Readonly<{ req: SigningRequest }>): React.JSX.Element {
   const { t } = useTranslation();
   const statusTone =
     req.status === SIGNING_STATUS.completed
       ? "green"
       : req.status === SIGNING_STATUS.failed
         ? "red"
-        : "default";
+        : req.status === SIGNING_STATUS.declined
+          ? "amber"
+          : "default";
   return (
     <div className="flex flex-col gap-1">
       <Tag tone={statusTone}>{requestStatusLabel(t, req.status)}</Tag>

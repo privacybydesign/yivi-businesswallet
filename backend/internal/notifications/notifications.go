@@ -25,6 +25,7 @@ package notifications
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"time"
 
@@ -57,12 +58,7 @@ func Channels() []ChannelID {
 
 // KnownChannel reports whether id is one of the known channels.
 func KnownChannel(id ChannelID) bool {
-	for _, c := range channelIDs {
-		if c == id {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(channelIDs, id)
 }
 
 // Group is the family a subscribable event belongs to. It carries no behaviour —
@@ -114,13 +110,31 @@ var catalog = []CatalogEntry{
 	{audit.MembershipDeclined, GroupMembership},
 	{audit.MembershipRevoked, GroupMembership},
 	{audit.MembershipRoleChanged, GroupMembership},
+	// Its metadata is the right before and after, as role_changed's is the role.
+	{audit.MembershipReviewChanged, GroupMembership},
 	{audit.MembershipExpired, GroupMembership},
+	{audit.MembershipIdentityRequested, GroupMembership},
+	{audit.MembershipIdentityReverified, GroupMembership},
+	{audit.MembershipIdentityReminderSent, GroupMembership},
+	{audit.MembershipIdentityOverdue, GroupMembership},
+
+	// audit.MembershipVogRejected/.MembershipVogMismatch/.MembershipVogInsufficientScope
+	// are left out on purpose, for the same reason
+	// audit.MembershipIdentityReverifyRejected is: each concerns a document the
+	// member submitted, and that record belongs in the audit log behind access
+	// control, not a webhook payload.
+	{audit.MembershipVogRequested, GroupMembership},
+	{audit.MembershipVogChecked, GroupMembership},
+	{audit.MembershipVogReminderSent, GroupMembership},
+	{audit.MembershipVogExpired, GroupMembership},
 
 	{audit.WalletBootstrapped, GroupWallet},
 	{audit.WalletSuspended, GroupWallet},
 	{audit.WalletRevoked, GroupWallet},
 	{audit.RepresentationClaimed, GroupWallet},
 	{audit.RepresentationRevoked, GroupWallet},
+	{audit.WalletUnitActivated, GroupWallet},
+	{audit.WalletUnitRevoked, GroupWallet},
 
 	{audit.QerdsMessageSent, GroupQerds},
 	{audit.QerdsMessageReceived, GroupQerds},
@@ -147,9 +161,14 @@ var catalog = []CatalogEntry{
 	// org's own document filename, the signing mode, signer counts, and redaction-safe
 	// status/error strings (see internal/signing/store.go) — never the disclosed legal
 	// identity that keeps signing.signed / accept_rejected out of this list.
+	// signing.declined is the one exception with a person-authored payload — the
+	// decline reason — and that free text is kept out of the audit metadata
+	// entirely (see DeclineSigner), so what this list admits is only ever a
+	// signer id and a status, same shape as the rest.
 	{audit.SigningRequested, GroupSigning},
 	{audit.SigningCompleted, GroupSigning},
 	{audit.SigningFailed, GroupSigning},
+	{audit.SigningDeclined, GroupSigning},
 }
 
 // subscribable indexes the catalog for the per-event lookup on the write path.

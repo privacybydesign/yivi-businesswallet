@@ -1,6 +1,8 @@
 package attestation
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 )
@@ -25,7 +27,7 @@ type CredentialOfferEnvelope struct {
 	// pre-authorized_code, so the receiver needs nothing else to redeem it.
 	CredentialOffer string `json:"credentialOffer"`
 	// Message is a human-readable fallback for QERDS inboxes that surface the
-	// body to an operator instead of auto-redeeming.
+	// body to an operator rather than parsing the envelope.
 	Message string `json:"message,omitempty"`
 }
 
@@ -37,7 +39,7 @@ func MarshalCredentialOfferEnvelope(senderOrgName, credentialName, offerURI stri
 		CredentialName:  credentialName,
 		CredentialOffer: offerURI,
 		Message: fmt.Sprintf(
-			"%s has offered your organization a credential (%s). Your business wallet adds it automatically.",
+			"%s has offered your organization a credential (%s). Accept the offer in your business wallet to add it.",
 			senderOrgName, credentialName),
 	}
 	b, err := json.Marshal(env)
@@ -58,6 +60,54 @@ func ParseCredentialOfferEnvelope(body string) (CredentialOfferEnvelope, bool) {
 	}
 	if env.Type != credentialOfferEnvelopeType || env.CredentialOffer == "" {
 		return CredentialOfferEnvelope{}, false
+	}
+	return env, true
+}
+
+// offerDeclinedEnvelopeType marks the QERDS body a receiving organization sends
+// back to the issuer when it declines a credential offer.
+const offerDeclinedEnvelopeType = "eaa-credential-offer-declined/v1"
+
+// OfferDeclinedEnvelope tells the issuer which of its offers was declined. It
+// carries the offer's hash, not the offer: the deeplink is a one-time bearer
+// token and would otherwise sit in the issuer's QERDS inbox.
+type OfferDeclinedEnvelope struct {
+	Type           string `json:"type"`
+	CredentialName string `json:"credentialName"`
+	OfferHash      string `json:"offerHash"`
+	Message        string `json:"message,omitempty"`
+}
+
+// OfferHash is the hex SHA-256 of an offer deeplink, as OfferDeclinedEnvelope
+// carries it.
+func OfferHash(offerURI string) string {
+	sum := sha256.Sum256([]byte(offerURI))
+	return hex.EncodeToString(sum[:])
+}
+
+// MarshalOfferDeclinedEnvelope builds the QERDS body declining offerURI.
+func MarshalOfferDeclinedEnvelope(receiverOrgName, credentialName, offerURI string) (string, error) {
+	env := OfferDeclinedEnvelope{
+		Type:           offerDeclinedEnvelopeType,
+		CredentialName: credentialName,
+		OfferHash:      OfferHash(offerURI),
+		Message:        fmt.Sprintf("%s declined the credential you offered (%s).", receiverOrgName, credentialName),
+	}
+	b, err := json.Marshal(env)
+	if err != nil {
+		return "", fmt.Errorf("attestation: marshal offer declined envelope: %w", err)
+	}
+	return string(b), nil
+}
+
+// ParseOfferDeclinedEnvelope reports whether body is an offer-declined envelope.
+func ParseOfferDeclinedEnvelope(body string) (OfferDeclinedEnvelope, bool) {
+	var env OfferDeclinedEnvelope
+	if err := json.Unmarshal([]byte(body), &env); err != nil {
+		return OfferDeclinedEnvelope{}, false
+	}
+	if env.Type != offerDeclinedEnvelopeType || env.OfferHash == "" {
+		return OfferDeclinedEnvelope{}, false
 	}
 	return env, true
 }

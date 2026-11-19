@@ -1,6 +1,7 @@
 package email
 
 import (
+	"maps"
 	"strings"
 	"testing"
 )
@@ -42,6 +43,47 @@ func sampleVars(kind Kind) map[string]string {
 			varOrgName:      "Acme BV",
 			varDocumentName: "Contract.pdf",
 			varSigningURL:   "https://wallet.example.org/acme/signing",
+		}
+	case KindSignatureDeclined:
+		return map[string]string{
+			varOrgName:      "Acme BV",
+			varDocumentName: "Contract.pdf",
+			varSignerName:   "Sam Jansen",
+			varReason:       "I no longer agree with the terms.",
+			varSigningURL:   "https://wallet.example.org/acme/signing",
+		}
+	case KindIdentityReminder, KindIdentityOverdue:
+		return map[string]string{
+			varOrgName:       "Acme BV",
+			varReidentifyURL: "https://wallet.example.org/reidentify/abc",
+			varDueDate:       "2026-08-01",
+		}
+	case KindIdentityRequested:
+		return map[string]string{
+			varOrgName:       "Acme BV",
+			varReidentifyURL: "https://wallet.example.org/reidentify/abc",
+			varReason:        "Your last identity check has expired.",
+		}
+	case KindVogReminder, KindVogExpired:
+		return map[string]string{
+			varOrgName: "Acme BV",
+			varVogURL:  "https://wallet.example.org/vog/abc",
+			varDueDate: "2026-08-01",
+		}
+	case KindVogRequested:
+		return map[string]string{
+			varOrgName: "Acme BV",
+			varVogURL:  "https://wallet.example.org/vog/abc",
+			varReason:  "Your VOG has expired.",
+		}
+	case KindIdentityProofingRequested:
+		return map[string]string{
+			varOrgName:        "Acme BV",
+			varRequesterName:  "Sam de Vries",
+			varProofingURL:    "vcmrtd://verify?handover=abc&api=https%3A%2F%2Fproofing.example.org",
+			varValidMinutes:   "10",
+			varSupportContact: "support@initech.example",
+			varPrivacyURL:     "https://initech.example/privacy",
 		}
 	default:
 		return nil
@@ -297,6 +339,16 @@ func TestValidateSamplesRejectsGapsAndLeftovers(t *testing.T) {
 		varAuditURL:       "https://wallet.example.org/acme/audit-log",
 		varDocumentName:   "Contract.pdf",
 		varSigningURL:     "https://wallet.example.org/acme/signing",
+		varReidentifyURL:  "https://wallet.example.org/reidentify/sample",
+		varDueDate:        "2026-08-01",
+		varReason:         "Your last identity check has expired.",
+		varVogURL:         "https://wallet.example.org/vog/abc",
+		varSignerName:     "Sam Jansen",
+		varRequesterName:  "Sam de Vries",
+		varProofingURL:    "vcmrtd://verify?handover=sample&api=https%3A%2F%2Fproofing.example.org",
+		varValidMinutes:   "10",
+		varSupportContact: "support@example.org",
+		varPrivacyURL:     "https://example.org/privacy",
 	}
 	if err := validateSamples(complete); err != nil {
 		t.Fatalf("validateSamples on the complete set = %v, want nil", err)
@@ -311,9 +363,7 @@ func TestValidateSamplesRejectsGapsAndLeftovers(t *testing.T) {
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {
 			broken := map[string]string{}
-			for k, v := range complete {
-				broken[k] = v
-			}
+			maps.Copy(broken, complete)
 			mutate(broken)
 			if err := validateSamples(broken); err == nil {
 				t.Errorf("validateSamples(%v) = nil, want an error", broken)

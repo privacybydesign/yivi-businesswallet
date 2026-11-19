@@ -2,7 +2,7 @@ import type { HTMLAttributes, ReactNode, ThHTMLAttributes } from "react";
 import { Icon } from "./icon";
 
 const TH_CLASS =
-  "border-line bg-surface-2 text-muted border-b px-3.5 py-2.5 text-left font-mono text-[11px] font-medium tracking-[0.06em] uppercase";
+  "border-line bg-surface-2 text-muted border-b px-3.5 py-2.5 text-left font-label text-[11px] font-medium tracking-[0.06em] uppercase";
 const TD_CLASS = "border-line border-b px-3.5 py-3";
 
 export type SortDir = "asc" | "desc";
@@ -10,14 +10,14 @@ export type SortDir = "asc" | "desc";
 export function Table({
   children,
   className,
-}: {
+}: Readonly<{
   children: ReactNode;
   className?: string;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   return (
     // Wide tables scroll horizontally within their container on small screens
     // instead of forcing the whole page to overflow.
-    <div className="overflow-x-auto">
+    <div className="relative overflow-x-auto">
       <table
         className={[
           "min-w-full border-collapse text-[13.5px]",
@@ -30,7 +30,9 @@ export function Table({
   );
 }
 
-function Head({ children }: { children: ReactNode }): React.JSX.Element {
+function Head({
+  children,
+}: Readonly<{ children: ReactNode }>): React.JSX.Element {
   return (
     <thead>
       <tr>{children}</tr>
@@ -55,7 +57,7 @@ function HeaderCell({
   sortDir,
   onSort,
   ...rest
-}: HeaderCellProps): React.JSX.Element {
+}: Readonly<HeaderCellProps>): React.JSX.Element {
   const classes = [TH_CLASS, className ?? ""].join(" ");
 
   if (!onSort) {
@@ -91,7 +93,9 @@ function HeaderCell({
   );
 }
 
-function Body({ children }: { children: ReactNode }): React.JSX.Element {
+function Body({
+  children,
+}: Readonly<{ children: ReactNode }>): React.JSX.Element {
   return <tbody>{children}</tbody>;
 }
 
@@ -99,7 +103,7 @@ function Row({
   children,
   className,
   ...rest
-}: HTMLAttributes<HTMLTableRowElement>): React.JSX.Element {
+}: Readonly<HTMLAttributes<HTMLTableRowElement>>): React.JSX.Element {
   return (
     <tr className={className} {...rest}>
       {children}
@@ -118,7 +122,7 @@ function Cell({
   className,
   scope,
   ...rest
-}: CellProps): React.JSX.Element {
+}: Readonly<CellProps>): React.JSX.Element {
   const classes = [TD_CLASS, className ?? ""].join(" ");
   if (scope) {
     return (
@@ -139,10 +143,10 @@ function Cell({
 function State({
   colSpan,
   children,
-}: {
+}: Readonly<{
   colSpan: number;
   children: ReactNode;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   return (
     <tr>
       <td className="text-ink-soft px-3.5 py-3" colSpan={colSpan}>

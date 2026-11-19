@@ -10,6 +10,7 @@ import type { TeamsSettings } from "../api/teams";
 import { ApiError } from "../api/http";
 import { Button, Card, Input } from "../ui";
 import * as React from "react";
+import { UnsavedChanges } from "./unsaved-changes";
 
 const CONFLICT_STATUS = 409;
 const BAD_GATEWAY_STATUS = 502;
@@ -70,10 +71,10 @@ function testError(error: Error, t: TFunction): string {
 function WebhookForm({
   slug,
   initial,
-}: {
+}: Readonly<{
   slug: string;
   initial: TeamsSettings;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const save = useUpdateTeamsSettingsMutation(slug);
 
@@ -106,8 +107,11 @@ function WebhookForm({
     save.mutate({ webhookUrl: "", enabled: false });
   }
 
+  const dirty = webhookUrl !== "" || enabled !== initial.enabled;
+
   return (
     <Card className="max-w-2xl p-7">
+      <UnsavedChanges dirty={dirty && !save.isPending} />
       <h2 className="text-[16px] font-semibold">
         {t("teamsSettings.heading")}
       </h2>
@@ -190,10 +194,10 @@ function WebhookForm({
 function TestCard({
   slug,
   ready,
-}: {
+}: Readonly<{
   slug: string;
   ready: boolean;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const test = useSendTeamsTestMutation(slug);
 
@@ -234,9 +238,9 @@ function TestCard({
 // and its forms.
 export function TeamsSettingsPanel({
   slug,
-}: {
+}: Readonly<{
   slug: string;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const settings = useTeamsSettingsQuery(slug, true);
 

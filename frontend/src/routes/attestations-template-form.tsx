@@ -13,7 +13,7 @@ import {
   useCreateAttestationTemplateMutation,
   useUpdateAttestationTemplateMutation,
 } from "../api/attestations.queries";
-import { Button, Modal } from "../ui";
+import { Button, Modal, Select } from "../ui";
 import { control } from "../lib/attestation-form";
 import { Field } from "./attestations-fields";
 import type { TFunction } from "i18next";
@@ -106,7 +106,7 @@ export function AttestationTemplateForm({
   schemas,
   keys,
   onClose,
-}: Props): React.JSX.Element {
+}: Readonly<Props>): React.JSX.Element {
   const { t } = useTranslation();
   const isEdit = template !== undefined;
   const create = useCreateAttestationTemplateMutation(slug);
@@ -137,11 +137,13 @@ export function AttestationTemplateForm({
 
   // The attribute list to prefill: from the chosen schema when creating, or
   // baked into the template when editing.
+  // A rulebook template has none: the wizard starts from the rulebook's example.
   const attributes = useMemo<AttestationAttribute[]>(() => {
     if (isEdit && template) {
-      return template.attributes;
+      return template.rulebook === undefined ? template.attributes : [];
     }
-    return schemas.find((s) => s.id === schemaId)?.attributes ?? [];
+    const picked = schemas.find((s) => s.id === schemaId);
+    return picked?.rulebook === undefined ? (picked?.attributes ?? []) : [];
   }, [isEdit, template, schemas, schemaId]);
 
   // The subject type drives which subject fields an attribute can be copied from.
@@ -157,7 +159,7 @@ export function AttestationTemplateForm({
   const nameError = attempted && trimmedName === "";
   const schemaError = attempted && !isEdit && schemaId === "";
 
-  function handleSubmit(event: React.FormEvent<HTMLFormElement>): void {
+  function handleSubmit(event: React.SubmitEvent<HTMLFormElement>): void {
     event.preventDefault();
     setAttempted(true);
     if (pending) {
@@ -274,9 +276,9 @@ export function AttestationTemplateForm({
                 : undefined
             }
           >
-            <select
+            <Select
               id="template-schema"
-              className={`${control(schemaError)} h-9`}
+              state={schemaError ? "error" : "ok"}
               value={schemaId}
               onChange={(event) => setSchemaId(event.target.value)}
             >
@@ -288,7 +290,7 @@ export function AttestationTemplateForm({
                   {s.displayName}
                 </option>
               ))}
-            </select>
+            </Select>
           </Field>
         )}
 
@@ -307,9 +309,8 @@ export function AttestationTemplateForm({
             />
           </Field>
           <Field id="template-key" label={t("attestations.templateForm.key")}>
-            <select
+            <Select
               id="template-key"
-              className={`${control(false)} h-9`}
               value={keyMaterialId}
               onChange={(event) => setKeyMaterialId(event.target.value)}
             >
@@ -319,7 +320,7 @@ export function AttestationTemplateForm({
                   {key.label}
                 </option>
               ))}
-            </select>
+            </Select>
           </Field>
         </div>
 
@@ -354,11 +355,10 @@ export function AttestationTemplateForm({
                   >
                     <div className="flex flex-col gap-1">
                       {sourceOptions.length > 0 && (
-                        <select
+                        <Select
                           aria-label={t("attestations.templateForm.copyFrom", {
                             attribute: attribute.label || attribute.key,
                           })}
-                          className={`${control(false)} h-9`}
                           value={boundToken}
                           onChange={(event) =>
                             setSources((current) => ({
@@ -375,7 +375,7 @@ export function AttestationTemplateForm({
                               {sourceLabel(t, token)}
                             </option>
                           ))}
-                        </select>
+                        </Select>
                       )}
                       <input
                         id={`template-default-${attribute.key}`}

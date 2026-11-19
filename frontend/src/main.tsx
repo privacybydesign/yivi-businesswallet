@@ -1,57 +1,53 @@
 import { StrictMode } from "react";
 import ReactDOM from "react-dom/client";
 import { RouterProvider } from "react-router";
-import {
-  MutationCache,
-  QueryClient,
-  QueryClientProvider,
-} from "@tanstack/react-query";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { router } from "./router";
-import { setUnauthorizedHandler } from "./api/http";
-import { meQueryKey } from "./api/auth.queries";
-import { toast } from "./lib/toast";
+import { queryClient } from "./query-client";
+import { watchSystemColorScheme } from "./lib/color-scheme";
 import { Toaster } from "./ui";
-import i18n from "./i18n";
+import { i18nReady } from "./i18n";
 import "./index.css";
 
-const STALE_TIME_MS = 30_000;
+watchSystemColorScheme();
 
-// Retries are handled in the HTTP transport (idempotent GETs only), so disable
-// TanStack Query's own retry to avoid compounding attempts.
-const queryClient = new QueryClient({
-  // Safety net: any mutation that fails surfaces a toast, so an action never
-  // fails silently. Forms that show the error inline opt out via
-  // `meta: { suppressErrorToast: true }`.
-  mutationCache: new MutationCache({
-    onError: (_error, _variables, _context, mutation) => {
-      if (mutation.meta?.suppressErrorToast) {
-        return;
-      }
-      toast.error(i18n.t("toasts.error"));
-    },
-  }),
-  defaultOptions: {
-    queries: {
-      retry: false,
-      staleTime: STALE_TIME_MS,
-    },
-  },
-});
-
-// On any 401, mark the session logged-out. We set the cache to null rather than
-// invalidating: invalidating would refetch `me`, whose own 401 would re-fire
-// this handler in an endless loop.
-setUnauthorizedHandler(() => {
-  queryClient.setQueryData(meQueryKey, null);
+// A tab from before a deploy asks for chunks that no longer exist. One reload
+// fetches the new index document; a chunk still missing right after one is
+// missing for another reason, so it is left to the error page.
+const CHUNK_RELOAD_KEY = "ybw.chunkReloadAt";
+const CHUNK_RELOAD_PAUSE_MS = 60_000;
+window.addEventListener("vite:preloadError", (event) => {
+  try {
+    const last = Number(sessionStorage.getItem(CHUNK_RELOAD_KEY) ?? 0);
+    if (Date.now() - last < CHUNK_RELOAD_PAUSE_MS) {
+      return;
+    }
+    sessionStorage.setItem(CHUNK_RELOAD_KEY, String(Date.now()));
+  } catch {
+    return; // no storage to guard the reload with
+  }
+  event.preventDefault();
+  window.location.reload();
 });
 
 const root = document.getElementById("root");
 
-ReactDOM.createRoot(root!).render(
-  <StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <RouterProvider router={router} />
-      <Toaster />
-    </QueryClientProvider>
-  </StrictMode>,
-);
+function render(): void {
+  ReactDOM.createRoot(root!).render(
+    <StrictMode>
+      <QueryClientProvider client={queryClient}>
+        <RouterProvider router={router} />
+        <Toaster />
+      </QueryClientProvider>
+    </StrictMode>,
+  );
+}
+
+// Render once the language's strings are in. If that chunk fails the app still
+// renders, as an unreadable page beats a blank one.
+try {
+  await i18nReady;
+} catch (error) {
+  console.error("loading language failed", error);
+}
+render();

@@ -68,8 +68,9 @@ func (s subject) String() string {
 
 // UpsertCredential caches a signer's linked signing credential (id, certificate +
 // chain as PEM, key algo) and audits the link. The subject is an internal member or
-// an external signee; neither shares a row with the other.
-func (s *Store) UpsertCredential(ctx context.Context, orgID uuid.UUID, subj subject, cred signingprovider.Credential) error {
+// an external signee; neither shares a row with the other. providerURL is the base
+// URL of the provider that holds the credential: its id means nothing to another.
+func (s *Store) UpsertCredential(ctx context.Context, orgID uuid.UUID, subj subject, providerURL string, cred signingprovider.Credential) error {
 	certPEM := encodeCertPEM(cred.Certificate)
 	chainPEM := encodeChainPEM(cred.Chain)
 	keyAlgo := strings.Join(cred.KeyAlgo, ",")
@@ -78,22 +79,24 @@ func (s *Store) UpsertCredential(ctx context.Context, orgID uuid.UUID, subj subj
 		// The two subject kinds have their own partial unique index, so each needs its
 		// own conflict target; a single ON CONFLICT cannot name both.
 		const upsertMember = `INSERT INTO signing_credentials
-			(organization_id, user_id, credential_id, certificate_pem, chain_pem, key_algo)
-			VALUES ($1,$2,$3,$4,$5,$6)
+			(organization_id, user_id, credential_id, certificate_pem, chain_pem, key_algo, provider_base_url)
+			VALUES ($1,$2,$3,$4,$5,$6,$7)
 			ON CONFLICT (organization_id, user_id) WHERE user_id IS NOT NULL DO UPDATE SET
 				credential_id = EXCLUDED.credential_id, certificate_pem = EXCLUDED.certificate_pem,
-				chain_pem = EXCLUDED.chain_pem, key_algo = EXCLUDED.key_algo, updated_at = now()`
+				chain_pem = EXCLUDED.chain_pem, key_algo = EXCLUDED.key_algo,
+				provider_base_url = EXCLUDED.provider_base_url, updated_at = now()`
 		const upsertExternal = `INSERT INTO signing_credentials
-			(organization_id, external_email, credential_id, certificate_pem, chain_pem, key_algo)
-			VALUES ($1,$2,$3,$4,$5,$6)
+			(organization_id, external_email, credential_id, certificate_pem, chain_pem, key_algo, provider_base_url)
+			VALUES ($1,$2,$3,$4,$5,$6,$7)
 			ON CONFLICT (organization_id, lower(external_email)) WHERE user_id IS NULL DO UPDATE SET
 				credential_id = EXCLUDED.credential_id, certificate_pem = EXCLUDED.certificate_pem,
-				chain_pem = EXCLUDED.chain_pem, key_algo = EXCLUDED.key_algo, updated_at = now()`
+				chain_pem = EXCLUDED.chain_pem, key_algo = EXCLUDED.key_algo,
+				provider_base_url = EXCLUDED.provider_base_url, updated_at = now()`
 		upsert, key := upsertMember, any(subj.userID)
 		if subj.isExternal() {
 			upsert, key = upsertExternal, subj.email
 		}
-		if _, err := q.Exec(ctx, upsert, orgID, key, cred.ID, certPEM, chainPEM, keyAlgo); err != nil {
+		if _, err := q.Exec(ctx, upsert, orgID, key, cred.ID, certPEM, chainPEM, keyAlgo, providerURL); err != nil {
 			return fmt.Errorf("signing: upsert credential org %s subject %s: %w", orgID, subj, err)
 		}
 		return s.audit.Record(ctx, q, audit.SigningCredentialLinked,
@@ -102,18 +105,21 @@ func (s *Store) UpsertCredential(ctx context.Context, orgID uuid.UUID, subj subj
 	})
 }
 
-// GetCredential returns a subject's linked credential, or ErrNoCredential if none.
-func (s *Store) GetCredential(ctx context.Context, orgID uuid.UUID, subj subject) (signingprovider.Credential, error) {
+// GetCredential returns the credential a subject linked at the provider with base
+// URL providerURL, or ErrNoCredential if none. One linked at another provider does
+// not count: after the organisation changes provider its signers link again.
+func (s *Store) GetCredential(ctx context.Context, orgID uuid.UUID, subj subject, providerURL string) (signingprovider.Credential, error) {
 	const selectMember = `SELECT credential_id, certificate_pem, chain_pem, key_algo
-		FROM signing_credentials WHERE organization_id = $1 AND user_id = $2`
+		FROM signing_credentials WHERE organization_id = $1 AND user_id = $2 AND provider_base_url = $3`
 	const selectExternal = `SELECT credential_id, certificate_pem, chain_pem, key_algo
-		FROM signing_credentials WHERE organization_id = $1 AND user_id IS NULL AND lower(external_email) = $2`
+		FROM signing_credentials WHERE organization_id = $1 AND user_id IS NULL AND lower(external_email) = $2
+			AND provider_base_url = $3`
 	query, key := selectMember, any(subj.userID)
 	if subj.isExternal() {
 		query, key = selectExternal, subj.email
 	}
 	var credID, certPEM, chainPEM, keyAlgo string
-	err := s.db.QueryRow(ctx, query, orgID, key).Scan(&credID, &certPEM, &chainPEM, &keyAlgo)
+	err := s.db.QueryRow(ctx, query, orgID, key, providerURL).Scan(&credID, &certPEM, &chainPEM, &keyAlgo)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return signingprovider.Credential{}, ErrNoCredential
 	}
@@ -135,19 +141,27 @@ func (s *Store) GetCredential(ctx context.Context, orgID uuid.UUID, subj subject
 // returns the request id and the persisted signer rows — the caller needs their row
 // ids to invite the external signees, who have no user id to be addressed by.
 func (s *Store) CreateRequest(ctx context.Context, orgID, createdBy uuid.UUID, filename string, pdf []byte, mode string, signers []SignerInput, rec RecipientInput) (uuid.UUID, []Signer, error) {
+	return s.CreateRequestFrom(ctx, orgID, MemberOrigin(createdBy), filename, pdf, mode, signers, rec)
+}
+
+// CreateRequestFrom is CreateRequest for either origin: a member in the wallet, or
+// the organisation's own software with an API key.
+func (s *Store) CreateRequestFrom(ctx context.Context, orgID uuid.UUID, origin Origin, filename string, pdf []byte, mode string, signers []SignerInput, rec RecipientInput) (uuid.UUID, []Signer, error) {
 	id := uuid.New()
 	created := make([]Signer, 0, len(signers))
 	err := database.InTx(ctx, s.db, func(q database.Querier) error {
 		const insert = `INSERT INTO signing_requests
 			(id, organization_id, created_by, status, filename, original_document, signing_mode,
-			 recipient_channel, recipient_address, recipient_name, message, delivery_status)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`
+			 recipient_channel, recipient_address, recipient_name, message, delivery_status,
+			 created_via, api_key_id, notify_signers, return_url)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`
 		deliveryStatus := DeliveryNotRequested
 		if rec.Channel != ChannelNone {
 			deliveryStatus = DeliveryPending
 		}
-		if _, err := q.Exec(ctx, insert, id, orgID, createdBy, StatusAwaitingSignatures, filename, pdf, mode,
-			rec.Channel, rec.Address, rec.Name, rec.Message, deliveryStatus); err != nil {
+		if _, err := q.Exec(ctx, insert, id, orgID, origin.createdBy, StatusAwaitingSignatures, filename, pdf, mode,
+			rec.Channel, rec.Address, rec.Name, rec.Message, deliveryStatus,
+			origin.via(), origin.apiKeyID, origin.notifySigners, origin.returnURL); err != nil {
 			return fmt.Errorf("signing: create request org %s: %w", orgID, err)
 		}
 		const insertSigner = `INSERT INTO signing_request_signers
@@ -186,7 +200,7 @@ func (s *Store) CreateRequest(ctx context.Context, orgID, createdBy uuid.UUID, f
 			audit.Created(map[string]any{
 				"filename": filename, "mode": mode, "signers": len(signers),
 				"externalSigners": external, "recipientChannel": rec.Channel,
-				"placements": placements,
+				"placements": placements, "createdVia": origin.via(),
 			}))
 	})
 	if err != nil {
@@ -313,9 +327,15 @@ func (s *Store) SignerByToken(ctx context.Context, rawToken string) (externalSig
 // CompleteRequest marks the request completed (all signers signed) and audits it.
 func (s *Store) CompleteRequest(ctx context.Context, orgID, id uuid.UUID) error {
 	return database.InTx(ctx, s.db, func(q database.Querier) error {
-		const update = `UPDATE signing_requests SET status=$2, updated_at=now() WHERE id=$1`
-		if _, err := q.Exec(ctx, update, id, StatusCompleted); err != nil {
+		// Only a request still awaiting signatures completes, so one a decline
+		// ended is not brought back and none is completed, or audited, twice.
+		const update = `UPDATE signing_requests SET status=$2, updated_at=now() WHERE id=$1 AND status=$3`
+		tag, err := q.Exec(ctx, update, id, StatusCompleted, StatusAwaitingSignatures)
+		if err != nil {
 			return fmt.Errorf("signing: complete request %s: %w", id, err)
+		}
+		if tag.RowsAffected() == 0 {
+			return nil
 		}
 		return s.audit.Record(ctx, q, audit.SigningCompleted,
 			audit.Target{Type: audit.TargetSigningRequest, ID: id.String(), OrgID: &orgID},
@@ -340,6 +360,40 @@ func (s *Store) SetDelivery(ctx context.Context, orgID, id uuid.UUID, status, re
 	})
 }
 
+// StalledDelivery names a completed request whose delivery never finished.
+type StalledDelivery struct {
+	OrgID     uuid.UUID
+	RequestID uuid.UUID
+}
+
+// stalledDeliveryBatch caps one redelivery pass.
+const stalledDeliveryBatch = 50
+
+// ListStalledDeliveries returns completed requests still pending delivery
+// after olderThan: their delivery goroutine died with its process.
+func (s *Store) ListStalledDeliveries(ctx context.Context, olderThan time.Duration) ([]StalledDelivery, error) {
+	const q = `SELECT organization_id, id FROM signing_requests
+		WHERE status = $1 AND delivery_status = $2 AND updated_at < now() - make_interval(secs => $3)
+		ORDER BY updated_at LIMIT $4`
+	rows, err := s.db.Query(ctx, q, StatusCompleted, DeliveryPending, olderThan.Seconds(), stalledDeliveryBatch)
+	if err != nil {
+		return nil, fmt.Errorf("signing: list stalled deliveries: %w", err)
+	}
+	defer rows.Close()
+	var out []StalledDelivery
+	for rows.Next() {
+		var d StalledDelivery
+		if err := rows.Scan(&d.OrgID, &d.RequestID); err != nil {
+			return nil, fmt.Errorf("signing: scan stalled delivery: %w", err)
+		}
+		out = append(out, d)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("signing: stalled deliveries rows: %w", err)
+	}
+	return out, nil
+}
+
 // MarkSignerFailed marks one signer's attempt failed with a redaction-safe reason
 // and audits it. It deliberately does NOT touch the request status: an error (or
 // timeout) on one signer must leave the request awaiting_signatures and retryable,
@@ -349,9 +403,14 @@ func (s *Store) SetDelivery(ctx context.Context, orgID, id uuid.UUID, status, re
 // addresses an internal member and an external signee alike.
 func (s *Store) MarkSignerFailed(ctx context.Context, orgID, id, signerID uuid.UUID, reason string) error {
 	return database.InTx(ctx, s.db, func(q database.Querier) error {
-		const markSigner = `UPDATE signing_request_signers SET status=$3 WHERE request_id=$1 AND id=$2`
-		if _, err := q.Exec(ctx, markSigner, id, signerID, SignerFailed); err != nil {
+		// A signature that already landed stands: a late error must not undo it.
+		const markSigner = `UPDATE signing_request_signers SET status=$3 WHERE request_id=$1 AND id=$2 AND status <> $4`
+		tag, err := q.Exec(ctx, markSigner, id, signerID, SignerFailed, SignerSigned)
+		if err != nil {
 			return fmt.Errorf("signing: mark signer failed %s: %w", id, err)
+		}
+		if tag.RowsAffected() == 0 {
+			return nil
 		}
 		return s.audit.Record(ctx, q, audit.SigningFailed,
 			audit.Target{Type: audit.TargetSigningRequest, ID: id.String(), OrgID: &orgID},
@@ -361,13 +420,50 @@ func (s *Store) MarkSignerFailed(ctx context.Context, orgID, id, signerID uuid.U
 	})
 }
 
+// DeclineSigner marks one signer declined with their optional reason and ends the
+// whole request: incremental PAdES cannot produce a document a selected signer
+// refused, so a single decline is terminal rather than leaving the request
+// half-signed. Both updates are guarded so a race loses cleanly rather than
+// double-processing: a signer already marked signed reports ErrAlreadySigned, and
+// a request no longer awaiting_signatures (already declined, or completed by a
+// signature that landed first) reports ErrInvalidRequest. The reason is
+// deliberately NOT part of the audit metadata — it is free text a person wrote,
+// shown only in the app and in the requester's mail (see notifications.go's
+// data-minimisation note). signerID is the signer row's own id, so it addresses
+// an internal member and an external signee alike.
+func (s *Store) DeclineSigner(ctx context.Context, orgID, id, signerID uuid.UUID, reason string) error {
+	return database.InTx(ctx, s.db, func(q database.Querier) error {
+		const markSigner = `UPDATE signing_request_signers
+			SET status=$3, declined_at=now(), decline_reason=$4
+			WHERE request_id=$1 AND id=$2 AND status <> $5`
+		tag, err := q.Exec(ctx, markSigner, id, signerID, SignerDeclined, reason, SignerSigned)
+		if err != nil {
+			return fmt.Errorf("signing: decline signer %s: %w", id, err)
+		}
+		if tag.RowsAffected() == 0 {
+			return ErrAlreadySigned
+		}
+		const markRequest = `UPDATE signing_requests SET status=$2, updated_at=now()
+			WHERE id=$1 AND status=$3`
+		tag, err = q.Exec(ctx, markRequest, id, StatusDeclined, StatusAwaitingSignatures)
+		if err != nil {
+			return fmt.Errorf("signing: decline request %s: %w", id, err)
+		}
+		if tag.RowsAffected() == 0 {
+			return ErrInvalidRequest
+		}
+		return s.audit.Record(ctx, q, audit.SigningDeclined,
+			audit.Target{Type: audit.TargetSigningRequest, ID: id.String(), OrgID: &orgID},
+			audit.Updated(map[string]any{"status": StatusAwaitingSignatures},
+				map[string]any{"status": StatusDeclined, "signer": signerID.String()}))
+	})
+}
+
 // GetRequest returns a request's metadata (no document bytes) plus its signer rows
 // (without names — the service enriches those from the member directory). Scoped by
 // org; caller-level authorization (creator/signer/admin) is enforced above.
 func (s *Store) GetRequest(ctx context.Context, orgID, id uuid.UUID) (Request, error) {
-	const query = `SELECT id, status, filename, signing_mode, created_by, recipient_channel,
-			recipient_name, recipient_address, message, delivery_status, delivery_error, error, created_at, updated_at
-		FROM signing_requests WHERE id=$1 AND organization_id=$2`
+	const query = `SELECT ` + requestColumns + ` FROM signing_requests r WHERE r.id=$1 AND r.organization_id=$2`
 	req, updatedAt, err := scanRequest(s.db.QueryRow(ctx, query, id, orgID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Request{}, ErrNotFound
@@ -422,9 +518,7 @@ func (s *Store) GetSignedDocument(ctx context.Context, orgID, id uuid.UUID) ([]b
 // lower sign_order has already signed. Newest first.
 func (s *Store) ListPendingForUser(ctx context.Context, orgID, userID uuid.UUID) ([]Request, error) {
 	const query = `
-		SELECT r.id, r.status, r.filename, r.signing_mode, r.created_by, r.recipient_channel,
-			r.recipient_name, r.recipient_address, r.message, r.delivery_status, r.delivery_error,
-			r.error, r.created_at, r.updated_at
+		SELECT ` + requestColumns + `
 		FROM signing_requests r
 		JOIN signing_request_signers me ON me.request_id = r.id AND me.user_id = $2
 		WHERE r.organization_id = $1
@@ -460,6 +554,18 @@ const (
 // An empty cursor starts at the newest; the returned cursor is empty when there is
 // no further page.
 func (s *Store) ListRequests(ctx context.Context, orgID uuid.UUID, cursor string, limit int) ([]Request, string, error) {
+	return s.listRequests(ctx, orgID, "", cursor, limit)
+}
+
+// ListAPIRequests is ListRequests narrowed to the requests the organisation's own
+// software made with an API key, which are the ones a key may read.
+func (s *Store) ListAPIRequests(ctx context.Context, orgID uuid.UUID, cursor string, limit int) ([]Request, string, error) {
+	return s.listRequests(ctx, orgID, CreatedViaAPI, cursor, limit)
+}
+
+// listRequests pages the org's requests; a non-empty createdVia keeps only the
+// requests made that way.
+func (s *Store) listRequests(ctx context.Context, orgID uuid.UUID, createdVia, cursor string, limit int) ([]Request, string, error) {
 	if limit <= 0 || limit > maxPageLimit {
 		limit = defaultPageLimit
 	}
@@ -468,21 +574,20 @@ func (s *Store) ListRequests(ctx context.Context, orgID uuid.UUID, cursor string
 		return nil, "", err
 	}
 	var rows pgx.Rows
-	const cols = `r.id, r.status, r.filename, r.signing_mode, r.created_by, r.recipient_channel,
-		r.recipient_name, r.recipient_address, r.message, r.delivery_status, r.delivery_error,
-		r.error, r.created_at, r.updated_at`
+	const cols = requestColumns
 	if hasCursor {
 		//nolint:gosec // limit is clamped to [1,100] above.
 		query := `SELECT ` + cols + ` FROM signing_requests r
 			WHERE r.organization_id=$1 AND (r.created_at, r.id) < ($2, $3)
+				AND ($4 = '' OR r.created_via = $4)
 			ORDER BY r.created_at DESC, r.id DESC LIMIT ` + strconv.Itoa(limit+1)
-		rows, err = s.db.Query(ctx, query, orgID, curTime, curID)
+		rows, err = s.db.Query(ctx, query, orgID, curTime, curID, createdVia)
 	} else {
 		//nolint:gosec // limit is clamped to [1,100] above.
 		query := `SELECT ` + cols + ` FROM signing_requests r
-			WHERE r.organization_id=$1
+			WHERE r.organization_id=$1 AND ($2 = '' OR r.created_via = $2)
 			ORDER BY r.created_at DESC, r.id DESC LIMIT ` + strconv.Itoa(limit+1)
-		rows, err = s.db.Query(ctx, query, orgID)
+		rows, err = s.db.Query(ctx, query, orgID, createdVia)
 	}
 	if err != nil {
 		return nil, "", fmt.Errorf("signing: list requests org %s: %w", orgID, err)
@@ -544,7 +649,8 @@ func (s *Store) scanRequestList(ctx context.Context, rows pgx.Rows) ([]Request, 
 // left to the service to enrich from the member directory; an external signee carries
 // their own, since there is no directory to look them up in.
 func (s *Store) signersFor(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID][]Signer, error) {
-	const query = `SELECT request_id, id, user_id, external_email, external_name, sign_order, status, signed_at
+	const query = `SELECT request_id, id, user_id, external_email, external_name, sign_order, status,
+			signed_at, declined_at, decline_reason
 		FROM signing_request_signers WHERE request_id = ANY($1) ORDER BY request_id, sign_order, id`
 	rows, err := s.db.Query(ctx, query, ids)
 	if err != nil {
@@ -558,7 +664,7 @@ func (s *Store) signersFor(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]
 		var sg Signer
 		var email, name string
 		if err := rows.Scan(&requestID, &sg.ID, &sg.UserID, &email, &name,
-			&sg.Order, &sg.Status, &sg.SignedAt); err != nil {
+			&sg.Order, &sg.Status, &sg.SignedAt, &sg.DeclinedAt, &sg.DeclineReason); err != nil {
 			return nil, fmt.Errorf("signing: scan signer: %w", err)
 		}
 		sg.Kind = KindInternal
@@ -615,14 +721,26 @@ type scanRow interface {
 	Scan(dest ...any) error
 }
 
-// scanRequest scans one request row (in the fixed column order used above) and
-// returns the request plus its updated_at (used to derive CompletedAt).
+// requestColumns are a request's columns as every read selects them, from
+// signing_requests aliased r, in the order scanRequest reads them.
+const requestColumns = `r.id, r.status, r.filename, r.signing_mode, r.created_by, r.created_via,
+	r.notify_signers, r.return_url, r.recipient_channel, r.recipient_name, r.recipient_address,
+	r.message, r.delivery_status, r.delivery_error, r.error, r.created_at, r.updated_at`
+
+// scanRequest scans one request row (requestColumns) and returns the request plus
+// its updated_at (used to derive CompletedAt). A request made over the API has no
+// creator: its CreatedBy stays the zero id.
 func scanRequest(row scanRow) (Request, time.Time, error) {
 	var r Request
 	var updatedAt time.Time
-	err := row.Scan(&r.ID, &r.Status, &r.Filename, &r.Mode, &r.CreatedBy, &r.RecipientChannel,
+	var createdBy *uuid.UUID
+	err := row.Scan(&r.ID, &r.Status, &r.Filename, &r.Mode, &createdBy, &r.CreatedVia,
+		&r.NotifySigners, &r.ReturnURL, &r.RecipientChannel,
 		&r.RecipientName, &r.RecipientAddress, &r.Message, &r.DeliveryStatus, &r.DeliveryError,
 		&r.Error, &r.CreatedAt, &updatedAt)
+	if createdBy != nil {
+		r.CreatedBy = *createdBy
+	}
 	return r, updatedAt, err
 }
 

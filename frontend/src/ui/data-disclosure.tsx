@@ -8,6 +8,9 @@ export interface DataDisclosureItem {
   label: string;
   // Why it is shared / what it is used for (already translated).
   detail: string;
+  // The reason the party asking gives for it, under the detail: a lead-in
+  // such as "Why:" and the text (both already translated).
+  reason?: { label: string; text: string };
 }
 
 interface DataDisclosureProps {
@@ -19,7 +22,7 @@ interface DataDisclosureProps {
 // strings. Used to make identity read-out transparent before the user scans.
 export function DataDisclosure({
   items,
-}: DataDisclosureProps): React.JSX.Element {
+}: Readonly<DataDisclosureProps>): React.JSX.Element {
   return (
     <ul className="flex flex-col gap-3">
       {items.map((item) => (
@@ -34,6 +37,12 @@ export function DataDisclosure({
             <div className="text-ink-soft text-[12.5px] leading-snug">
               {item.detail}
             </div>
+            {item.reason && (
+              <div className="text-ink mt-0.5 text-[12.5px] leading-snug">
+                <span className="font-semibold">{item.reason.label}</span>{" "}
+                {item.reason.text}
+              </div>
+            )}
           </div>
         </li>
       ))}

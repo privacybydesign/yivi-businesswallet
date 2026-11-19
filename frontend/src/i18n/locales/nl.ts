@@ -11,7 +11,12 @@ type Translation<T> = {
 
 export const nl: Translation<typeof en> = {
   common: {
+    pages: "Pagina's",
+    pageRange: "{{from}}–{{to}} van {{total}}",
+    previousPage: "Vorige",
+    nextPage: "Volgende",
     cancel: "Annuleren",
+    canReview: "Mag beoordelen",
     close: "Sluiten",
     comingSoon: "Binnenkort beschikbaar",
     copy: "Kopiëren",
@@ -20,6 +25,12 @@ export const nl: Translation<typeof en> = {
     department: "Afdeling",
     edit: "Bewerken",
     jobTitle: "Functie",
+    colorScheme: "Weergave",
+    colorSchemeName: {
+      system: "Auto",
+      light: "Licht",
+      dark: "Donker",
+    },
     language: "Taal",
     languageName: {
       en: "English",
@@ -41,10 +52,17 @@ export const nl: Translation<typeof en> = {
   nav: {
     dashboard: "Dashboard",
     members: "Leden",
+    identityProofing: "Identiteitsverificatie",
+    identityProofingOverview: "Overzicht",
+    flows: "Flows",
+    reviews: "Beoordelingen",
+    reviewsWaiting: "wachtend",
+    developers: "Ontwikkelaars",
     qerds: "Veilige bezorging",
     attestations: "Attestaties",
     postguard: "PostGuard-bestanden",
     signing: "Documenten ondertekenen",
+    credentialRequests: "Gegevensverzoeken",
     auditLog: "Auditlogboek",
     adminDashboard: "Overzicht",
     allOrganizations: "Organisaties",
@@ -83,6 +101,8 @@ export const nl: Translation<typeof en> = {
       "De KVK vermeldt je niet als vertegenwoordiger van dit bedrijf, dus je kunt de wallet niet registreren.",
     alreadyRegistered:
       "Dit bedrijf heeft al een business wallet. Vraag een eigenaar om je uit te nodigen.",
+    ebwoidMismatch:
+      "De identificatiegegevens van de eigenaar (EBWOID) horen bij een ander bedrijf dan dit KVK-nummer.",
     error: "Registreren van de wallet mislukt: {{message}}",
     kind: {
       bestuurder: "Bestuurder",
@@ -208,6 +228,71 @@ export const nl: Translation<typeof en> = {
     sharesEmail: "Bij het inloggen deel je alleen je e-mailadres.",
     registerLink: "Nieuw bedrijf registreren? Registreer hier",
   },
+  openid4vp: {
+    title: "Organisatiegegevens delen",
+    starting: "Verzoek voorbereiden…",
+    requestedBy:
+      "{{verifier}} vraagt een van je organisaties om gegevens te delen.",
+    pickOrg: "Kies de organisatie die antwoordt",
+    noOrgs: "Je bent geen lid van een organisatie die kan antwoorden.",
+    selecting: "Antwoord versturen…",
+    minimisationHint:
+      "Alleen de gegevens waar de verifieerder om vraagt worden gedeeld, en pas na goedkeuring.",
+    completedTitle: "Antwoord verstuurd",
+    completedHint:
+      "{{verifier}} heeft de presentatie van je organisatie ontvangen.",
+    completedDoneHint: "Dit verzoek is beantwoord.",
+    returnToVerifier: "Terug naar {{verifier}}",
+    awaitingTitle: "Wacht op goedkeuring",
+    awaitingHint:
+      "Het antwoord wordt verstuurd zodra het binnen de organisatie is goedgekeurd.",
+    deniedTitle: "Verzoek afgewezen",
+    deniedHint: "Dit verzoek is niet ingewilligd.",
+    expiredTitle: "Dit verzoek is verlopen",
+    expiredHint: "Vraag de verifieerder om een nieuw verzoek te starten.",
+    invalidTitle: "Dit verzoek kan niet worden verwerkt",
+    startErrors: {
+      invalidInvocation:
+        "De link waarmee je hier kwam mist de parameters die een verifieerder moet meegeven.",
+      invalidRequest:
+        "Het verzoek van de verifieerder is ongeldig of gebruikt een niet-ondersteunde vorm.",
+      invalidRequestUriMethod:
+        "De verifieerder vraagt om een niet-ondersteunde manier om het verzoek op te halen.",
+      invalidRequestObject:
+        "Het verzoek van de verifieerder kon niet worden gevalideerd.",
+      requestUriUnreachable:
+        "Het verzoek van de verifieerder kon niet worden opgehaald.",
+      validationUnavailable:
+        "Deze wallet kan verzoeken van verifieerders nog niet valideren.",
+      failed: "Er ging iets mis. Probeer het opnieuw.",
+    },
+    errors: {
+      otherSession: {
+        title: "Verzoek hoort bij een andere sessie",
+        hint: "Dit verzoek is gestart door een andere ingelogde gebruiker.",
+      },
+      alreadyHandled: {
+        title: "Verzoek al afgehandeld",
+        hint: "Dit verzoek is al beantwoord of is verlopen.",
+      },
+      notFound: {
+        title: "Verzoek niet gevonden",
+        hint: "Deze link is niet geldig of het verzoek is verlopen.",
+      },
+      noMatchingCredential: {
+        title: "Geen passend credential",
+        hint: "Deze organisatie heeft geen credential dat aan het verzoek van de verifieerder voldoet.",
+      },
+      presentationFailed: {
+        title: "Antwoord kon niet worden verstuurd",
+        hint: "De presentatie kon niet bij de verifieerder worden afgeleverd. Vraag de verifieerder om een nieuw verzoek te starten.",
+      },
+      failed: {
+        title: "Er ging iets mis",
+        hint: "Het verzoek kon niet worden geladen. Probeer het opnieuw.",
+      },
+    },
+  },
   register: {
     title: "Business wallet registreren",
     subtitle: "Nieuw hier? Registreer je bedrijf — nog geen account nodig.",
@@ -232,7 +317,7 @@ export const nl: Translation<typeof en> = {
     identityIntro:
       "Bevestig je identiteit met je EU Digital Identity-wallet. Dit is precies wat je deelt:",
     disclosure: {
-      identityLabel: "Paspoort of identiteitskaart",
+      identityLabel: "Paspoort, identiteitskaart of verblijfsvergunning",
       identityDetail:
         "Bevestigt je naam, geboortedatum en nationaliteit, zodat we je kunnen koppelen aan de bij de KVK geregistreerde vertegenwoordigers van het bedrijf.",
       emailLabel: "E-mailadres",
@@ -251,6 +336,8 @@ export const nl: Translation<typeof en> = {
       "De KVK vermeldt je niet als vertegenwoordiger van dit bedrijf, dus je kunt de wallet niet registreren.",
     alreadyRegistered:
       "Dit bedrijf heeft al een business wallet. Vraag een eigenaar om je uit te nodigen.",
+    ebwoidMismatch:
+      "De identificatiegegevens van de eigenaar (EBWOID) horen bij een ander bedrijf dan dit KVK-nummer.",
     error: "Registratie kon niet worden voltooid. Probeer het opnieuw.",
     back: "Terug",
     haveAccount: "Heb je al een account? Inloggen",
@@ -314,28 +401,1941 @@ export const nl: Translation<typeof en> = {
       },
     },
   },
+  reidentify: {
+    loading: "Je heridentificatie wordt geopend…",
+    title: "Bevestig je identiteit opnieuw",
+    intro:
+      "{{org}} vraagt leden om hun identiteit af en toe opnieuw te bewijzen. Scan de code met je wallet om te bevestigen dat jij het nog bent.",
+    forEmail: "Voor {{email}}",
+    start: "Mijn identiteit bevestigen",
+    scanPrompt:
+      "Scan deze code met je wallet om je identiteit voor {{org}} te bevestigen.",
+    done: "Je identiteit is bevestigd",
+    doneHint:
+      "{{org}} heeft de bevestiging vastgelegd. Je kunt deze pagina sluiten of naar de wallet gaan.",
+    goToApp: "Naar de wallet",
+    retry: "Opnieuw proberen",
+    errors: {
+      linkTitle: "Deze link werkt niet meer",
+      linkBody:
+        "Heridentificatielinks verlopen, en een nieuwere link vervangt een oudere. Vraag een beheerder van de organisatie om een nieuwe link, of start het vanuit de wallet.",
+      emailTitle: "Die wallet is niet dit lid",
+      emailBody:
+        "Het e-mailadres in de credential die je hebt gedeeld is niet het adres waarnaar deze link is verstuurd. Gebruik de wallet met dat adres.",
+      nameTitle: "De naam komt niet overeen",
+      nameBody:
+        "De naam op de credential die je hebt gedeeld wijkt af van de naam die deze organisatie heeft vastgelegd. Neem contact op met een beheerder van de organisatie.",
+      staleTitle: "Deze credential is te oud",
+      staleBody:
+        "Deze organisatie accepteert alleen een recent verkregen identiteitscredential. Haal een nieuwe op bij de uitgever in je wallet en open deze link daarna opnieuw.",
+      genericTitle: "Je identiteit bevestigen mislukt",
+      genericBody: "{{message}}",
+    },
+    banner: {
+      requested:
+        "{{org}} heeft je gevraagd je identiteit opnieuw te bevestigen.",
+      dueSoon: "Je identiteitsbevestiging voor {{org}} verloopt op {{date}}.",
+      overdue:
+        "Je identiteitsbevestiging voor {{org}} is verlopen op {{date}}.",
+      overdueNoDate: "Je identiteitsbevestiging voor {{org}} is verlopen.",
+      action: "Mijn identiteit bevestigen",
+      error: "Heridentificatie starten mislukt: {{message}}",
+    },
+  },
+  identityProofing: {
+    title: "Identiteitsverificatie",
+    pause: {
+      pausedTitle: "Identiteitsverificatie is gepauzeerd",
+      byPlatform:
+        "De platformbeheerder heeft identiteitsverificatie voor deze organisatie gepauzeerd. Neem contact met hen op om het te hervatten.",
+      whatStops:
+        "Zolang het gepauzeerd is, start er niets nieuws: geen verzoeken, geen API-aanroepen en geen gehoste links. Sessies die op beoordeling wachten worden afgewezen, met het verzoek het later opnieuw te proberen. Sessies die al lopen worden afgerond en hun webhooks gaan nog uit.",
+      platformColumn: "Identiteitsverificatie",
+      active: "Actief",
+      unknown: "Onbekend",
+      pausedByPlatform: "Gepauzeerd door {{name}}",
+      pausedByPlatformAdmin: "Gepauzeerd door een platformbeheerder",
+      platformConfirmTitle: "Identiteitsverificatie pauzeren voor {{name}}?",
+      byPlatformAdmin:
+        "{{name}}, platformbeheerder, heeft identiteitsverificatie voor deze organisatie gepauzeerd. Neem contact op om het te hervatten.",
+      platformPause: "Pauzeren",
+      platformResume: "Hervatten",
+    },
+    overview: {
+      apiDocs: "API-documentatie",
+      title: "Overzicht",
+      subtitle: "Wat jouw aandacht vraagt, en op wie je wacht.",
+      decision: {
+        title: "Wacht op jouw besluit",
+        open: "Beoordelingen openen",
+        empty:
+          "Niets te beoordelen. Als een controle zelf niet kan beslissen, staat die hier.",
+      },
+      waiting: {
+        title: "Wacht op de persoon",
+        hint: "Verstuurd, maar nog niet afgerond.",
+        empty: "Geen enkele controle wacht op een persoon.",
+        forAdmin: "Wacht op een beheerder",
+      },
+      finished: {
+        title: "Recent afgerond",
+        empty:
+          "Nog geen controle afgerond. Geverifieerde, mislukte en verlopen controles staan hier.",
+      },
+      allPeople: "Alle personen",
+      summary_one:
+        "Laatste 30 dagen: {{count}} controle verstuurd, {{verified}} geverifieerd, {{failed}} mislukt.",
+      summary_other:
+        "Laatste 30 dagen: {{count}} controles verstuurd, {{verified}} geverifieerd, {{failed}} mislukt.",
+      webhookAlertNoAnswer_one:
+        "Het webhook-endpoint antwoordt niet sinds {{since}}. {{count}} resultaat wacht op een nieuwe poging.",
+      webhookAlertNoAnswer_other:
+        "Het webhook-endpoint antwoordt niet sinds {{since}}. {{count}} resultaten wachten op een nieuwe poging.",
+      webhookAlert_one:
+        "Het webhook-endpoint geeft {{code}} sinds {{since}}. {{count}} resultaat wacht op een nieuwe poging.",
+      webhookAlert_other:
+        "Het webhook-endpoint geeft {{code}} sinds {{since}}. {{count}} resultaten wachten op een nieuwe poging.",
+      webhookAlertLink: "Webhook openen",
+    },
+    requests: {
+      empty: "Nog geen verzoeken.",
+      subject: "Persoon",
+      noName: "Geen naam opgegeven",
+      atLeast: "{{count}}+",
+      flow: "Flow",
+      requestedBy: "Aangevraagd door",
+      assurance: "Betrouwbaarheid",
+      verifiedAs: "Geverifieerd als {{name}}",
+    },
+    methods: {
+      idemApp: "Idem-app",
+      yiviApp: "Yivi-app",
+      browser: "Browser",
+    },
+    status: {
+      pending: "Link verstuurd",
+      inProgress: "Bezig",
+      approved: "Geverifieerd",
+      rejected: "Mislukt",
+      needsReview: "Wordt beoordeeld",
+      expired: "Verlopen",
+      cancelled: "Geannuleerd",
+    },
+    rejectionReasons: {
+      documentTypeNotAccepted: "documenttype niet toegestaan in de flow",
+      documentCountryNotAccepted:
+        "land van uitgifte niet toegestaan in de flow",
+      faceStepNotCompleted: "gezichtsverificatie niet afgerond",
+      faceNoMatch: "gezicht komt niet overeen met het document",
+      ageNotDisclosed:
+        "de Yivi-app heeft niet gedeeld of de persoon oud genoeg is",
+      livenessFailed: "levendheidscontrole mislukt",
+      docTampered: "chipgegevens van het document zijn gemanipuleerd",
+      chipCloneDetected: "gekloonde documentchip gedetecteerd",
+      docExpired: "document verlopen",
+      docNotAuthentic: "het gefotografeerde document is niet echt",
+      docFieldsInvalid: "de gedrukte gegevens van het document zijn afgekeurd",
+      docScanFailed:
+        "de foto van het document is niet gelukt, ook niet na alle pogingen",
+      documentMismatch:
+        "het gefotografeerde document is niet het gelezen document",
+      assuranceNotMet: "onder het vereiste betrouwbaarheidsniveau van de flow",
+      manualReviewRejected: "geweigerd door een beoordelaar",
+      reviewNotHolder:
+        "een beoordelaar vond dat wat is aangeleverd van iemand anders is",
+      reviewAltered:
+        "een beoordelaar vond dat wat is aangeleverd bewerkt lijkt",
+      reviewLapsed: "niet op tijd beoordeeld",
+      legalRetention:
+        "de organisatie moet deze gegevens volgens de wet bewaren",
+      orgPaused:
+        "identiteitsverificatie werd gepauzeerd terwijl de sessie op beoordeling wachtte; probeer het later opnieuw",
+      employmentNotProvided:
+        "er is na de identiteitscontrole niet op tijd een Verzekeringsbericht toegevoegd",
+      identityMismatch:
+        "een andere persoon: de naam of geboortedatum op het document is niet die waarvoor het verzoek was",
+      unknown: "de controle is niet geslaagd ({{code}})",
+      evidenceNotAsRequested:
+        "een beoordelaar vond dat wat is aangeleverd niet is wat gevraagd was",
+    },
+    errors: {
+      noEncryptionKey:
+        "Deze server heeft geen versleutelingssleutel voor identiteitsverificatie. Vraag je beheerder IDENTITY_PROOFING_ENCRYPTION_KEY in te stellen.",
+      flowNotFound: "Die flow bestaat niet meer. Kies een andere.",
+      flowNotCompletable:
+        "Die flow legt het gezicht vast in een browser, en daar kan de persoon nog niet bij. Kies een flow die in de app werkt.",
+      flowNotAllowed:
+        "Die flow is niet meer beschikbaar voor leden. Kies een andere.",
+      memberNotFound: "Die persoon is geen lid van deze organisatie.",
+      noDefaultFlow:
+        "Je organisatie heeft geen standaardflow. Kies een flow, of stel een standaard in op de pagina Flows.",
+      proofingPaused:
+        "Identiteitsverificatie is gepauzeerd voor deze organisatie.",
+      apiKeyNotFound: "Dat API-token bestaat niet meer.",
+      apiKeyNotRevealable:
+        "Dit token is gemaakt voordat tokens opnieuw getoond konden worden. Maak een nieuw token aan.",
+      sessionNotFound: "Die sessie bestaat niet meer.",
+      notUnderReview:
+        "Deze sessie wacht niet meer op beoordeling: misschien heeft iemand haar al beoordeeld.",
+      ownReview:
+        "Je hebt deze controle zelf verstuurd, of ze gaat over jou, dus een andere beoordelaar beslist erover.",
+      addressNotUnderReview:
+        "Dit adres wacht niet meer op beoordeling: misschien heeft iemand het al beoordeeld.",
+      referencePhotoRequired:
+        "Deze flow vergelijkt het gezicht met je eigen foto van de persoon, die alleen via de API kan worden meegestuurd. Kies een andere flow.",
+      organizationNotFound: "Die organisatie bestaat niet.",
+      webhookNotFound:
+        "Het webhook-endpoint bestaat niet meer: misschien heeft iemand het verwijderd. Laad de pagina opnieuw.",
+      linkStarted: "Deze link is al ergens anders geopend. Ga daar verder.",
+      sessionOver: "Deze sessie is afgelopen. Start een nieuwe.",
+      deviceActive:
+        "De Idem-app heeft deze sessie nog open: ga daar verder, of sluit hem eerst.",
+      appFinished:
+        "De Idem-app heeft zijn deel al gedaan: ga verder op deze pagina.",
+      hostedDisabled:
+        "De gehoste pagina van deze flow staat uit. Zet hem aan onder Gehoste pagina bij de flow, of verstuur het verzoek op een andere manier.",
+      redirectNotAllowed:
+        "Deze pagina staat niet op een van je terugstuur-origins. Voeg eerst de origin toe onder Instellingen › Gegevens en privacy.",
+      redirectOriginInUse:
+        "De terugkeerpagina van een flow staat op een origin die je verwijdert. Wijzig eerst de terugkeerpagina op het tabblad Gehoste pagina van die flow.",
+      dataRequestFlow:
+        "Mijn gegevens inzien en Mijn gegevens verwijderen zijn vaste flows van de wallet: ze kunnen niet worden gewijzigd.",
+      diplomasNeedPage:
+        "Deze flow vraagt om diploma's, die worden geüpload op de pagina waar de controle loopt. Toon hem op dit scherm of stuur een gehoste link.",
+      diplomasClosed:
+        "Diploma's kunnen alleen kort na de identiteitscontrole worden toegevoegd.",
+      diplomasNotAsked: "Deze controle vraagt niet om diploma's.",
+      addressNeedsPage:
+        "Deze flow vraagt om het adres, dat wordt ingevuld op de pagina waar de controle loopt. Toon hem op dit scherm of stuur een gehoste link.",
+      addressClosed:
+        "Het adres kan maar één keer worden ingevuld, kort na de identiteitscontrole.",
+      addressNotAsked: "Deze controle vraagt niet om een adres.",
+      addressNotFound:
+        "Dit adres staat niet in de Nederlandse adresregistratie. Controleer postcode, huisnummer en straat.",
+      documentScanNeedsPage:
+        "Deze flow fotografeert het document, wat gebeurt op de pagina waar de controle loopt. Toon hem op dit scherm of stuur een gehoste link.",
+      documentScanFailed:
+        "De foto's van het document zijn niet bruikbaar. Probeer het opnieuw.",
+      documentScanMismatch:
+        "Deze foto's horen bij een andere controle. Fotografeer het document opnieuw.",
+      documentScanUnavailable:
+        "De scanservice kon het resultaat van deze scan niet doorgeven. Fotografeer het document opnieuw.",
+      documentScanDone: "Het document is al gefotografeerd.",
+      documentScanPending:
+        "Fotografeer eerst het document en deel daarna je gegevens vanuit de Yivi-app.",
+      noDocumentScanner:
+        "Deze server fotografeert geen documenten. Vraag je beheerder ID_SCAN_KEY_ID en ID_SCAN_SECRET in te stellen.",
+      employmentNeedsPage:
+        "Deze flow vraagt om het Verzekeringsbericht van UWV, dat wordt geüpload op de pagina waar de controle loopt. Toon hem op dit scherm of stuur een gehoste link.",
+      employmentClosed:
+        "Het Verzekeringsbericht kan maar één keer worden geüpload, kort na de identiteitscontrole.",
+      employmentNotAsked:
+        "Deze controle vraagt niet om een Verzekeringsbericht.",
+      noEmploymentChecker:
+        "Deze server controleert geen Verzekeringsbericht. Vraag je beheerder EMPLOYMENT_VALIDATOR_PROVIDER in te stellen.",
+      noDiplomaChecker:
+        "Deze server controleert geen diploma's. Vraag je beheerder DIPLOMA_VALIDATOR_PROVIDER in te stellen.",
+      flowNoIdentity:
+        "Een flow voor gegevensverzoeken moet naam en geboortedatum uitlezen: daarmee worden de sessies van de persoon gevonden.",
+      dataFlowForMember:
+        "Een flow voor gegevensverzoeken is voor externe personen. Haal hem eerst uit de flows voor leden.",
+      exportUnavailable: "Deze gegevens kunnen niet meer worden gedownload.",
+      reasonsMissing:
+        "Elk onderdeel dat deze flow verzamelt heeft een reden nodig in elke taal die de gehoste pagina aanbiedt. Vul ze eerst in op het tabblad Controle.",
+      mandateWithdrawn:
+        "Je mandaat voor deze organisatie is niet meer actief, daarom zijn de beheerinstellingen voor jou gesloten. Een wettelijk vertegenwoordiger kan je een nieuw mandaat geven.",
+      legalRetention:
+        "Een sessie die je volgens de wet moet bewaren kan nog niet verwijderd worden. Vink die uit.",
+      tooLarge: "Het bestand is te groot.",
+      sealCheckUnavailable:
+        "Het zegel op het bestand kan nu niet worden gecontroleerd. Probeer het over een paar minuten opnieuw.",
+      sealUnchecked:
+        "Een document van deze stap heeft een zegel dat nooit is gecontroleerd. Controleer het zegel opnieuw voordat je het accepteert.",
+      generic: "Er ging iets mis. Probeer het opnieuw.",
+    },
+    address: {
+      overview: {
+        label: "Adres",
+        detail: "Na de identiteitscontrole: het postadres dat je invult",
+      },
+      identityDone: "Je identiteit is geverifieerd.",
+      heading: "Vul nu je adres in",
+      intro:
+        "Vul het adres in waar je woont. In Nederland vullen je postcode en huisnummer de straat en plaats in uit de Nederlandse adresregistratie. Het wordt bij je geverifieerde identiteit bewaard.",
+      lookup: {
+        choose: "Welk van deze adressen is van jou?",
+        none: "Deze postcode en dit huisnummer staan niet in de Nederlandse adresregistratie. Controleer ze.",
+        unavailable:
+          "Je adres kan nu niet worden opgezocht. Vul straat en plaats zelf in.",
+      },
+      netherlands: "Nederland",
+      fields: {
+        street: "Straat",
+        houseNumber: "Huisnummer",
+        postalCode: "Postcode",
+        city: "Plaats",
+        country: "Land",
+      },
+      required: "Vul dit in.",
+      save: "Adres opslaan",
+      closed: "De tijd om je adres in te vullen is voorbij.",
+      continue: "Verder",
+    },
+    diplomas: {
+      overview: {
+        label: "Diploma's",
+        detail:
+          "Na de identiteitscontrole: de diploma-uittreksels die je bij DUO downloadt, gecontroleerd op de handtekening van DUO en op je naam en geboortedatum",
+      },
+      how: {
+        login: "Log in bij Mijn DUO met DigiD.",
+        openDuo: "Open Mijn DUO",
+        download:
+          "Download bij ‘Mijn diploma's’ het uittreksel van elk diploma als pdf.",
+      },
+      level: "niveau {{level}}",
+      reasons: {
+        notADiploma:
+          "Dit is geen diploma-uittreksel van DUO. Download de originele pdf via Mijn DUO.",
+        signatureInvalid:
+          "De handtekening van DUO klopt niet: het bestand is gewijzigd of niet door DUO gemaakt. Download de originele pdf opnieuw.",
+        holderMismatch: "Dit diploma staat niet op jouw naam en geboortedatum.",
+        duplicate: "Dit diploma is al toegevoegd.",
+      },
+    },
+    employment: {
+      overview: {
+        label: "Verzekeringsbericht",
+        detail:
+          "Na de identiteitscontrole: het Verzekeringsbericht dat je bij UWV downloadt, gecontroleerd op het zegel van UWV en op je naam en geboortedatum",
+      },
+      how: {
+        login: "Log in bij Mijn UWV met DigiD.",
+        openUwv: "Open Mijn UWV",
+        download:
+          "Open bij ‘Persoonlijke gegevens’ je ‘Arbeidsverleden’ en download het als pdf.",
+      },
+      kept: "Verzekeringsbericht van {{date}} geaccepteerd",
+      keptChecks:
+        "Het zegel van UWV is geldig, het bestand is niet gewijzigd en het staat op jouw naam.",
+      noRelations: "Er staat geen huidig dienstverband in.",
+      period: "sinds {{from}}, laatst aangegeven {{to}}",
+      benefit: "(uitkering)",
+      otherIncome: "(ander inkomen)",
+      review:
+        "Er staat geen huidige baan in. De organisatie beoordeelt je Verzekeringsbericht. Je identiteitscontrole blijft geverifieerd.",
+      reviewBenefit:
+        "Er staat een lopende uitkering in. De organisatie beoordeelt je Verzekeringsbericht. Je identiteitscontrole blijft geverifieerd.",
+      reviewOtherIncome:
+        "Er staat ander lopend inkomen in, betaald zonder gewerkte uren. De organisatie beoordeelt je Verzekeringsbericht. Je identiteitscontrole blijft geverifieerd.",
+      reasons: {
+        notAStatement:
+          "Dit is geen Verzekeringsbericht van UWV. Download het via Mijn UWV.",
+        signatureInvalid:
+          "Het zegel van UWV klopt niet: het bestand is gewijzigd of niet door UWV gemaakt. Download het opnieuw en upload het originele bestand.",
+        holderMismatch:
+          "Dit Verzekeringsbericht staat op naam van iemand anders.",
+        stale:
+          "Dit Verzekeringsbericht is ouder dan 30 dagen. Download een nieuw exemplaar.",
+        duplicate: "Er is al een Verzekeringsbericht toegevoegd.",
+      },
+    },
+    documents: {
+      identityDone: "Je identiteit is geverifieerd.",
+      heading: "Voeg nu je documenten toe",
+      intro:
+        "Upload de documenten hieronder als pdf, als je wilt allemaal tegelijk. We controleren wie elk document heeft uitgegeven en of het op jouw naam staat.",
+      kinds: {
+        diplomas: "Diploma-uittreksel van DUO",
+        employment: "Verzekeringsbericht van UWV",
+      },
+      needed: "Nog nodig",
+      added: "Toegevoegd",
+      choose: "Pdf's kiezen",
+      chooseAnother: "Nog een pdf toevoegen",
+      checking: "Bezig met controleren…",
+      unchanged:
+        "Upload elke pdf precies zoals je hem downloadde. Een scan, een foto of een opnieuw afgedrukte pdf werkt niet.",
+      closed: "De tijd om documenten toe te voegen is voorbij.",
+      continue: "Verder",
+      needAll: "Voeg elk document hierboven toe om verder te gaan.",
+      verdictsAnnounced: "Geaccepteerd: {{accepted}}. Geweigerd: {{refused}}.",
+      sealPending_one:
+        "We hebben {{count}} document ontvangen, maar konden het zegel nu niet controleren. Een beoordelaar controleert het later. Je hoeft niets te doen.",
+      sealPending_other:
+        "We hebben {{count}} documenten ontvangen, maar konden de zegels nu niet controleren. Een beoordelaar controleert ze later. Je hoeft niets te doen.",
+      reasons: {
+        notSupported:
+          "Dit is geen document dat we kunnen controleren. Upload de originele pdf, zoals je hem downloadde.",
+        notAsked: "Dit document wordt hier niet gevraagd.",
+        tooMany:
+          "Je hebt het maximale aantal diploma's voor een controle toegevoegd.",
+        checkFailed:
+          "We konden dit bestand nu niet controleren. Upload dit bestand opnieuw.",
+      },
+    },
+    flows: {
+      eidas: "eIDAS {{level}}",
+      noAssurance: "Geen minimumniveau",
+    },
+    send: {
+      title: "Een persoon verifiëren",
+      what: {
+        legend: "Wat verstuur je?",
+        identity: {
+          title: "Een identiteitscontrole",
+          hint: "De persoon bewijst wie hij of zij is, met de stappen van een flow die je kiest.",
+        },
+        data_access: {
+          title: "Mijn gegevens inzien",
+          hint: "De persoon vraagt wat je over hem of haar bewaart. Eerst bewijst die wie hij of zij is; de gegevens zijn te zien zodra een beoordelaar het goedkeurt.",
+        },
+        data_erasure: {
+          title: "Mijn gegevens verwijderen",
+          hint: "De persoon vraagt je te verwijderen wat je over hem of haar bewaart. Eerst bewijst die wie hij of zij is.",
+        },
+      },
+      channel: "Hoe krijgt de persoon de QR-code?",
+      channels: {
+        email: {
+          title: "Per e-mail versturen",
+          hint: "Een mail met de QR-code en een link.",
+        },
+        onScreen: {
+          title: "Op dit scherm tonen",
+          hint: "Voor iemand die bij je is.",
+        },
+        link: {
+          title: "Link kopiëren",
+          hint: "Je stuurt de link zelf. Hij kan één keer worden gestart, binnen 72 uur.",
+        },
+      },
+      linkReturn: {
+        title: "Terugsturen na de controle",
+        hint: "Naar {{url}}",
+      },
+      mailLifetime: "Werkt {{minutes}} minuten na het versturen.",
+      submitOnScreen: "Pagina openen",
+      submitLink: "Link maken",
+      linkTitle: "Link gemaakt",
+      linkHint:
+        "Stuur deze link naar de persoon, bijvoorbeeld via chat. Hij kan één keer worden gestart, binnen 72 uur; de uitkomst verschijnt op het tabblad Personen.",
+      linkOpen: {
+        label: "Openen in nieuw tabblad",
+        newTab: "(opent een nieuw tabblad)",
+      },
+      linkDone: "Klaar",
+      email: "E-mailadres",
+      emailPlaceholder: "naam@example.nl",
+      emailRequired: "Vul een geldig e-mailadres in.",
+      diplomasOnScreen:
+        "Deze flow vraagt om een adres, diploma's of een Verzekeringsbericht, die worden opgegeven op de pagina waar de controle loopt, dus hij loopt op dit scherm of als link.",
+      notLinkable:
+        "Deze flow wordt niet per e-mail of als link verstuurd, dus de persoon doorloopt hem op dit scherm.",
+      addName: {
+        title: "Naam van de persoon toevoegen",
+        hint: "Staat in je lijst tot de controle klaar is; daarna de naam van hun document.",
+        passNote: "Nodig om de naam op hun document te vergelijken.",
+      },
+      onlyThisPerson: {
+        title: "Alleen deze persoon laten slagen",
+        hint: "De naam en geboortedatum op hun document moeten kloppen, anders wordt de controle afgewezen.",
+      },
+      name: "Naam",
+      birthDate: "Geboortedatum",
+      required: "(verplicht)",
+      nameRequired: "Vul de naam van de persoon in.",
+      birthDateRequired: "Vul de geboortedatum in.",
+      flow: "Flow",
+      submit: "Verzoek versturen",
+      cancel: "Annuleren",
+      noFlowsAdmin: "Maak eerst een flow aan, op de pagina Flows.",
+      noFlowsMember:
+        "Een beheerder moet eerst een flow beschikbaar maken voor leden voordat je een verzoek kunt versturen.",
+      referencePhotoFlows:
+        "Flows die het gezicht vergelijken met je eigen foto van de persoon staan hier niet: jouw systeem verstuurt die via de API, met de foto.",
+    },
+    onScreen: {
+      title: "Een persoon verifiëren",
+      missingFlow:
+        "Deze flow bestaat niet meer of kan hier niet worden verstuurd. Ga terug en kies een andere.",
+      identityInReview:
+        "Je identiteitscontrole is klaar. Iemand beoordeelt hem nadat je hier klaar bent.",
+      steps: {
+        overview: "Wat er wordt verzameld",
+        document: "Je ID fotograferen",
+        method: "Kies een app",
+        session: "Scan de QR-code",
+        address: "Adres",
+        documents: "Documenten",
+      },
+      overview: {
+        heading: "{{name}} wil je identiteit verifiëren",
+        intro:
+          "Je bevestigt je identiteit met je paspoort of identiteitskaart. {{name}} ontvangt:",
+        noData: "Alleen de uitkomst: of je identiteit is geverifieerd.",
+        why: "Waarom:",
+        retention_one:
+          "Deze gegevens worden uiterlijk {{count}} dag na afloop van de controle verwijderd.",
+        retention_other:
+          "Deze gegevens worden uiterlijk {{count}} dagen na afloop van de controle verwijderd.",
+        support: "Vragen? {{contact}}",
+        privacy: "Privacyverklaring",
+        cancel: "Annuleren",
+        continue: "Verder",
+      },
+      attributeDetails: {
+        dg1: "Je naam, geboortedatum en nationaliteit, en het nummer en de vervaldatum van het document.",
+        dg1WithoutBirthDate:
+          "Je naam en nationaliteit, en het nummer en de vervaldatum van het document.",
+        age_over:
+          "Alleen of je oud genoeg bent, bepaald uit je document: niet je geboortedatum.",
+        dg11: "Je geboorteplaats en persoonsnummer (BSN), als je document die op de chip heeft staan.",
+        dg2: "Je pasfoto op de chip van het document.",
+        chip_checks: "Of de chip echt en onveranderd is.",
+        document_image:
+          "Foto's van de voor- en achterkant van je document (bij een paspoort alleen de fotopagina).",
+        selfie: "Een foto van je gezicht tijdens de controle.",
+        biometrics:
+          "Hoe goed je gezicht overeenkomt met de foto op het document.",
+      },
+      method: {
+        heading: "Hoe wil je je verifiëren?",
+        only: "Je verifieert met de {{app}}: deze controle werkt met geen andere app. Zorg dat die op je telefoon staat.",
+        yivi: {
+          title: "Yivi-app",
+          detail:
+            "Deel het paspoort, de identiteitskaart of de verblijfsvergunning die al in je Yivi-app staat.",
+          detailPersonalData:
+            "Deel een document of je persoonsgegevens (geladen met DigiD) die deze controle accepteert, uit je Yivi-app.",
+        },
+        idem: {
+          title: "Idem-app",
+          detail:
+            "Scan je paspoort of identiteitskaart met de Idem-app en houd het tegen je telefoon om de chip te lezen.",
+        },
+        back: "Terug",
+      },
+      documentScan: {
+        heading: "Fotografeer je identiteitsbewijs",
+        hint: "Maak hieronder in de beveiligde scan van CM.com een foto van de voor- en achterkant van je ID-kaart of rijbewijs, of van de fotopagina van je paspoort.",
+        passportHint:
+          "Voor een paspoort: sla het open als een boek en draai het een kwartslag, zodat het opengeslagen paspoort in het kader past.",
+        frameTitle: "ID-scan van CM.com",
+        start: "Document fotograferen",
+        finishing: "Foto's toevoegen…",
+        loading: "De beveiligde scan van CM.com wordt geladen…",
+        cancelled: "De foto's zijn niet gemaakt. Probeer het opnieuw.",
+        retry: "Opnieuw proberen",
+      },
+      scan: {
+        yiviHeading: "Scan met de Yivi-app",
+        yiviHint:
+          "Open de Yivi-app en scan deze code, of tik op de knop als deze pagina op je telefoon staat.",
+        openYivi: "Openen in de Yivi-app",
+        getYivi: "Nog geen Yivi-app? Download hem via de",
+        appStore: "App Store",
+        playStore: "Google Play",
+        yiviPrivacy: "Yivi's privacyregels",
+        yiviPrivacyUrl: "https://www.yivi.app/privacy",
+        idemHeading: "Scan met de Idem-app",
+        idemHint: "Open de Idem-app en scan deze code vanuit de app.",
+        openIdem: "Openen in de Idem-app",
+        starting: "De sessie wordt gestart…",
+        expiresIn: "Geldig voor {{time}}",
+        expired: "Deze code is verlopen.",
+        restart: "Opnieuw beginnen",
+        startedElsewhere:
+          "Deze controle is in een ander venster gestart: ga daar verder in de app.",
+        inProgress: "De sessie is geopend op de telefoon.",
+        newCode: "Nieuwe code tonen",
+        connectedHeading: "Verder in de Idem-app",
+        connectedHint:
+          "De sessie is geopend op de telefoon. Wordt de app gesloten, dan verschijnt hier een code om verder te gaan.",
+        finishedHeading: "De Idem-app is klaar",
+        finishedHint:
+          "De telefoon heeft zijn deel gedaan. De controle wordt op deze pagina afgerond.",
+        awayHeading: "De Idem-app is gesloten",
+        awayHint:
+          "Scan deze code met de Idem-app om verder te gaan waar de sessie was, op dezelfde of een andere telefoon.",
+        newCodeLoading: "Nieuwe code ophalen…",
+        newCodeHint:
+          "App gesloten of een andere telefoon? Met een nieuwe code ga je verder waar de sessie was.",
+      },
+      yiviEnded: "De sessie in de Yivi-app is beëindigd: {{reason}}",
+      yiviShared: "Gedeeld vanuit de Yivi-app. De verificatie wordt afgerond…",
+      yiviCodes: {
+        documentNotAccepted: "deze flow accepteert het gedeelde document niet.",
+        ageNotDisclosed:
+          "het gedeelde document gaf niet aan of je oud genoeg bent.",
+        faceNotVerified: "de gezichtscontrole in de ID-scan is niet gelukt.",
+      },
+      ended: {
+        title: "Deze controle is beëindigd",
+        message:
+          "De controle is niet op tijd afgerond, dus er is niets gedeeld.",
+      },
+      outcome: {
+        steps: {
+          kinds: {
+            address: "Adres",
+            diplomas: "Diploma",
+            employment: "Verzekeringsbericht",
+          },
+          state: {
+            received: "Ontvangen",
+            checking: "Wordt gecontroleerd",
+            rejected: "Niet geaccepteerd",
+            missing: "Niet ontvangen",
+            open: "Nog te doen",
+          },
+        },
+        approved: {
+          title: "Identiteit geverifieerd",
+          message: "De controle is afgerond.",
+        },
+        rejected: {
+          title: "Niet geverifieerd",
+          message: "De controle is niet gelukt.",
+        },
+        refused: {
+          title: "Verzoek geweigerd",
+          message:
+            "Je hebt bewezen wie je bent, maar je verzoek is niet ingewilligd.",
+        },
+        legalRetention: {
+          title: "Je gegevens kunnen nog niet verwijderd worden",
+          until: "Al je gegevens kunnen vanaf {{date}} verwijderd worden.",
+        },
+        expired: {
+          title: "Sessie beëindigd",
+          message: "De controle is niet op tijd afgerond.",
+        },
+        review: {
+          title: "Wacht op beoordeling",
+          message:
+            "De controle is klaar en wordt handmatig beoordeeld voordat er een besluit is.",
+        },
+        cancelled: {
+          title: "Controle gestopt",
+          message:
+            "Er is geen identiteitscontrole gedaan en er is niets gedeeld.",
+        },
+        back: "Terug naar het overzicht",
+        again: "Opnieuw verifiëren",
+      },
+    },
+    people: {
+      title: "Alle personen",
+      subtitle: "Iedereen naar wie je een controle stuurde, op elke flow.",
+      allFlows: "Alle flows",
+      details: "Details",
+    },
+    sessions: {
+      sealCheckedAgain: "Nadat een beoordelaar het zegel opnieuw controleerde",
+      review: {
+        reasonRequired: "Geef een reden: die wordt bewaard in het auditlog.",
+        reasonTooLong: "Houd de reden op maximaal {{max}} tekens.",
+      },
+      dataRequest: {
+        download: "Gegevens downloaden",
+        downloadUntil: "Beschikbaar tot {{date}}",
+        downloadClosed: "De download was beschikbaar tot {{date}}.",
+      },
+      method: "App",
+      timeline: "Tijdlijn",
+      noEvents: "Nog niets vastgelegd.",
+      identity: {
+        audited:
+          "Het openen van een afgeronde sessie wordt vastgelegd in het auditlog.",
+        reveal: "Tonen",
+        revealPhoto: "{{name}} tonen",
+        conceal: "Verbergen",
+        photo: "Documentfoto",
+        referencePhoto: "Foto die met het verzoek is meegestuurd",
+        noDocument:
+          "Geen: het gezicht is vergeleken met de foto die met het verzoek is meegestuurd",
+        selfie: "Selfie",
+        documentImage: "Voorkant van het document",
+        documentImageBack: "Achterkant van het document",
+        none: "Geen identiteit: de controle is niet goedgekeurd.",
+        name: "Naam",
+        birthDate: "Geboortedatum",
+        nationality: "Nationaliteit",
+        ageOver: "{{age}} jaar of ouder",
+        ageOverYes: "Ja",
+        ageOverNo: "Nee",
+        document: "Document",
+        passiveAuth: "Echtheid chip",
+        faceMatch: "Gezichtsvergelijking",
+        liveness: "Echtheid persoon",
+        documentCheck: "Documentcontrole",
+        documentVerdicts: {
+          authentic: "Echt",
+          doubtful: "Twijfelachtig",
+          fake: "Niet echt",
+        },
+        documentFields: "Gedrukte gegevens",
+        documentZones: "MRZ gelijk aan gedrukte tekst",
+        checks: {
+          valid: "Geldig",
+          invalid: "Ongeldig",
+          not_performed: "Niet uitgevoerd",
+          passed: "Geslaagd",
+          failed: "Mislukt",
+        },
+      },
+      filters: {
+        all: "Alle ({{number}})",
+        in_progress: "Bezig ({{number}})",
+        review: "Te beoordelen ({{number}})",
+        verified: "Geverifieerd ({{number}})",
+        failed: "Mislukt ({{number}})",
+        expired: "Verlopen ({{number}})",
+      },
+      retention_one:
+        "Persoonsgegevens worden {{count}} dag na afloop van een controle gewist. Het resultaat en het auditspoor blijven.",
+      retention_other:
+        "Persoonsgegevens worden {{count}} dagen na afloop van een controle gewist. Het resultaat en het auditspoor blijven.",
+      retentionLegal:
+        "Persoonsgegevens van identiteitscontroles worden minstens {{period}} na afloop bewaard, zoals de wet vereist. Het resultaat en het auditspoor blijven.",
+      retentionOwnLegal:
+        "Je ziet de controles die jij verstuurde. Persoonsgegevens van identiteitscontroles worden minstens {{period}} na afloop bewaard.",
+      retentionOwn_one:
+        "Je ziet de controles die jij verstuurde. Persoonsgegevens worden {{count}} dag na afloop van een controle gewist.",
+      retentionOwn_other:
+        "Je ziet de controles die jij verstuurde. Persoonsgegevens worden {{count}} dagen na afloop van een controle gewist.",
+      viaApiKey: "API-token · {{name}}",
+      result: "Resultaat",
+      started: "Gestart",
+      duration: "Duur",
+      details: "Details van controle {{id}}",
+      flowVersion: "Flowversie",
+      fullId: "Referentie",
+      reason: "Reden",
+      completed: "Afgerond",
+      purgeAt: "Persoonsgegevens gewist op",
+      expectedSubject: "Verwachte persoon",
+      expectedSubjectValue:
+        "Naam en geboortedatum gecontroleerd tegen het document",
+      address: {
+        title: "Adres",
+        none: "Geen adres ingevuld.",
+        declared:
+          "Zelf opgegeven: zoals de persoon het invulde, niet gecontroleerd tegen een document.",
+        verified:
+          "Zelf opgegeven: het adres bestaat in de Nederlandse adresregistratie (BAG), maar is niet bevestigd als woonadres van de persoon.",
+        unchecked:
+          "Zelf opgegeven: de Nederlandse adresregistratie was niet bereikbaar om het te controleren.",
+        unsupported:
+          "Zelf opgegeven: alleen Nederlandse adressen worden gecontroleerd in een register.",
+        registered:
+          "Bevestigd: gelijk aan het woonadres uit de BRP dat de persoon deelde vanuit de Yivi-app.",
+        registeredMismatch:
+          "Wijkt af van het woonadres uit de BRP dat de persoon deelde vanuit de Yivi-app.",
+        registeredTitle: "Woonadres (BRP)",
+        review: {
+          pending:
+            "Wacht op een beoordelaar die het adres bevestigt. De identiteitscontrole verandert niet.",
+          confirmed: "Een beoordelaar heeft het adres bevestigd.",
+          rejected:
+            "Een beoordelaar heeft het adres afgewezen. De identiteitscontrole verandert niet.",
+          lapsed:
+            "Niemand heeft het adres op tijd beoordeeld. De identiteitscontrole verandert niet.",
+        },
+        openReview: "Open de beoordeling",
+        tag: {
+          pending: "Adres in beoordeling",
+          confirmed: "Adres bevestigd",
+          rejected: "Adres afgewezen",
+          lapsed: "Adresbeoordeling verlopen",
+        },
+        toReview: "Gaat naar een beoordelaar",
+      },
+      diplomas: {
+        title: "Diploma's",
+        none: "Geen diploma toegevoegd.",
+        number: "DUO-nummer {{number}}",
+        review: {
+          pending:
+            "Wacht op een beoordelaar die over de diploma's beslist. De identiteitscontrole verandert niet.",
+          confirmed: "Een beoordelaar heeft de diploma's geaccepteerd.",
+          rejected:
+            "Een beoordelaar heeft de diploma's afgewezen. De identiteitscontrole verandert niet.",
+          lapsed:
+            "Niemand heeft de diploma's op tijd beoordeeld. De identiteitscontrole verandert niet.",
+        },
+      },
+      employment: {
+        title: "Verzekeringsbericht",
+        none: "Geen Verzekeringsbericht geüpload.",
+        statementDate: "Verzekeringsbericht van {{date}}",
+        noRelations: "Geen huidig dienstverband of uitkering bekend bij UWV",
+        employed: "Heeft nu werk: ja",
+        notEmployed: "Heeft nu werk: nee",
+        benefit: "Uitkering",
+        otherIncome: "Ander inkomen",
+        payrollTaxNumber: "Loonheffingennummer {{number}}",
+        period: "sinds {{from}}, laatst aangegeven {{to}}",
+        source:
+          "Uit het Verzekeringsbericht van UWV, gecontroleerd op het zegel van UWV en op de geverifieerde naam en geboortedatum. Alleen het dienstverband dat op de datum van het bericht loopt wordt bewaard.",
+        review: {
+          pending:
+            "Wacht op een beoordelaar die over het Verzekeringsbericht beslist. De identiteitscontrole verandert niet.",
+          confirmed:
+            "Een beoordelaar heeft het Verzekeringsbericht geaccepteerd.",
+          rejected:
+            "Een beoordelaar heeft het Verzekeringsbericht afgewezen. De identiteitscontrole verandert niet.",
+          lapsed:
+            "Niemand heeft het Verzekeringsbericht op tijd beoordeeld. De identiteitscontrole verandert niet.",
+        },
+      },
+      parts: {
+        identity: "Identiteit",
+        kinds: {
+          address: "Adres",
+          diplomas: "Diploma",
+          employment: "Verzekeringsbericht",
+        },
+        state: {
+          not_started: "Niet gestart",
+          open: "Wacht op de persoon",
+          to_review: "Te beoordelen",
+          done: "Klaar",
+          accepted: "Geaccepteerd",
+          rejected: "Afgewezen",
+          lapsed: "Beoordeling verlopen",
+          not_provided: "Niet aangeleverd",
+        },
+        summary: {
+          needs_review: "Beoordeling nodig",
+          in_progress: "Bezig",
+          incomplete: "Onvolledig",
+          complete: "Compleet",
+        },
+      },
+      purged: "Persoonsgegevens gewist",
+      purgedSubject: "Gewist",
+      failedBecause: "{{status}} · {{reason}}",
+    },
+    settings: {
+      days_one: "{{count}} dag",
+      days_other: "{{count}} dagen",
+    },
+    webhookState: {
+      delivering: "Levert af",
+      deliveringCode: "Levert af · {{code}}",
+      failing: "Faalt · {{code}} sinds {{since}}",
+      failingNoAnswer: "Faalt · geen antwoord sinds {{since}}",
+      notConfigured: "Niet ingesteld",
+    },
+    secret: {
+      copy: "Kopiëren",
+      copied: "Gekopieerd",
+      done: "Ik heb het bewaard",
+    },
+    branding: {
+      title: "Jouw huisstijl",
+      hint: "Gebruikt in de verificatiemail, op de gehoste pagina en in de Idem-app, voor elke flow. Een flow kan een eigen huisstijl hebben, op het tabblad Huisstijl van die flow.",
+      displayName: "Weergavenaam",
+      displayNameHint:
+        "Ondertekent de mail en het onderwerp. Leeg gebruikt de naam van de organisatie.",
+      logo: "Logo",
+      logoSet: "Huidig logo",
+      noLogo: "Geen logo: de weergavenaam staat er in plaats daarvan",
+      logoHint: "PNG, JPEG, GIF of WebP, hooguit 512 KB.",
+      upload: "Uploaden",
+      replace: "Vervangen",
+      removeLogo: "Verwijderen",
+      primaryColor: "Primaire kleur",
+      hexColor: "Hexkleur",
+      orgColor: "Standaard",
+      swatches: {
+        green: "Groen",
+        blue: "Blauw",
+        red: "Rood",
+        black: "Zwart",
+      },
+      colorInvalid: "Vul een hexkleur in zoals #1F5B4A.",
+      primaryColorHint:
+        "Voor knoppen en het merkteken. De tekst erop wordt aangepast voor contrast.",
+      secondaryColor: "Secundaire kleur",
+      secondaryColorHint:
+        "Gebruikt voor staplabels en badges in de Idem-app en op de gehoste pagina.",
+      themeTitle: "Huisstijl",
+      themeHint:
+        "De rest van de uitstraling van de organisatie in de Idem-app en op de gehoste pagina: dezelfde opties als het thema van de organisatie. Leeg houdt het standaardontwerp.",
+      supportContact: "Supportcontact",
+      supportPlaceholder: "klantenservice@example.nl",
+      privacyUrl: "URL van de privacyverklaring",
+      privacyPlaceholder: "https://example.nl/privacy",
+      hidePoweredBy:
+        "Laat de regel “Mogelijk gemaakt door Yivi” weg op de gehoste pagina",
+      showTheme: "Toon deze uitstraling in de Idem-app en op de gehoste pagina",
+      showThemeHint:
+        "Uit: zij houden hun eigen uitstraling. De verificatiemail gebruikt haar altijd.",
+      discard: "Verwerpen",
+      save: "Huisstijl opslaan",
+    },
+    legalRetention: {
+      title: "Wettelijke bewaartermijn",
+      hint_one:
+        "Zonder wettelijke termijn worden persoonsgegevens {{count}} dag na afloop van een controle gewist.",
+      hint_other:
+        "Zonder wettelijke termijn worden persoonsgegevens {{count}} dagen na afloop van een controle gewist.",
+      switch:
+        "We moeten deze gegevens volgens de wet een bepaalde tijd bewaren",
+      switchHint:
+        "Bijvoorbeeld wanneer een sectorwet je verplicht een identiteitsbewijs te bewaren.",
+      keepFor: "Bewaren gedurende",
+      unit: "Eenheid",
+      units: {
+        years: "jaar",
+        months: "maanden",
+      },
+      period: {
+        years_one: "{{count}} jaar",
+        years_other: "{{count}} jaar",
+        months_one: "{{count}} maand",
+        months_other: "{{count}} maanden",
+      },
+      countedFrom: "Geteld vanaf het einde van elke controle.",
+      amountInvalid:
+        "Vul een geheel getal in van minstens 1, en hooguit 50 jaar.",
+      reason: "Reden, getoond aan de persoon",
+      reasonEn: "English",
+      reasonNl: "Nederlands",
+      reasonRequired:
+        "Geef de reden in beide talen, elk hooguit {{max}} tekens.",
+      changes: {
+        title: "Wat dit verandert",
+        keep: "Elke flow bewaart persoonsgegevens minstens {{period}}. Een flow mag ze langer bewaren, niet korter.",
+        erase:
+          "Mijn gegevens verwijderen wordt geweigerd gedurende de {{period}} na afloop van een controle. De persoon ziet de reden en de datum waarop de gegevens verwijderd kunnen worden.",
+        access: "Mijn gegevens inzien blijft werken.",
+      },
+      removeConfirm: {
+        title: "Wettelijke bewaartermijn verwijderen?",
+        message_one:
+          "Identiteitscontroles worden dan alleen nog bewaard zo lang hun flow zegt, of {{count}} dag na afloop voor een flow zonder eigen bewaartermijn. Elke controle die langer geleden is afgelopen, verliest binnen het uur haar persoonsgegevens, in de wallet en in de verificatiedienst, en Mijn gegevens verwijderen wordt niet meer geweigerd. Dit kan niet ongedaan worden gemaakt.",
+        message_other:
+          "Identiteitscontroles worden dan alleen nog bewaard zo lang hun flow zegt, of {{count}} dagen na afloop voor een flow zonder eigen bewaartermijn. Elke controle die langer geleden is afgelopen, verliest binnen het uur haar persoonsgegevens, in de wallet en in de verificatiedienst, en Mijn gegevens verwijderen wordt niet meer geweigerd. Dit kan niet ongedaan worden gemaakt.",
+        confirm: "Bewaartermijn verwijderen",
+      },
+      shortenConfirm: {
+        title: "Wettelijke bewaartermijn verkorten tot {{period}}?",
+        message:
+          "Elke identiteitscontrole die meer dan {{period}} geleden is afgelopen en voorbij de eigen bewaartermijn van haar flow is, verliest binnen het uur haar persoonsgegevens, in de wallet en in de verificatiedienst. Dit kan niet ongedaan worden gemaakt.",
+        confirm: "Bewaartermijn verkorten",
+      },
+      discard: "Verwerpen",
+      save: "Opslaan",
+    },
+    dataRequests: {
+      title: "Gegevensverzoeken van personen",
+      intro:
+        "Elke organisatie biedt deze twee aan, zoals de AVG vereist. De persoon bewijst eerst wie hij of zij is: Document scannen, Chip van het document lezen, Gezichtscontrole (eIDAS Substantieel).",
+      access: {
+        title: "Mijn gegevens inzien",
+        hint: "De persoon ziet wat je van hem of haar bewaart, zodra een beoordelaar het goedkeurt.",
+        state: "Altijd aan",
+      },
+      erasure: {
+        title: "Mijn gegevens verwijderen",
+        hint: "Beschikbaar zodra de wettelijke termijn hieronder voor de gegevens van die persoon voorbij is.",
+        after: "Na {{period}}",
+        anyTime: "Meteen",
+      },
+      whoDecides: {
+        legend: "Wie beslist",
+        review: {
+          label: "Een beoordelaar beslist over elk verzoek",
+          hint: "Er wordt niets verwijderd totdat iemand het in Beoordelingen goedkeurt.",
+        },
+        automatic: {
+          label: "Automatisch verwijderen als het zeker is",
+          hint: "Controles die met hetzelfde document zijn bewezen, worden meteen verwijderd. Een beoordelaar beslist over controles die alleen op naam of e-mailadres overeenkomen.",
+        },
+      },
+    },
+    redirectOrigins: {
+      title: "Terugstuur-origins",
+      hint: "Eén per regel, zoals https://portal.example.com. Een gehoste pagina mag de persoon naar deze origins terugsturen en daarop worden ingesloten.",
+      save: "Opslaan",
+    },
+    reviews: {
+      title: "Beoordelingen",
+      subtitle:
+        "Controles en gegevensverzoeken die op het besluit van een persoon wachten. Oudste eerst.",
+      notAllowed:
+        "Alleen beheerders en leden met het recht om te beoordelen kunnen beoordelen.",
+      tabsLabel: "Toon",
+      alsoDecided: "Al beoordeeld in deze sessie",
+      decidedAutomatically:
+        "Automatisch beslist door de controle, zonder beoordelaar.",
+      nextPart: "Volgende: {{part}}",
+      tabs: {
+        all: "Alles",
+        checks: "Identiteitscontroles",
+        steps: "Extra stappen",
+        data: "Gegevensverzoeken",
+        closed: "Afgehandeld",
+      },
+      columns: {
+        person: "Persoon",
+        what: "Wat",
+        why: "Waarom het wacht",
+        since: "Wacht sinds",
+        outcome: "Uitkomst",
+        closed: "Afgehandeld",
+        action: "Actie",
+      },
+      review: "Beoordeel",
+      view: "Bekijk",
+      reviewOf: "Beoordeel {{name}}",
+      viewOf: "Bekijk {{name}}",
+      empty: "Er wacht niets op een besluit.",
+      emptyClosed: "Er is nog niets afgehandeld.",
+      identityCheck: "Identiteitscontrole",
+      addressCheck: "Adres",
+      employmentCheck: "Verzekeringsbericht",
+      diplomasCheck: "Diploma's",
+      seal: {
+        why: "Het zegel kon bij het uploaden niet worden gecontroleerd, omdat de EU-vertrouwenslijsten of de intrekkingsserver van de uitgever niet bereikbaar waren. Controleer het opnieuw voordat je beslist.",
+        unchecked_one:
+          "{{count}} bestand heeft nog een ongecontroleerd zegel. Je kunt deze stap pas accepteren als het zegel is gecontroleerd.",
+        unchecked_other:
+          "{{count}} bestanden hebben nog een ongecontroleerd zegel. Je kunt deze stap pas accepteren als elk zegel is gecontroleerd.",
+        checkAgain: "Zegel opnieuw controleren",
+        checked:
+          "De zegels zijn gecontroleerd. Het resultaat staat per bestand.",
+        files_one:
+          "{{count}} bestand ging naar beoordeling omdat het zegel bij het uploaden niet gecontroleerd kon worden",
+        files_other:
+          "{{count}} bestanden gingen naar beoordeling omdat het zegel bij het uploaden niet gecontroleerd kon worden",
+        states: {
+          waiting: "Zegel nog niet gecontroleerd",
+          kept: "Zegel gecontroleerd, bewaard",
+          refused: "Geweigerd",
+          notChecked: "Nooit gecontroleerd",
+        },
+        reasons: {
+          signatureInvalid:
+            "Het zegel klopt niet. Het bestand is na het verzegelen gewijzigd, of het komt niet van de uitgever.",
+          holderMismatch: "Het document staat op naam van een ander.",
+          notADocument: "Dit is geen leesbaar document van de uitgever.",
+          stale: "Het Verzekeringsbericht is ouder dan 30 dagen.",
+          duplicate:
+            "Hetzelfde document was al toegevoegd, dus deze kopie is niet bewaard.",
+        },
+      },
+      diplomas: {
+        title: "Diploma's beoordelen",
+        whyTitle: "Waarom dit op jou wacht",
+        whyAlways:
+          "Deze flow laat de diploma's door een beoordelaar goedkeuren. Het zegel van DUO op elk uittreksel klopt, en elk uittreksel staat op naam van de persoon.",
+        decisionTitle: "Besluit",
+        confirm: "Diploma's accepteren",
+        reject: "Diploma's afwijzen",
+        confirmed: "De diploma's zijn geaccepteerd.",
+        rejected: "De diploma's zijn afgewezen.",
+        lapsed: "Niemand heeft de diploma's op tijd beoordeeld.",
+      },
+      employment: {
+        title: "Verzekeringsbericht beoordelen",
+        whyTitle: "Waarom dit op jou wacht",
+        whyAlways:
+          "Deze flow laat elk Verzekeringsbericht door een beoordelaar goedkeuren. In dit bericht staat een huidige baan en geen uitkering of ander inkomen.",
+        decisionTitle: "Besluit",
+        confirm: "Verzekeringsbericht accepteren",
+        reject: "Verzekeringsbericht afwijzen",
+        confirmed: "Het Verzekeringsbericht is geaccepteerd.",
+        rejected: "Het Verzekeringsbericht is afgewezen.",
+        lapsed: "Niemand heeft het Verzekeringsbericht op tijd beoordeeld.",
+      },
+      address: {
+        title: "Adres beoordelen",
+        whyTitle: "Waarom dit op jou wacht",
+        why: "De persoon heeft dit adres zelf ingevuld. Geen register bevestigt dat diegene daar woont, dus een beoordelaar beslist.",
+        whyMismatch:
+          "Dit adres wijkt af van het woonadres uit de BRP dat de persoon deelde vanuit de Yivi-app. Misschien is diegene net verhuisd, dus een beoordelaar beslist.",
+        whyAlways:
+          "Deze flow laat elk adres door een beoordelaar goedkeuren. Het woonadres uit de BRP dat de persoon deelde, bevestigt dit adres.",
+        method: "Gecontroleerd met",
+        level: "Betrouwbaarheidsniveau",
+        decisionTitle: "Besluit",
+        confirm: "Adres bevestigen",
+        reject: "Adres afwijzen",
+        confirmed: "Het adres is bevestigd.",
+        rejected: "Het adres is afgewezen.",
+        lapsed: "Niemand heeft het adres op tijd beoordeeld.",
+      },
+      requestedBy: "Aangevraagd door {{name}}",
+      provenWith: {
+        idem_app: "Bewezen met de Idem-app",
+        yivi_app: "Bewezen met de Yivi-app",
+        browser: "Bewezen in de browser",
+        unknown: "Bewezen",
+      },
+      why: {
+        identity: "Een deel is niet ondertekend of uit een bron gehaald",
+        address: "Zelf opgegeven adres, geen register bevestigt het",
+        addressMismatch: "Wijkt af van het woonadres (BRP)",
+        data_access:
+          "Een beoordelaar keurt elk verzoek om gegevens in te zien goed",
+        data_erasure:
+          "Een beoordelaar keurt elk verzoek om gegevens te verwijderen goed",
+        no_current_employment:
+          "In het Verzekeringsbericht staat geen huidige baan",
+        current_benefit:
+          "In het Verzekeringsbericht staat een lopende uitkering van UWV",
+        alwaysReview: "De flow laat elk identiteitsbewijs beoordelen",
+        addressAlways: "De flow laat elk adres beoordelen",
+        employmentAlways: "De flow laat elk Verzekeringsbericht beoordelen",
+        diplomasAlways: "De flow laat de diploma's beoordelen",
+        current_other_income:
+          "In het Verzekeringsbericht staat ander lopend inkomen zonder gewerkte uren",
+      },
+      answerBy: "Antwoord voor {{date}}",
+      outcome: {
+        approved: "Goedgekeurd",
+        rejected: "Afgewezen",
+        confirmed: "Adres bevestigd",
+        addressRejected: "Adres afgewezen",
+        addressLapsed: "Adresbeoordeling verlopen",
+        employmentConfirmed: "Verzekeringsbericht geaccepteerd",
+        employmentRejected: "Verzekeringsbericht afgewezen",
+        employmentLapsed: "Beoordeling Verzekeringsbericht verlopen",
+        diplomasConfirmed: "Diploma's geaccepteerd",
+        diplomasRejected: "Diploma's afgewezen",
+        diplomasLapsed: "Beoordeling diploma's verlopen",
+      },
+      footer:
+        "Beheerders en leden met het recht om te beoordelen zien deze pagina.",
+      footerWho: "Wie dat heeft: <members>Leden</members>.",
+      back: "Terug naar beoordelingen",
+      decided: {
+        by: "Besloten door {{name}} · {{when}}",
+        at: "Besloten · {{when}}",
+        reason: "Reden: {{reason}}",
+      },
+      notWaiting: {
+        approved:
+          "Dit verzoek wacht niet meer op een besluit. Het is goedgekeurd.",
+        rejected:
+          "Dit verzoek wacht niet meer op een besluit. Het is afgewezen.",
+        other: "Dit verzoek wacht niet meer op een besluit.",
+      },
+      check: {
+        photosTitle: "Foto's",
+        title: "Een identiteitscontrole beoordelen",
+        why: {
+          title: "Waarom dit op jou wacht",
+          alwaysReview:
+            "Deze flow laat elk identiteitsbewijs door een beoordelaar goedkeuren. Bekijk de automatische controles hieronder voordat je beslist.",
+          body: "Geen handtekening of register staat in voor een deel van deze controle, dus een persoon moet het nakijken.",
+          no_current_employment:
+            "De identiteit is geverifieerd, maar in het Verzekeringsbericht staat geen huidige baan. Bekijk het dienstverband hieronder.",
+          current_benefit:
+            "De identiteit is geverifieerd, maar in het Verzekeringsbericht staat een lopende uitkering van UWV. Bekijk het dienstverband hieronder.",
+          current_other_income:
+            "De identiteit is geverifieerd, maar in het Verzekeringsbericht staat ander lopend inkomen zonder gewerkte uren: een pensioen, AOW, bijstand of een laatste betaling. Bekijk het dienstverband hieronder.",
+        },
+        auto: {
+          title: "Automatisch gecontroleerd",
+          none: "Er is geen automatische controle gemeld.",
+          chipGenuine: "De gegevens op de chip zijn echt en ongewijzigd",
+          chipNotCopy: "De chip is geen kopie",
+          livePerson: "Een echte persoon, geen foto of video",
+          faceMatch: "Het gezicht komt overeen met de documentfoto",
+          passed: "Geslaagd",
+          failed: "Mislukt",
+          notPerformed: "Niet uitgevoerd",
+        },
+        data: {
+          title: "Gegevens van de chip",
+          expires: "Verloopt",
+          level: "Bereikt niveau",
+          levelOnceApproved: "{{level}}, na goedkeuring",
+        },
+        decision: {
+          title: "Jouw besluit",
+          question:
+            "Is wat {{name}} heeft gestuurd echt, en is het van die persoon?",
+          approve: "Ja, keur de controle goed",
+          reject: "Nee, wijs de controle af",
+          wrong: "Wat klopt er niet",
+          wrongOptions: {
+            someoneElse: "Het is van iemand anders",
+            altered: "Het lijkt aangepast",
+            notAsked: "Het is niet wat gevraagd was",
+            other: "Iets anders",
+          },
+          reason: "Reden",
+          reasonHint:
+            "Verplicht. Wordt met jouw naam in het auditlogboek bewaard; de persoon ziet het niet.",
+          choiceRequired: "Kies of je de controle goedkeurt of afwijst.",
+          submit: "Beslis",
+          approveSubmit: "Controle goedkeuren",
+          rejectSubmit: "Controle afwijzen",
+          approved: "De controle is goedgekeurd.",
+          rejected: "De controle is afgewezen.",
+        },
+        own: {
+          sent: "Je hebt deze controle zelf verstuurd, dus een andere beoordelaar beslist erover.",
+          subject:
+            "Deze controle gaat over jou, dus een andere beoordelaar beslist erover.",
+        },
+      },
+      dataRequest: {
+        asked: "Gevraagd door {{name}} op {{date}}.",
+        askedPurged: "Gevraagd op {{date}}.",
+        answerBy: "Antwoord voor {{date}} (de AVG geeft één maand).",
+        who: {
+          title: "Wie vraagt het",
+          provenWith: "Bewezen met",
+          chip: "chip",
+          faceMatch: "live gezichtsvergelijking",
+          level: "Bereikt niveau",
+        },
+        found: {
+          title: "Gevonden gegevens van deze persoon",
+          data_access:
+            "Vink aan wat je deelt. Controles die met hetzelfde document zijn bewezen staan aangevinkt; de andere zijn mogelijk van iemand anders.",
+          data_erasure:
+            "Vink aan wat je verwijdert. Controles waarvan naam en geboortedatum van een geverifieerde chip zijn gelezen staan aangevinkt, met hetzelfde document of een ander: ze zijn van deze persoon. Haal het vinkje weg bij wat bewaard moet blijven.",
+          closed: "Wat er per controle is besloten.",
+          none: "Er is in je organisatie geen andere controle van deze persoon gevonden.",
+          unfinished:
+            "Een controle die nooit is afgerond heeft geen bewezen identiteit om mee te vergelijken: alleen het e-mailadres of de ingetypte naam komt overeen. Vink hem alleen aan als hij van deze persoon is.",
+          unfinishedErasure:
+            "Een controle die nooit is afgerond heeft geen bewezen identiteit om mee te vergelijken: alleen het e-mailadres of de ingetypte naam komt overeen. Vink hem aan als hij van deze persoon is om hem ook te verwijderen; de rest wordt verwijderd als de bewaartermijn van je organisatie afloopt.",
+          heldUntil: "Wettelijk bewaard tot {{date}}",
+          held: "Een controle die je wettelijk moet bewaren kan nog niet worden verwijderd, dus je kunt hem niet aanvinken. Het verzoek om hem te verwijderen wordt afgewezen tot de getoonde datum.",
+          levels: {
+            strong: "Hetzelfde document",
+            probable: "Dezelfde naam en geboortedatum",
+            email: "Hetzelfde e-mailadres",
+            name: "Dezelfde naam",
+          },
+          erased: "Verwijderd",
+          approved: "Goedgekeurd",
+          kept: "Bewaard",
+        },
+        decision: {
+          title: "Jouw besluit",
+          data_erasure_one: "Verwijder {{count}} controle.",
+          data_erasure_other: "Verwijder {{count}} controles.",
+          data_access_one:
+            "Open de gegevens van {{count}} controle om te downloaden.",
+          data_access_other:
+            "Open de gegevens van {{count}} controles om te downloaden.",
+          kept_one: "De andere {{count}} blijft.",
+          kept_other: "De andere {{count}} blijven.",
+          erasedAlready_one:
+            "{{count}} controle is al automatisch verwijderd. Wijs je af, dan blijft de rest bewaard.",
+          erasedAlready_other:
+            "{{count}} controles zijn al automatisch verwijderd. Wijs je af, dan blijft de rest bewaard.",
+          reason: "Reden",
+          reasonHint:
+            "Verplicht. Wordt met jouw naam in het auditlogboek bewaard.",
+          approve_data_erasure_one: "Verwijder {{count}} controle",
+          approve_data_erasure_other: "Verwijder {{count}} controles",
+          approve_data_access_one: "Open {{count}} controle",
+          approve_data_access_other: "Open {{count}} controles",
+          refuse: "Wijs het verzoek af",
+          confirmTitle_one: "{{count}} controle verwijderen?",
+          confirmTitle_other: "{{count}} controles verwijderen?",
+          confirmMessage:
+            "De persoonsgegevens in de controles die je hebt aangevinkt, en in dit verzoek, worden direct verwijderd en kunnen niet worden hersteld. De controles blijven als vastlegging zonder die gegevens.",
+          approved: "Het verzoek is goedgekeurd.",
+          rejected: "Het verzoek is afgewezen.",
+          restKept: "De rest blijft bewaard.",
+        },
+      },
+    },
+    developers: {
+      title: "Ontwikkelaars",
+      subtitle:
+        "Alles in de Business Wallet werkt zonder installatie. Kom hier alleen om hetzelfde vanuit je eigen software te doen: maak een token om de API aan te roepen en voeg een endpoint toe dat de resultaten ontvangt.",
+      adminOnly: "Alleen een beheerder kan deze pagina zien.",
+      signingApi: {
+        title: "Onderteken-API",
+        note: "Dezelfde API-tokens openen ook de onderteken-API op {{path}}: maak een ondertekenverzoek met een pdf en de ondertekenaars, haal de ondertekenlink van elke ondertekenaar op, lees de status en download de ondertekende pdf.",
+      },
+    },
+    apiKeys: {
+      title: "API-tokens",
+      nameRequired: "Vul een naam in.",
+      intro:
+        "Met een token start je software controles op elke flow en leest ze de resultaten. Je kunt het hier altijd opnieuw tonen.",
+      create: "Token aanmaken",
+      name: "Naam",
+      nameHint:
+        "Zodat je je tokens uit elkaar kunt houden, bijvoorbeeld het systeem dat het gebruikt.",
+      created: "Aangemaakt",
+      lastUsed: "Laatst gebruikt",
+      neverUsed: "Nooit",
+      empty: "Nog geen tokens.",
+      actions: "Acties",
+      revoke: "Intrekken",
+      revokeNamed: "{{name}} intrekken",
+      show: "Tonen",
+      showNamed: "{{name}} tonen",
+      shownTitle: "Token “{{name}}”",
+      shownHint:
+        "Bewaar het veilig, bijvoorbeeld in de geheimenopslag van je backend. Het tonen van een token komt in het auditlog.",
+      notRevealable: "Kan niet getoond worden",
+      notRevealableHint:
+        "Dit token is gemaakt voordat tokens opnieuw getoond konden worden. Maak een nieuw token aan en trek dit in om het te vervangen.",
+      revokeConfirm: {
+        title: "{{name}} intrekken?",
+        message:
+          "Alles wat dit token gebruikt, werkt meteen niet meer. Dit kan niet ongedaan worden gemaakt.",
+      },
+      createdTitle: "Kopieer je token nu",
+      createdHint:
+        "Bewaar het token “{{name}}” veilig, bijvoorbeeld in de geheimenopslag van je backend.",
+      createdNote:
+        "Je kunt het later opnieuw tonen met Tonen, naast het token.",
+    },
+    webhooks: {
+      endpoint: "Webhook-endpoint",
+      formHint:
+        "De wallet stuurt een ondertekend bericht naar deze URL als een sessie geverifieerd is, mislukt, verloopt of als de persoonsgegevens gewist zijn.",
+      url: "URL",
+      urlPlaceholder: "https://api.example.nl/hooks/yivi-proofing",
+      events: "Gebeurtenissen",
+      save: "Endpoint opslaan",
+      delivering: "Levert af",
+      failing: "Faalt",
+      secret: "Ondertekeningsgeheim",
+      retries: "Herhalingen",
+      retriesValue_one:
+        "Exponentieel uitstel, tot {{count}} poging binnen 24 uur",
+      retriesValue_other:
+        "Exponentieel uitstel, tot {{count}} pogingen binnen 24 uur",
+      queued_one: "{{count}} resultaat wacht op een nieuwe poging",
+      queued_other: "{{count}} resultaten wachten op een nieuwe poging",
+      test: "Testbericht sturen",
+      rotate: "Geheim vernieuwen",
+      edit: "Bewerken",
+      remove: "Verwijderen",
+      rotateConfirm: {
+        title: "Ondertekeningsgeheim vernieuwen?",
+        message:
+          "Berichten worden vanaf nu met het nieuwe geheim ondertekend, ook de berichten die op een nieuwe poging wachten. Nog 24 uur dragen ze ook een handtekening met het oude geheim, zodat je ontvanger blijft werken terwijl je hem op het nieuwe geheim instelt.",
+      },
+      removeConfirm: {
+        title: "Webhook-endpoint verwijderen?",
+        message:
+          "Er worden geen berichten meer naartoe gestuurd, en de berichten die op een nieuwe poging wachten vervallen.",
+      },
+      secretTitle: "Je ondertekeningsgeheim",
+      secretHint:
+        "Kopieer het nu en bewaar het bij je ontvanger: het wordt niet opnieuw getoond. Controleer er de Yivi-Signature-header mee.",
+      recent: "Recente afleveringen",
+      columns: {
+        event: "Gebeurtenis",
+        session: "Sessie",
+        response: "Antwoord",
+        sent: "Verstuurd",
+      },
+      defaultBody:
+        "Er worden geen berichten verstuurd. Resultaten staan op het tabblad Personen van elke flow, zijn op te vragen via de API en staan in de auditlog.",
+      defaultHint:
+        "Host je een eigen ontvanger? Voeg de URL toe en elk ondertekend bericht wordt daarheen gepost, voor alle flows.",
+      useOwn: "Endpoint toevoegen",
+      noDeliveries: "Nog geen berichten verstuurd.",
+      queuedTag: "In de wachtrij",
+      noAnswer: "Geen antwoord",
+      retrying_one: "poging {{count}} mislukt, opnieuw",
+      retrying_other: "{{count}} pogingen mislukt, opnieuw",
+      gaveUp: "opgegeven",
+    },
+  },
+  identityProofingFlows: {
+    title: "Flows",
+    subtitle:
+      "Een flow bepaalt welke gegevens worden gevraagd en het minimale betrouwbaarheidsniveau. Open een flow om te zien welke personen hij heeft geïdentificeerd.",
+    adminOnly:
+      "Alleen een beheerder van deze organisatie kan verificatieflows beheren.",
+    notCompletable: "Kan niet vanuit de wallet verstuurd worden",
+    referencePhoto: "Eigen foto, via API",
+    versionShort: "v{{version}}",
+    versionLong: "Versie {{version}}",
+    edit: "Flow bewerken",
+    columns: {
+      flow: "Flow",
+      assurance: "Betrouwbaarheid",
+      people: "Personen, 30 dagen",
+      preselected: "Voorgeselecteerd",
+      members: "Leden mogen gebruiken",
+      open: "Openen",
+    },
+    open: "{{name}} openen",
+    selection: {
+      empty: "Nog geen flows. Maak er een aan met Nieuwe flow.",
+      default: "Standaard",
+      members: "Leden",
+      save: "Beschikbare flows opslaan",
+    },
+    page: {
+      notFound: "Deze flow bestaat niet.",
+      backToFlows: "Terug naar de flows",
+      defaultFlow: "Standaardflow",
+      tabsLabel: "Flow",
+      people: "Personen",
+    },
+    editTabs: {
+      check: "Controle",
+      branding: "Huisstijl",
+      hosted: "Gehoste pagina",
+    },
+    branding: {
+      title: "Huisstijl voor deze flow",
+      hint: "Gebruikt in de verificatiemail, op de gehoste pagina en in de Idem-app van deze flow, voor iemand buiten de organisatie.",
+      which: "Welke huisstijl",
+      same: {
+        title: "Zelfde als de organisatie",
+        noLogo: "geen logo",
+        change: "Wijzigen onder Instellingen › Huisstijl",
+      },
+      custom: {
+        title: "Eigen huisstijl voor deze flow",
+        hint: "Voor een product met een eigen naam of uiterlijk. Velden die je leeg laat gebruiken die van de organisatie.",
+      },
+      orgEmpty: "Organisatie: leeg",
+      logoInherited: "Het logo van de organisatie",
+      preview: {
+        caption: "Voorbeeld",
+        mail: "Verificatiemail",
+        app: "Idem-app",
+        hosted: "Gehoste pagina",
+        appNote:
+          "Het eerste scherm van de Idem-app als de persoon het verzoek opent.",
+        idem: {
+          title: "Verzoek",
+          heading: "{{party}} wil je identiteit verifiëren",
+          requestedBy: "Aangevraagd door {{org}}",
+          expiresIn_one: "Dit verzoek verloopt over {{count}} minuut.",
+          expiresIn_other: "Dit verzoek verloopt over {{count}} minuten.",
+          theyWillReceive: "Zij ontvangen",
+          stepByStep:
+            "Je gegevens gaan stap voor stap naar de verificatiedienst, zodat je op een ander apparaat verder kunt. {{party}} ontvangt ze pas als je afrondt. Stop je, dan worden ze verwijderd zodra dit verzoek verloopt.",
+          continue: "Doorgaan",
+          decline: "Weigeren",
+          items: {
+            documentIdentity:
+              "Documentidentiteit (naam, geboortedatum, documentnummer, vervaldatum)",
+            additionalDetails:
+              "Aanvullende persoonsgegevens (persoonsnummer, geboorteplaats)",
+            facePhoto: "Je pasfoto uit de chip van het document",
+            chipChecks: "Controles op de echtheid van het document",
+            biometrics: "Resultaat van de gezichtsverificatie",
+            ageOver: "Of je {{age}} jaar of ouder bent",
+            ageCheck: "Of je oud genoeg bent",
+            everything: "Alles wat de app uit je document leest",
+          },
+        },
+      },
+      dropConfirm: {
+        title: "De huisstijl van de organisatie gebruiken?",
+        message:
+          "De eigen weergavenaam, het logo, de kleur, het supportcontact en de URL van de privacyverklaring van deze flow worden verwijderd. De mail, de gehoste pagina en de Idem-app tonen daarna de huisstijl van de organisatie.",
+        confirm: "Die van de organisatie gebruiken",
+      },
+    },
+    hosted: {
+      title: "Gehoste pagina",
+      hint: "De pagina die iemand opent via een link of e-mail voor deze flow.",
+      enabled: "Toestaan dat deze flow als link wordt verstuurd",
+      enabledHint:
+        "Leden kunnen dan “Link kopiëren” of e-mail kiezen als ze iemand verifiëren.",
+      locales: "Talen",
+      localesHint:
+        "De pagina opent in de taal van het verzoek, anders in de browsertaal van de persoon.",
+      localesRequired: "Houd minstens één taal aan.",
+      reasonsMissing:
+        "Vul eerst op het tabblad Controle de redenen in voor {{languages}}: elk onderdeel dat de flow verzamelt heeft er een nodig in elke taal die de pagina aanbiedt.",
+      openCheck: "Naar het tabblad Controle",
+      completion: "Als de controle klaar is",
+      returnUrl: {
+        label: "Terugkeerpagina",
+        hint: "Optioneel. Links voor deze flow sturen de persoon hierheen, tenzij het verzoek een eigen pagina noemt. Hij moet op een van de terugstuur-origins staan onder Instellingen › Gegevens en privacy.",
+        placeholder: "https://portal.example.com/geverifieerd",
+      },
+      completions: {
+        redirect: {
+          title: "Terug naar je website",
+          hint: "Naar het adres dat bij het verzoek hoort, anders naar de terugkeerpagina hieronder. Zonder een van beide een bedankpagina.",
+        },
+        done: {
+          title: "Altijd een bedankpagina tonen",
+          hint: "Verzoeken kunnen geen terugkeeradres meegeven.",
+        },
+      },
+      save: "Opslaan",
+      preview: "Voorbeeld · eerste stap",
+      previewNote: "Gebruikt de huisstijl van deze flow.",
+    },
+    versions: {
+      title: "Versies",
+      hint: "Verzoeken die al verstuurd zijn houden de versie waarmee ze begonnen. Activeer een eerdere versie om terug te gaan.",
+      active: "Actief",
+      activate: "Activeren",
+    },
+    steps: {
+      document_capture: "Document scannen",
+      nfc_read: "Chip van het document lezen",
+      document_photo: "Document fotograferen",
+      face_verification: "Gezichtscontrole",
+      address: "Adres invullen",
+      documents: "Documenten uploaden ({{documents}})",
+    },
+    documents: {
+      diploma: "DUO-diploma",
+      employment: "UWV-Verzekeringsbericht",
+    },
+    bsnPolicies: {
+      retrieve: "Het volledige BSN bewaren",
+      mask: "De laatste 3 cijfers bewaren",
+      omit: "Weglaten",
+    },
+    assuranceLevels: {
+      low: "Laag",
+      substantial: "Substantieel",
+    },
+    checks: {
+      passiveAuth: "De gegevens op de chip zijn echt en ongewijzigd",
+      chipAuth: "De chip is geen kopie",
+      faceMatch: "Het gezicht komt overeen met de documentfoto",
+      liveness: "Een levend persoon, geen foto of video",
+    },
+    attributes: {
+      dg1: "Naam en documentgegevens",
+      age_over: "Leeftijdscontrole",
+      dg11: "Geboorteplaats en persoonsnummer (BSN)",
+      dg2: "Pasfoto van de chip",
+      chip_checks: "Uitkomst chipcontroles",
+      document_image: "Foto's van het document",
+      selfie: "Selfie",
+      biometrics: "Scores gezichtscontrole",
+    },
+    attributeHints: {
+      dg1: "Naam, geboortedatum, nationaliteit, en het type, nummer en de vervaldatum van het document.",
+      age_over:
+        "Alleen of de persoon de minimumleeftijd of ouder is, bepaald uit de geboortedatum op de chip of de documentfoto. Nooit de datum zelf: aangevinkt met Naam en documentgegevens komen die zonder geboortedatum.",
+      dg11: "Alleen als de chip ze bevat; veel chips niet.",
+      dg2: "De pasfoto van de houder op de chip, getoond naast de selfie.",
+      chip_checks: "Of de chip echt bleek en geen kopie.",
+      document_image:
+        "De voor- en achterkant van een ID-kaart of rijbewijs, of de fotopagina van een paspoort.",
+      selfie:
+        "De foto van het gezicht die tijdens de gezichtscontrole is gemaakt.",
+      biometrics:
+        "Hoe goed het gezicht overeenkwam met de documentfoto, en of het een levend persoon was.",
+    },
+    kinds: {
+      identity: { title: "Identiteitscontrole" },
+      data_access: { title: "Mijn gegevens inzien" },
+      data_erasure: { title: "Mijn gegevens verwijderen" },
+    },
+    dataRequests: {
+      title:
+        "Mijn gegevens inzien en Mijn gegevens verwijderen zijn altijd beschikbaar",
+      hint: "Elke organisatie biedt deze twee AVG-verzoeken. Het zijn geen flows die je bewerkt.",
+      link: "Instellingen › Gegevens en privacy",
+    },
+    new: {
+      title: "Nieuwe flow",
+      editTitle: "{{name}} bewerken",
+      name: "Naam",
+      namePlaceholder: "NL-paspoort + selfie",
+      create: "Flow aanmaken",
+      saveVersion: "Opslaan als versie {{version}}",
+      errors: {
+        name: "Geef de flow een naam.",
+        steps: "Kies minstens één stap.",
+        assuranceLevel:
+          "Deze flow kan het vereiste niveau niet halen: zet aan wat het niveau vereist, of verlaag het.",
+        documentTypes: "Vink minstens één documenttype aan.",
+        issuingCountries: "Voeg een land toe, of kies Elk land.",
+        faceMatchThreshold:
+          "Kies een drempel voor de gezichtsvergelijking die het niveau toestaat.",
+        retentionSeconds: "Vul een heel aantal seconden in.",
+        ageOver: "Vul een heel aantal jaren van 1 tot en met 120 in.",
+        apps: "De Idem-app heeft niets te doen in deze flow: zet het scannen en lezen van het document of de gezichtscontrole in de app aan, of vink de Idem-app uit.",
+        appsNeeded:
+          "Het scannen en lezen van het document en de gezichtscontrole in de app hebben een app nodig: vink de Yivi-app, de Idem-app of beide aan.",
+        personalDataYivi:
+          "Persoonsgegevens komen alleen uit de Yivi-app: vink onder Apps de Yivi-app aan, of vink persoonsgegevens uit.",
+        personalDataDocument:
+          "De Idem-app deelt geen persoonsgegevens maar leest een document: vink ook een documenttype aan, of vink onder Apps de Idem-app uit.",
+        personalDataAge:
+          "Met persoonsgegevens wordt de foto van het document aan de persoon gekoppeld via de geboortedatum, die een leeftijdscheck niet bewaart: zet de leeftijdscheck uit.",
+        identity:
+          "Een diplomaflow heeft de naam en geboortedatum nodig: zet het scannen van het document aan en vink Naam en documentgegevens aan.",
+      },
+    },
+    editor: {
+      orgDefault: "Standaard van de organisatie",
+      nameHint:
+        "Alleen jij en je collega's zien deze naam. De persoon die wordt gecontroleerd ziet hem nooit.",
+      level: "Niveau van identiteitsverificatie",
+      levelHint:
+        "Het deel identiteitsverificatie van een eIDAS-betrouwbaarheidsniveau (uitvoeringsverordening 2015/1502).",
+      levels: {
+        none: {
+          title: "Geen",
+          hint: "Er is geen niveau vereist. De persoon doet de stappen onder Geavanceerde instellingen; het resultaat zegt welk niveau is gehaald.",
+        },
+        low: {
+          title: "Laag",
+          hint: "De persoon scant met de telefoon de chip in het paspoort of de ID-kaart. Geen selfie.",
+          caveat:
+            "Laat zien dat het document echt is, niet dat de persoon die scant de eigenaar is of dat de chip het origineel is.",
+        },
+        substantial: {
+          title: "Substantieel",
+          hint: "De persoon scant het paspoort of de ID-kaart, houdt het tegen de telefoon zodat de chip wordt gelezen, en maakt een selfie. Een controle die tekortschiet wordt afgewezen.",
+        },
+      },
+      advanced: {
+        title: "Geavanceerde instellingen",
+        hint: "Stappen, documenten, wat je ontvangt, privacy.",
+      },
+      locks: {
+        required: "Vereist voor {{level}}",
+        mandatory: "Dit is verplicht voor {{level}}",
+        passiveAuth: "Altijd aan als de chip wordt gelezen",
+        faceMatch: "Altijd aan bij de gezichtscontrole",
+        everyFlow: "Altijd aan, voor elke flow",
+      },
+      steps: {
+        title: "Wat de persoon doet",
+        hint: "Stappen in de volgorde waarin ze gebeuren.",
+        scanAndRead: "Het document scannen en lezen",
+        scanAndReadHint:
+          "De persoon scant de coderegels van het paspoort, de ID-kaart of het Nederlandse rijbewijs en houdt het document daarna tegen de telefoon zodat de chip wordt gelezen.",
+        addressHint:
+          "Na de identiteitscontrole, in de browser en niet in de Idem-app: de persoon vult zijn postadres in. Een Nederlands adres wordt gecontroleerd in de Nederlandse adresregistratie (BAG); elk ander adres wordt bewaard zoals hij het opgeeft. Zo'n flow wordt op het scherm getoond of als gehoste link verstuurd, nooit gemaild.",
+        photoHint:
+          "De voor- en achterkant van een ID-kaart of rijbewijs, of de fotopagina van een paspoort, gemaakt in de browser met de ID-scan. Getoond op het scherm of verstuurd als gehoste link, nooit per mail.",
+        faceHint:
+          "Een selfie, gecontroleerd op een levend persoon en vergeleken met de foto op de chip.",
+        faceInScan: "Het gezicht controleren in de ID-scan",
+        faceInScanHint:
+          "Direct na de foto van het document, in de browser: de ID-scan controleert of de persoon levend is en vergelijkt het gezicht met de foto op het document. Niet met de chipfoto, dus dit haalt geen betrouwbaarheidsniveau.",
+        documents: "Documenten uploaden",
+        documentsHint:
+          "Na de identiteitscontrole, in de browser: de persoon uploadt elk document dat hieronder is aangevinkt als pdf. Elk bestand wordt gecontroleerd op het zegel van de uitgever en op naam en geboortedatum. Alleen op het scherm of via een link, nooit per e-mail.",
+        diploma: "Diploma-uittreksel (DUO)",
+        diplomaHint: "Uit Mijn DUO, tot 10 per sessie.",
+        employment: "Verzekeringsbericht (UWV)",
+        employmentHint: "Uit Mijn UWV, één per sessie.",
+        faceWithoutChip:
+          "Zonder het lezen van de chip is er geen chipfoto: het gezicht wordt vergeleken met je eigen foto van deze persoon, die jouw systeem bij elke sessie via de API meestuurt. Deze flow kan niet naar leden worden gestuurd, loopt alleen in de Idem-app en haalt geen betrouwbaarheidsniveau.",
+        lifetime: "Geldigheid QR-code",
+        lifetimeHint:
+          "Daarna verloopt de sessie en is een nieuw verzoek nodig.",
+        apps: "Apps",
+        appsHint: "De apps waarin de persoon deze flow kan doen.",
+        yiviApp: "Yivi-app",
+        yiviAppHint:
+          "De persoon deelt zijn gegevens uit de Yivi-app, op dit scherm of via een link.",
+        idemApp: "Idem-app",
+        idemAppHint:
+          "De persoon scant zijn paspoort of ID-kaart met de Idem-app en leest de chip uit.",
+        needsApp:
+          "Heeft een app nodig: vink onder Apps de Yivi-app of de Idem-app aan.",
+        idemAppLock:
+          "Niet zolang persoonsgegevens het enige documenttype is: de Idem-app deelt die niet. Vink ook een documenttype aan.",
+        appsBoth:
+          "De persoon kiest een van de twee apps. Wat je ontvangt hangt af van de gekozen app.",
+        appsNone: "Geen app: de ID-scan in de browser is de hele controle.",
+        appsOnly: {
+          yivi: "Deze flow werkt alleen met de Yivi-app: de persoon krijgt dat te zien en geen keuze.",
+          idem: "Deze flow werkt alleen met de Idem-app: de persoon krijgt dat te zien en geen keuze.",
+        },
+        lifetimeDefault: "Standaard van de organisatie ({{minutes}} minuten)",
+        minutes_one: "{{count}} minuut",
+        minutes_other: "{{count}} minuten",
+      },
+      documents: {
+        title: "Welke documenten",
+        hint: "Een document dat niet is aangevinkt wordt geweigerd.",
+        types: "Documenttypen",
+        passport: "Paspoort",
+        identity_card: "Identiteitskaart",
+        residence_permit: "Verblijfsvergunning",
+        drivers_license: "Nederlands rijbewijs",
+        personal_data: "Persoonsgegevens (BRP, met DigiD)",
+        personalDataHint:
+          "Werkt alleen in de Yivi-app: naam en geboortedatum uit de BRP, geladen met DigiD. Een foto van het document wordt daarmee vergeleken. Met de Idem-app laat de persoon een van de documenttypes hierboven lezen.",
+        personalDataLock: "Alleen als onder Apps de Yivi-app is aangevinkt.",
+        countries: "Landen van uitgifte",
+        any: "Elk land",
+        only: "Alleen deze landen",
+        add: "Een land toevoegen",
+        addPlaceholder: "Een land toevoegen",
+        addHint: "Kies uit de lijst van landen die documenten uitgeven.",
+        remove: "{{country}} verwijderen",
+        removeLabel: "Verwijderen",
+      },
+      receive: {
+        title: "Wat je ontvangt",
+        hint: "Zonder vinkjes krijg je alleen de uitkomst. Elk onderdeel dat je aanvinkt heeft een reden nodig in elke taal van de gehoste pagina; de persoon leest die voor ze beginnen.",
+        identityLocked:
+          "Naam en documentgegevens blijft aan: een gegevensverzoek vindt de sessies van de persoon op naam en geboortedatum, en een diploma of Verzekeringsbericht wordt daarmee vergeleken.",
+        ageOver: "Minimumleeftijd",
+        ageOverOption: "{{age}} jaar of ouder",
+        ageOverHint:
+          "Alleen leeftijdscontrole beantwoordt of de persoon op de dag van de controle deze leeftijd of ouder is.",
+        ageOverLocked:
+          "Uit bij verplichte diploma's: die worden met de geboortedatum vergeleken.",
+        reason: "Waarom je het nodig hebt · {{language}}",
+        reasonOptional: "Waarom je het nodig hebt · {{language}} (optioneel)",
+        reasonMissing: "Vul ook de reden in voor {{language}}.",
+      },
+      checks: {
+        title: "Controles",
+        hint: "Een mislukte controle wijst de sessie af.",
+        expired: "Verlopen documenten weigeren",
+        threshold: {
+          label: "Drempel voor de gezichtsvergelijking",
+          hint: "Hoe goed de selfie moet overeenkomen met de foto op de chip. Een hogere drempel wijst meer look-alikes af, en ook meer echte houders.",
+          floor: "Minstens {{min}} voor {{level}}",
+          recommended: "De markering bij {{min}} is het aanbevolen minimum.",
+          warningLabel: "Onder {{min}} wordt afgeraden",
+          warning:
+            "Onder {{min}} wordt afgeraden: meer mensen die niet de houder van het document zijn komen erdoor.",
+        },
+      },
+      review: {
+        title: "Beoordeling",
+        hint: "Welke delen van een sessie op een beoordelaar wachten, ook als ze alle controles doorstaan.",
+        always: "Het identiteitsbewijs altijd laten beoordelen",
+        alwaysHint:
+          "Een identiteitsbewijs dat alle controles doorstaat, wacht op een beoordelaar die het goedkeurt. Een mislukte controle wijst het nog steeds af.",
+        address: "Het adres altijd laten beoordelen",
+        addressHint:
+          "Elk adres wacht op een beoordelaar, ook een adres dat het woonadres uit de BRP bevestigt.",
+        employment: "Het Verzekeringsbericht altijd laten beoordelen",
+        employmentHint:
+          "Elk bewaard Verzekeringsbericht wacht op een beoordelaar, ook een bericht met alleen een huidige baan.",
+        diplomas: "De diploma's altijd laten beoordelen",
+        diplomasHint:
+          "De bewaarde diploma-uittreksels wachten op een beoordelaar, ook als het zegel van DUO klopt.",
+      },
+      privacy: {
+        title: "Privacy",
+        hint: "Hoe lang gegevens worden bewaard en wat wordt afgeschermd.",
+        retention: "Persoonsgegevens bewaren gedurende",
+        retentionHint:
+          "Nooit korter dan een wettelijke termijn die is ingesteld onder Instellingen › Gegevens en privacy.",
+        retentionDefault: "Standaard van de organisatie ({{days}} dagen)",
+        retentionSeconds_one: "{{count}} seconde",
+        retentionSeconds_other: "{{count}} seconden",
+        bsn: "BSN",
+        bsnHint:
+          "Bewaar het volledige BSN alleen als de wet je toestaat het te verwerken.",
+        blackOutBsn: "Het BSN en de handtekening op documentfoto's zwart maken",
+        keepFacePhotos: "Gezichtsfoto's bewaren na de vergelijking",
+        keepFacePhotosHint:
+          "Uit: het portret, de selfie en de foto van de afzender verdwijnen zodra de gezichtsvergelijking klaar is; de uitkomst blijft. Zet dit alleen aan voor een organisatie die ze moet bewaren.",
+      },
+      footer:
+        "Opslaan maakt versie {{version}}. Verzoeken die al zijn verstuurd houden hun versie.",
+      countries: {
+        EUE: "Europese Unie (laissez-passer)",
+        GBD: "Burger van een Brits overzees gebiedsdeel",
+        GBN: "Brits staatsburger (overzee)",
+        GBO: "Brits overzees burger",
+        GBP: "Brits beschermd persoon",
+        GBS: "Brits onderdaan",
+        UNA: "Gespecialiseerd agentschap van de Verenigde Naties",
+        UNK: "VN-missie in Kosovo (UNMIK)",
+        UNO: "Verenigde Naties",
+        XCC: "Caribische Gemeenschap (CARICOM)",
+        XES: "Organisatie van Oost-Caribische Staten",
+        XMP: "Mercosur",
+        XOM: "Soevereine Militaire Orde van Malta",
+        XPO: "Interpol",
+      },
+    },
+  },
+  reviewLink: {
+    reviewingAs: "Je beoordeelt als {{name}} · link geldig tot {{until}}",
+    done: "Niets van deze sessie wacht nog op jou. Je kunt deze pagina sluiten.",
+    invalid:
+      "Deze beoordelingslink is onbekend of verlopen. Vraag een nieuwe aan in je eigen systeem.",
+    error: "De beoordeling kon niet worden geladen. Probeer het zo opnieuw.",
+  },
+  proofLink: {
+    notFound: "Deze link bestaat niet, of is verwijderd.",
+    decline: "Weigeren",
+    declineConfirm: {
+      title: "Dit verzoek weigeren?",
+      message:
+        "{{organization}} krijgt je gegevens niet, en deze link werkt daarna niet meer. Wil je later toch verifiëren, vraag {{organization}} dan om een nieuwe link.",
+      confirm: "Weigeren",
+      back: "Ga terug",
+    },
+    errors: {
+      unavailable:
+        "Deze link werkt nu niet. Neem contact op met de organisatie die hem stuurde.",
+      sessionOver:
+        "Deze sessie is afgelopen. Vraag de organisatie die je deze link stuurde om een nieuwe.",
+    },
+    redirecting: "Je wordt teruggestuurd…",
+    poweredBy: "Mogelijk gemaakt door Yivi",
+    ended: {
+      started_one:
+        "De controle is niet binnen {{count}} minuut afgerond, dus er is niets gedeeld met {{name}}.",
+      started_other:
+        "De controle is niet binnen {{count}} minuten afgerond, dus er is niets gedeeld met {{name}}.",
+      timedOut:
+        "De controle is niet op tijd afgerond, dus er is niets gedeeld met {{name}}.",
+      notStarted:
+        "De controle is niet op tijd gestart, dus er is niets gedeeld met {{name}}.",
+      retryTitle: "Opnieuw proberen?",
+      retryHint: "Vraag {{name}} om een nieuwe link.",
+    },
+    dataRequest: {
+      data_access: {
+        intro:
+          "Je vraagt {{organization}} welke gegevens er van je zijn. Bevestig eerst wie je bent.",
+        inReview:
+          "Je verzoek is ter beoordeling naar {{organization}} gestuurd. Open deze link later opnieuw om de uitkomst te zien.",
+      },
+      data_erasure: {
+        intro:
+          "Je vraagt {{organization}} om je gegevens te verwijderen. Bevestig eerst wie je bent.",
+        inReview:
+          "Je verzoek is ter beoordeling naar {{organization}} gestuurd. Open deze link later opnieuw om de uitkomst te zien.",
+      },
+      erased: "Je gegevens zijn verwijderd.",
+      erasedPartly_one:
+        "We hebben de gegevens verwijderd die we met zekerheid aan jou konden koppelen. {{count}} eerder verzoek konden we niet met zekerheid aan jou koppelen. Dat is bewaard en wordt verwijderd zodra de bewaartermijn van {{organization}} verloopt.",
+      erasedPartly_other:
+        "We hebben de gegevens verwijderd die we met zekerheid aan jou konden koppelen. {{count}} eerdere verzoeken konden we niet met zekerheid aan jou koppelen. Die zijn bewaard en worden verwijderd zodra de bewaartermijn van {{organization}} verloopt.",
+      keptByLaw_one:
+        "{{count}} identiteitscontrole wordt bewaard tot {{date}}, omdat {{organization}} die volgens de wet moet bewaren. Daarna wordt ze verwijderd.",
+      keptByLaw_other:
+        "{{count}} identiteitscontroles worden bewaard tot {{date}}, omdat {{organization}} die volgens de wet moet bewaren. Daarna worden ze verwijderd.",
+      refused: {
+        reviewer:
+          "{{organization}} heeft je verzoek geweigerd. Neem contact met hen op als je wilt weten waarom.",
+        lapsed:
+          "{{organization}} heeft je verzoek niet binnen een maand beantwoord. Vraag hen om een nieuwe link.",
+        paused:
+          "{{organization}} kon je verzoek nu niet behandelen. Vraag hen later om een nieuwe link.",
+        law: "{{organization}} moet je gegevens volgens de wet bewaren, daarom zijn ze niet verwijderd.",
+      },
+      download: "Mijn gegevens downloaden",
+      downloadUntil: "Beschikbaar tot {{date}}.",
+      downloadExpired: "De download is niet meer beschikbaar.",
+    },
+  },
+  vog: {
+    title: "Dien je VOG in",
+    subtitle:
+      "{{org}} vraagt leden om een geldige Verklaring Omtrent het Gedrag (VOG).",
+    loading: "Je VOG-inzending wordt geopend…",
+    forEmail: "Voor {{email}}",
+    completing: "Wordt vastgelegd…",
+    submitError: "Kon je VOG niet controleren: {{message}}",
+    linkNotFoundTitle: "Deze link werkt niet meer",
+    linkNotFoundBody:
+      "VOG-links verlopen, een nieuwere link vervangt een oudere, en een link werkt niet meer zodra er een geldige VOG is vastgelegd. Vraag een beheerder van de organisatie om een nieuwe link, of start hem vanuit de wallet.",
+    errorTitle: "Kon deze link niet openen",
+    errorBody: "{{message}}",
+    doneHint:
+      "{{org}} heeft de uitkomst vastgelegd. Je kunt deze pagina sluiten of naar de wallet gaan.",
+    goToApp: "Naar de wallet",
+    identity: {
+      heading: "Bevestig eerst je identiteit",
+      hint: "Een VOG-controle vergelijkt de naam en geboortedatum op het document met je identiteit, en {{org}} heeft nog geen geverifieerde identiteit van je. Scan de code met je wallet om te bevestigen wie je bent; daarna kun je direct je VOG uploaden.",
+      start: "Mijn identiteit bevestigen",
+      combinedHeading: "Of doe beide in één keer",
+      combinedHint:
+        "{{org}} accepteert ook de pbdf.vog-credential. Deel je identiteit en je VOG vanuit je wallet in één scan.",
+      combinedStart: "Identiteit bevestigen en VOG delen",
+      combinedDone: "Je identiteit is bevestigd en je VOG is gecontroleerd",
+    },
+    upload: {
+      heading: "Upload je VOG",
+      hint: "Live gecontroleerd bij validatie.nl en vergeleken met je vastgelegde identiteit. De PDF zelf wordt nooit opgeslagen - alleen de uitkomst.",
+      chooseFile: "Kies een PDF",
+      uploading: "Je VOG wordt gecontroleerd…",
+    },
+    credential: {
+      heading: "Of deel hem vanuit je wallet",
+      hint: "{{org}} accepteert ook de pbdf.vog-credential. Deze wordt uitgegeven door Stichting Privacy by Design over een VOG die zij bij uitgifte hebben gevalideerd, geen actuele verklaring van Justis.",
+      start: "Delen vanuit wallet",
+    },
+    result: {
+      valid: "Je VOG is geldig.",
+      rejected:
+        "Dit document kon niet worden gevalideerd als geldige, actuele VOG.",
+      mismatch:
+        "De naam of geboortedatum op deze VOG komt niet overeen met je vastgelegde identiteit.",
+      insufficientScope: "Deze VOG dekt niet alles wat {{org}} vereist.",
+      tooOld: "Deze VOG is ouder dan {{org}} accepteert.",
+    },
+    banner: {
+      none: "{{org}} vraagt een VOG (Verklaring Omtrent het Gedrag) van je.",
+      expiring: "Je VOG voor {{org}} verloopt op {{date}}.",
+      expired: "Je VOG voor {{org}} is verlopen op {{date}}.",
+      rejected: "Je laatste VOG-inzending voor {{org}} is niet geaccepteerd.",
+      recheckRequired:
+        "De VOG-vereisten van {{org}} zijn gewijzigd; dien een nieuwe VOG in.",
+      requested: "{{org}} heeft je gevraagd een VOG in te dienen.",
+      action: "VOG indienen",
+      error: "Kon je VOG-link niet openen: {{message}}",
+    },
+  },
   dashboard: {
     greeting: {
       morning: "Goedemorgen, {{name}}",
       afternoon: "Goedemiddag, {{name}}",
       evening: "Goedenavond, {{name}}",
     },
-    role: "Je rol: {{role}}",
-    stats: {
-      attestations: "Uitgegeven attestaties",
-      documents: "Te ondertekenen documenten",
-    },
-    details: "Details",
-    id: "ID",
     viewMembers: "Leden bekijken",
-    wallet: {
-      title: "Business wallet",
-      legalName: "Wettelijke naam",
-      kvkNumber: "KVK-nummer",
-      euid: "EUID",
-      address: "Digitaal adres",
-      status: "Status",
+    todo: {
+      title: "Te doen",
+      hint: "Wat in de Business Wallet jouw aandacht vraagt.",
+      empty: "Er is nu niets dat jouw aandacht vraagt.",
+      error: "Kon ledeninzichten niet laden: {{message}}",
+      reviews_one: "{{number}} verzoek wacht op jouw besluit",
+      reviews_other: "{{number}} verzoeken wachten op jouw besluit",
+      reviewsDetail:
+        "Identiteitscontroles en gegevensverzoeken waarover een persoon moet beslissen.",
+      openReviews: "Beoordelingen openen",
+      notIdentified_one: "{{count}} lid heeft zich niet geïdentificeerd",
+      notIdentified_other: "{{count}} leden hebben zich niet geïdentificeerd",
+      notIdentifiedDetail:
+        "Leden moeten zich identificeren voordat ze namens {{org}} kunnen handelen.",
+      vogAttention_one: "{{count}} lid heeft een VOG die aandacht vraagt",
+      vogAttention_other: "{{count}} leden hebben een VOG die aandacht vraagt",
+      vogAttentionDetail:
+        "Ontbreekt, gevraagd, afgewezen, verlopen of opnieuw nodig.",
     },
+    waiting: {
+      title: "Wachten op anderen",
+      hint: "Er is nog niets dat jij hoeft te doen.",
+      empty: "Je wacht op niemand.",
+      unfinished_one: "{{number}} identiteitscontrole niet afgerond",
+      unfinished_other: "{{number}} identiteitscontroles niet afgerond",
+      unfinishedDetail: "De mensen hebben ze nog niet afgerond.",
+      forAdmin_one: "{{number}} verzoek wacht op een beheerder",
+      forAdmin_other: "{{number}} verzoeken wachten op een beheerder",
+      forAdminDetail: "Een beheerder moet erover beslissen.",
+      openOverview: "Overzicht openen",
+    },
+    orgDetails:
+      "Organisatiegegevens, KVK-nummer en digitaal adres staan bij <settings>Instellingen › Organisatie</settings>.",
   },
   access: {
     notMember: "Je bent geen lid van deze organisatie.",
@@ -354,6 +2354,10 @@ export const nl: Translation<typeof en> = {
     home: "Terug naar home",
   },
   toasts: {
+    attestationHeldRecheckedSame:
+      "Status opnieuw gecontroleerd: deze credential is ongewijzigd",
+    attestationHeldRechecked:
+      "Status opnieuw gecontroleerd: deze credential is veranderd",
     dismiss: "Sluiten",
     error: "Er is iets misgegaan. Probeer het opnieuw.",
     invitationSent: "Uitnodiging verstuurd",
@@ -361,16 +2365,32 @@ export const nl: Translation<typeof en> = {
     invitationRevoked: "Uitnodiging ingetrokken",
     memberUpdated: "Lid bijgewerkt",
     memberRemoved: "Lid verwijderd",
+    identitySettingsSaved: "Instellingen voor heridentificatie opgeslagen",
+    identificationRequested_one: "Identificatie aangevraagd",
+    identificationRequested_other:
+      "Identificatie aangevraagd bij {{count}} leden",
+    screeningSettingsSaved: "VOG-screeninginstellingen opgeslagen",
+    vogRequested_one: "VOG aangevraagd",
+    vogRequested_other: "VOG aangevraagd bij {{count}} leden",
     organizationUpdated: "Organisatie bijgewerkt",
     organizationDeleted: "Organisatie verwijderd",
+    testModeOn: "{{name}} staat nu in testmodus",
+    testModeOff: "{{name}} is nu live",
     departmentAdded: "Afdeling toegevoegd",
     departmentRenamed: "Afdeling hernoemd",
     departmentDeleted: "Afdeling verwijderd",
+    mandateGranted: "Mandaat verleend",
+    mandateRevoked_one: "Mandaat ingetrokken",
+    mandateRevoked_other: "{{count}} mandaten ingetrokken",
+    mandateRevocationScheduled_one: "Intrekking ingepland",
+    mandateRevocationScheduled_other:
+      "Intrekking ingepland, {{count}} mandaten geraakt",
     qerdsMessageSent: "Bericht verstuurd",
     qerdsInboxChecked_one: "{{count}} nieuw bericht ontvangen",
     qerdsInboxChecked_other: "{{count}} nieuwe berichten ontvangen",
     qerdsAddressAdded: "Digitaal adres toegevoegd",
     qerdsAddressDefaultChanged: "Standaardadres bijgewerkt",
+    qerdsAddressDeleted: "Digitaal adres verwijderd",
     qerdsContactAdded: "Contact toegevoegd",
     qerdsContactDeleted: "Contact verwijderd",
     postguardKeySaved: "API-sleutel opgeslagen",
@@ -380,6 +2400,7 @@ export const nl: Translation<typeof en> = {
     postguardFileSent: "Versleuteld bestand verstuurd",
     postguardNotificationsSaved: "Notificatie-instellingen opgeslagen",
     attestationSchemaCreated: "Schema aangemaakt",
+    attestationRulebookImported: "Rulebook geïmporteerd",
     attestationSchemaUpdated: "Schema bijgewerkt",
     attestationSchemaDeleted: "Schema verwijderd",
     attestationTemplateCreated: "Sjabloon aangemaakt",
@@ -392,6 +2413,13 @@ export const nl: Translation<typeof en> = {
     attestationIssued: "Attestatie uitgegeven",
     attestationRevoked: "Attestatie ingetrokken",
     attestationOfferCancelled: "Aanbod geannuleerd",
+    credentialOfferAccepted: "Credential toegevoegd aan de wallet",
+    credentialOfferDeclined: "Aanbod geweigerd",
+    credentialRequestSent: "Gegevensverzoek verstuurd",
+    requestTemplateSaved: "Sjabloon opgeslagen",
+    requestTemplateDeleted: "Sjabloon verwijderd",
+    credentialRequestApproved: "Gegevens gedeeld",
+    credentialRequestDeclined: "Verzoek geweigerd",
     emailSettingsSaved: "E-mailinstellingen opgeslagen",
     emailTestSent: "Test-e-mail verstuurd",
     slackSettingsSaved: "Slack-instellingen opgeslagen",
@@ -399,6 +2427,21 @@ export const nl: Translation<typeof en> = {
     teamsSettingsSaved: "Microsoft Teams-instellingen opgeslagen",
     teamsTestSent: "Testnotificatie verstuurd",
     cscSettingsSaved: "Instellingen ondertekenprovider opgeslagen",
+    identityProofingFlowCreated: "Flow aangemaakt",
+    identityProofingFlowsSaved: "Beschikbare flows opgeslagen",
+    identityProofingFlowVersionSaved: "Versie {{version}} opgeslagen en actief",
+    identityProofingFlowVersionActivated: "Versie {{version}} is actief",
+    identityProofingMailNotSent:
+      "Verzoek aangemaakt, maar de mail kon niet verstuurd worden. Controleer de mailinstellingen van deze organisatie.",
+    identityProofingRequestSent: "Verzoek verstuurd",
+    identityProofingSettingsSaved: "Instellingen opgeslagen",
+    identityProofingBrandingSaved: "Huisstijl opgeslagen",
+    identityProofingHostedSettingsSaved:
+      "Instellingen van de gehoste pagina opgeslagen",
+    identityProofingApiKeyRevoked: "API-token ingetrokken",
+    identityProofingWebhookSaved: "Webhook opgeslagen",
+    identityProofingWebhookRemoved: "Webhook verwijderd",
+    identityProofingWebhookTestQueued: "Testbericht in de wachtrij",
     notificationSettingsSaved: "Notificatie-instellingen opgeslagen",
     provisioningSettingsSaved:
       "Instellingen voor directorysynchronisatie opgeslagen",
@@ -409,7 +2452,9 @@ export const nl: Translation<typeof en> = {
     onboardingAttestationsUpdated: "Onboarding-attestaties bijgewerkt",
     wscaActivated: "Houder-wallet geactiveerd",
     wscaRotated: "Wallet-geheim geroteerd",
-    themeSaved: "Branding bijgewerkt",
+    walletUnitRevoked: "Wallet-unit ingetrokken",
+    walletUnitActivated: "Nieuwe wallet-unit geactiveerd",
+    themeSaved: "Wallet-thema bijgewerkt",
     avatarSaved: "Profielfoto opgeslagen",
     avatarRemoved: "Profielfoto verwijderd",
   },
@@ -424,12 +2469,49 @@ export const nl: Translation<typeof en> = {
     columns: {
       member: "Lid",
       status: "Status",
+      vog: "VOG",
       actions: "Acties",
     },
     unassigned: "—",
     active: "Actief",
     pending: "In afwachting",
     verified: "Geverifieerd",
+    verifiedOn: "Geverifieerd op {{date}}",
+    identity: {
+      never: "Nooit geïdentificeerd",
+      verified: "Geïdentificeerd",
+      dueSoon: "Binnenkort verlopen",
+      overdue: "Verlopen",
+      requested: "Aangevraagd",
+      dueOn: "Heridentificeren vóór {{date}}",
+      requestedOn: "Aangevraagd op {{date}}",
+      neverHint:
+        "Dit lid heeft zijn identiteit niet meer bewezen sinds deze functie live is.",
+    },
+    vog: {
+      notRequired: "Geen VOG vereist",
+      none: "VOG vereist",
+      valid: "VOG geldig",
+      expiring: "VOG verloopt binnenkort",
+      expired: "VOG verlopen",
+      rejected: "VOG afgewezen",
+      recheckRequired: "VOG-hercontrole vereist",
+      requested: "VOG aangevraagd",
+      validUntil: "Geldig tot {{date}}",
+      expiredOn: "Verlopen op {{date}}",
+      requestedOn: "Aangevraagd op {{date}}",
+    },
+    memberType: {
+      employee: "Medewerker",
+      external: "Extern",
+    },
+    select: "{{name}} selecteren",
+    selectAll: "Alle leden op deze pagina selecteren",
+    selectedCount_one: "{{count}} geselecteerd",
+    selectedCount_other: "{{count}} geselecteerd",
+    clearSelection: "Selectie wissen",
+    requestIdentification: "Identificatie aanvragen",
+    requestVog: "VOG aanvragen",
     resend: "Opnieuw versturen",
     revoke: "Intrekken",
     search: "Zoek op naam, e-mail, rol, afdeling…",
@@ -456,28 +2538,47 @@ export const nl: Translation<typeof en> = {
       "Elke uitgifte, vrijgave, ondertekening en configuratiewijziging wordt vastgelegd.",
     filter: "Filteren",
     export: "Exporteren",
-    adminOnly: "Alleen organisatiebeheerders kunnen het auditlogboek bekijken.",
+    detailHidden:
+      "Je ziet wijzigingen in de instellingen van de organisatie. Wie iets deed, wat er veranderde en alles over personen zien alleen beheerders.",
+    hiddenActor: "Verborgen",
     loadError: "Auditlogboek laden mislukt: {{message}}",
     loadMore: "Meer laden",
     empty: "Er is nog geen activiteit vastgelegd.",
     system: "Systeem",
+    apiKeyActor: "API-token {{prefix}}…",
+    hostedLinkActor: "Persoon, via een gehoste link",
+    reviewLinkActor: "Beoordelingslink van API-token {{prefix}}…",
+    adminActor: "Een beheerder",
     columns: {
       when: "Wanneer",
       actor: "Actor",
       action: "Actie",
       target: "Doel",
       subject: "Onderwerp",
+      details: "Details",
     },
     noSubject: "—",
+    detailsToggle: "Details van {{action}} op {{when}}",
+    noDetails: "Er zijn geen verdere details vastgelegd.",
+    fields: {
+      method: "Methode",
+      assuranceLevel: "Betrouwbaarheid",
+      eidasLevel: "eIDAS-niveau",
+      errorCode: "Reden",
+      ipsStatus: "Status bij verificatiedienst",
+    },
     targets: {
       organization: "Organisatie",
       member: "Lid",
       department: "Afdeling",
+      mandate: "Mandaat",
       user: "Gebruiker",
       qerdsMessage: "Beveiligd bericht",
       qerdsAddress: "Digitaal adres",
       qerdsContact: "Contact",
       walletInstance: "Wallet",
+      walletUnit: "Wallet-unit",
+      wscaAccount: "Houder-wallet",
       walletRepresentation: "Vertegenwoordiging",
       kvkRegistration: "KVK-registratie",
       postguardKey: "PostGuard API-sleutel",
@@ -489,23 +2590,37 @@ export const nl: Translation<typeof en> = {
       issuedAttestation: "Uitgegeven attestatie",
       attestationKey: "Attestatiesleutel",
       heldAttestation: "Ontvangen credential",
+      credentialOffer: "Binnengekomen credentialaanbod",
       orgEmailSettings: "E-mailinstellingen",
       orgEmailTemplate: "E-mailtekst",
       orgIssuerSettings: "Uitgever-instellingen",
       orgThemeSettings: "Thema-instellingen",
       orgOnboardingAttestations: "Onboarding-attestaties",
       orgNotificationSettings: "Notificatie-instellingen",
+      orgIdentitySettings: "Instellingen voor heridentificatie",
+      orgScreeningSettings: "VOG-screeninginstellingen",
       orgSlackSettings: "Slack-instellingen",
       orgTeamsSettings: "Microsoft Teams-instellingen",
       orgProvisioningSettings: "Provisioning-instellingen",
       orgCscSettings: "Instellingen ondertekenprovider",
       signingCredentials: "Ondertekencredential",
       signingRequests: "Ondertekenverzoek",
+      presentationTransaction: "Presentatieverzoek",
+      outboundPresentationRequest: "Gegevensverzoek",
+      presentationRequestTemplate: "Sjabloon voor gegevensverzoek",
+      orgIdentityProofingSettings: "Instellingen identiteitsverificatie",
+      identityProofingFlow: "Identiteitsverificatieflow",
+      identityProofingRequest: "Identiteitsverificatieverzoek",
+      identityProofingCustomer: "Identiteitsverificatieklant",
     },
     actions: {
+      attestationHeldReceived: "Credential ontvangen",
+      attestationHeldStatusChanged:
+        "Status van credential gewijzigd bij de uitgever",
       orgCreated: "Organisatie aangemaakt",
       orgUpdated: "Organisatie bijgewerkt",
       orgDeleted: "Organisatie verwijderd",
+      orgTestModeChanged: "Testmodus gewijzigd",
       memberInvited: "Lid uitgenodigd",
       inviteResent: "Uitnodiging opnieuw verstuurd",
       inviteRevoked: "Uitnodiging ingetrokken",
@@ -516,6 +2631,24 @@ export const nl: Translation<typeof en> = {
       memberRevoked: "Lidmaatschap ingetrokken",
       roleChanged: "Rol gewijzigd",
       inviteExpired: "Uitnodiging verlopen",
+      memberTypeChanged: "Type lid gewijzigd",
+      reviewRightChanged: "Recht om te beoordelen gewijzigd",
+      identityRequested: "Identificatie aangevraagd",
+      identityReverified: "Identiteit opnieuw bevestigd",
+      identityReverifyRejected: "Heridentificatiepoging afgewezen",
+      identityReminderSent: "Identiteitsherinnering verstuurd",
+      identityOverdue: "Identiteitsbevestiging verlopen",
+      identitySettingsUpdated: "Instellingen voor heridentificatie bijgewerkt",
+      vogRequested: "VOG aangevraagd",
+      vogChecked: "VOG geslaagd",
+      vogRejected: "VOG afgewezen",
+      vogMismatch: "VOG identiteit komt niet overeen",
+      vogInsufficientScope: "VOG mist vereiste codes",
+      vogReminderSent: "VOG-herinnering verstuurd",
+      vogExpired: "VOG verlopen",
+      screeningSettingsUpdated: "VOG-screeninginstellingen bijgewerkt",
+      mandateGranted: "Mandaat verleend",
+      mandateRevoked: "Mandaat ingetrokken",
       deptCreated: "Afdeling aangemaakt",
       deptUpdated: "Afdeling bijgewerkt",
       deptDeleted: "Afdeling verwijderd",
@@ -528,6 +2661,7 @@ export const nl: Translation<typeof en> = {
       qerdsMessageReceived: "Beveiligd bericht ontvangen",
       qerdsAddressProvisioned: "Digitaal adres aangemaakt",
       qerdsAddressDefaultChanged: "Standaardadres gewijzigd",
+      qerdsAddressDeleted: "Digitaal adres verwijderd",
       qerdsContactAdded: "Contact toegevoegd",
       qerdsContactDeleted: "Contact verwijderd",
       postguardKeySet: "PostGuard API-sleutel ingesteld",
@@ -543,6 +2677,10 @@ export const nl: Translation<typeof en> = {
       walletRevoked: "Wallet ingetrokken",
       representationClaimed: "Vertegenwoordiging geclaimd",
       representationRevoked: "Vertegenwoordiging ingetrokken",
+      walletUnitActivated: "Wallet-unit geactiveerd",
+      walletUnitRevoked: "Wallet-unit ingetrokken",
+      wscaAccountActivated: "Houder-wallet geactiveerd",
+      wscaAccountRotated: "Wallet-geheim geroteerd",
       kvkRegistrationValidated: "KVK-registratie gevalideerd",
       kvkRegistrationNotValidated: "KVK-registratie afgewezen",
       attestationSchemaCreated: "Attestatieschema aangemaakt",
@@ -555,10 +2693,13 @@ export const nl: Translation<typeof en> = {
       attestationClaimed: "Attestatie geclaimd",
       attestationRevoked: "Attestatie ingetrokken",
       attestationOfferCancelled: "Attestatieaanbod geannuleerd",
+      attestationDeclined: "Ontvanger heeft een attestatieaanbod geweigerd",
       attestationKeyAdded: "Attestatiesleutel toegevoegd",
       attestationKeySuspended: "Attestatiesleutel opgeschort",
       attestationKeyRevoked: "Attestatiesleutel ingetrokken",
       attestationHeldDeleted: "Ontvangen credential verwijderd",
+      attestationOfferAccepted: "Binnengekomen credentialaanbod geaccepteerd",
+      attestationOfferDeclined: "Binnengekomen credentialaanbod geweigerd",
       emailSettingsUpdated: "E-mailinstellingen bijgewerkt",
       emailTemplateUpdated: "E-mailtekst bijgewerkt",
       emailTemplateReset: "E-mailtekst teruggezet naar de standaard",
@@ -576,6 +2717,93 @@ export const nl: Translation<typeof en> = {
       signingCompleted: "Documenthandtekening voltooid",
       signingDelivered: "Ondertekend document bezorgd",
       signingFailed: "Documenthandtekening mislukt",
+      signingDeclined: "Ondertekening geweigerd",
+      presentationRequested: "Presentatieverzoek ontvangen",
+      presentationOrgSelected: "Organisatie gekozen voor een presentatie",
+      presentationCompleted: "Presentatie verstuurd",
+      presentationDenied: "Presentatieverzoek afgewezen",
+      presentationExpired: "Presentatieverzoek verlopen",
+      presentationRequestReceived: "Presentatieverzoek via QERDS ontvangen",
+      presentationRequestSent: "Gegevens bij een organisatie opgevraagd",
+      presentationRequestTemplateCreated:
+        "Sjabloon voor gegevensverzoek opgeslagen",
+      presentationRequestTemplateDeleted:
+        "Sjabloon voor gegevensverzoek verwijderd",
+      presentationResponseReceived: "Antwoord op een gegevensverzoek ontvangen",
+      presentationRequestFailed: "Gegevensverzoek mislukt",
+      identityProofingFlowCreated: "Identiteitsverificatieflow aangemaakt",
+      identityProofingFlowsConfigured:
+        "Voor leden beschikbare identiteitsverificatieflows gewijzigd",
+      identityProofingFlowVersionCreated:
+        "Nieuwe versie van een identiteitsverificatieflow opgeslagen",
+      identityProofingFlowVersionActivated:
+        "Versie van een identiteitsverificatieflow geactiveerd",
+      identityProofingRequested: "Identiteitsverificatieverzoek verstuurd",
+      identityProofingSessionCreated: "Identiteitsverificatiesessie aangemaakt",
+      identityProofingSessionStarted: "Identiteitsverificatie gestart",
+      identityProofingSessionHandover:
+        "Nieuwe code voor identiteitsverificatie uitgegeven",
+      identityProofingDocumentScanStarted: "Documentscan gestart",
+      identityProofingDocumentScanFailed: "Documentscan zonder pogingen over",
+      identityProofingSessionEnded:
+        "Identiteitsverificatiesessie onafgerond beëindigd",
+      identityProofingSessionCancelled:
+        "Identiteitsverificatiesessie geannuleerd",
+      identityProofingSessionPurged: "Identiteitsverificatiesessie gewist",
+      identityProofingResultRead: "Resultaat identiteitsverificatie gelezen",
+      identityProofingDeviceClaimed:
+        "Apparaat nam identiteitsverificatie-sessie over",
+      identityProofingDeviceHandedOver:
+        "Identiteitsverificatie-sessie overgedragen aan ander apparaat",
+      identityProofingHandoverIssued:
+        "Overdracht naar ander apparaat aangeboden",
+      identityProofingHandoverClaimFailed:
+        "Overdracht naar ander apparaat geweigerd",
+      identityProofingAccessDenied:
+        "Apparaat geweigerd voor identiteitsverificatie-sessie",
+      identityProofingApproved: "Identiteit geverifieerd",
+      identityProofingRejected: "Identiteitsverificatie afgewezen",
+      identityProofingNeedsReview:
+        "Identiteitsverificatie moet beoordeeld worden",
+      identityProofingReviewDecided:
+        "Beoordeling identiteitsverificatie genomen",
+      identityProofingDataExported: "Gegevens van verzoek gedownload",
+      identityProofingFlowKindConfigured: "Type verificatieflow ingesteld",
+      identityProofingCustomerCreated: "Identiteitsverificatieklant toegevoegd",
+      identityProofingCustomerUpdated: "Identiteitsverificatieklant bijgewerkt",
+      identityProofingCustomerFlowsConfigured:
+        "Aan een klant toegewezen identiteitsverificatieflows gewijzigd",
+      identityProofingCustomerRemoved: "Identiteitsverificatieklant verwijderd",
+      identityProofingSettingsUpdated:
+        "Instellingen voor identiteitsverificatie bijgewerkt",
+      identityProofingApiKeyCreated: "API-token aangemaakt",
+      identityProofingApiKeyRevoked: "API-token ingetrokken",
+      identityProofingApiKeyRevealed: "API-token getoond",
+      identityProofingWebhookConfigured: "Webhook-endpoint ingesteld",
+      identityProofingWebhookSecretRotated: "Webhookgeheim vernieuwd",
+      identityProofingWebhookRemoved: "Webhook-endpoint verwijderd",
+      identityProofingPaused: "Identiteitsverificatie gepauzeerd",
+      identityProofingFlowHostedConfigured:
+        "Gehoste pagina van een flow gewijzigd",
+      identityProofingFlowBrandingConfigured:
+        "Huisstijl van een flow gewijzigd",
+      identityProofingFlowDiplomasConfigured:
+        "Gewijzigd of een flow om diploma's vraagt",
+      identityProofingDiplomaAdded: "Diploma toegevoegd",
+      identityProofingDiplomaRejected: "Diploma geweigerd",
+      identityProofingFlowAddressConfigured:
+        "Gewijzigd of een flow om het adres vraagt",
+      identityProofingAddressAdded: "Adres ingevuld",
+      identityProofingAddressReviewed: "Adres beoordeeld",
+      identityProofingReviewItemDecided: "Beoordeling afgerond",
+      identityProofingReviewLinkCreated: "Beoordelingslink gemaakt",
+      identityProofingFlowEmploymentConfigured:
+        "Gewijzigd of een flow om het Verzekeringsbericht vraagt",
+      identityProofingEmploymentAdded: "Verzekeringsbericht toegevoegd",
+      identityProofingEmploymentRejected: "Verzekeringsbericht geweigerd",
+      identityProofingDocumentUnchecked:
+        "Document bewaard waarvan het zegel niet gecontroleerd kon worden",
+      identityProofingResumed: "Identiteitsverificatie hervat",
       provisioningRunCompleted: "Gebruikers gesynchroniseerd uit de directory",
       provisioningRunFailed: "Directorysynchronisatie mislukt",
     },
@@ -608,6 +2836,13 @@ export const nl: Translation<typeof en> = {
     selectDepartment: "Selecteer afdeling",
     roleMember: "Lid",
     roleAdmin: "Beheerder",
+    memberType: "Type lid",
+    memberTypeEmployee: "Medewerker",
+    memberTypeExternal: "Extern",
+    memberTypeHint:
+      "Voor externen (zzp'ers, uitzendkrachten en partnermedewerkers) kun je een kortere heridentificatietermijn instellen dan voor medewerkers.",
+    externalOrganisation: "Werkt voor",
+    externalOrganisationPlaceholder: "bijv. Contractors BV",
     attestations:
       "Attestaties die bij onboarding automatisch worden uitgegeven",
     attestationsHint:
@@ -642,7 +2877,40 @@ export const nl: Translation<typeof en> = {
       loadMore: "Meer laden",
     },
     active: "Actief lid",
-    verified: "Geverifieerd",
+    identifiedOn: "Geïdentificeerd op",
+    never: "Nooit",
+    identityDueOn: "Heridentificeren vóór",
+    memberType: "Type lid",
+    externalOrganisation: "Werkt voor",
+    requestIdentification: "Identificatie aanvragen",
+    requestIdentificationHint:
+      "Vraagt dit lid om nu zijn identiteit opnieuw te bevestigen. Het lid krijgt een e-mail met een link.",
+    identityRequested: "Identificatie aangevraagd",
+    vogValidUntil: "VOG geldig tot",
+    vogNone: "Geen VOG bekend",
+    requestVog: "VOG aanvragen",
+    requestVogHint:
+      "Vraagt dit lid om nu een VOG in te dienen. Het lid krijgt een e-mail met een link om hem in te dienen, zonder in te loggen.",
+    vogRequested: "VOG aangevraagd",
+    uploadVog: "VOG uploaden namens lid",
+    uploadVogHint:
+      "Uploadt en valideert een VOG-PDF op dezelfde manier als de eigen upload van het lid; vergeleken met de vastgelegde identiteit.",
+    uploadVogError: "Kon deze VOG niet controleren: {{message}}",
+    vogHistory: {
+      title: "VOG-geschiedenis",
+      empty: "Er is nog geen VOG gecontroleerd voor dit lid.",
+      error: "VOG-geschiedenis laden mislukt: {{message}}",
+      columns: {
+        checkedAt: "Gecontroleerd",
+        method: "Methode",
+        result: "Resultaat",
+        validUntil: "Geldig tot",
+      },
+      methodPdf: "PDF-upload",
+      methodCredential: "pbdf.vog-credential",
+      resultMismatch: "Identiteit komt niet overeen",
+      resultInsufficientScope: "Vereiste codes ontbreken",
+    },
     sendMessage: "Bericht versturen",
     offboard: "Lid off-boarden",
     offboardConfirm: {
@@ -658,16 +2926,25 @@ export const nl: Translation<typeof en> = {
     title: "Lid bewerken",
     jobTitlePlaceholder: "bijv. Engineering Lead",
     noDepartment: "Geen afdeling",
+    memberType: "Type lid",
+    memberTypeEmployee: "Medewerker",
+    memberTypeExternal: "Extern",
+    memberTypeHint:
+      "Voor externen kun je een kortere heridentificatietermijn instellen dan voor medewerkers.",
+    externalOrganisation: "Werkt voor",
+    externalOrganisationPlaceholder: "bijv. Contractors BV",
+    canReviewHint:
+      "Beslist over identiteitscontroles en gegevensverzoeken bij Beoordelingen. Beheerders mogen dit altijd.",
     lastAdmin:
       "Dit is de enige beheerder van de organisatie. Maak eerst een ander lid beheerder.",
   },
   signing: {
     title: "Documenten ondertekenen",
     subtitle:
-      "Gekwalificeerde elektronische handtekeningen via je CSC-ondertekenprovider",
+      "Elektronische handtekeningen via de ondertekenprovider van je organisatie",
     credentialTitle: "Ondertekencertificaat",
     credentialDescription:
-      "Je gekwalificeerde ondertekencertificaat wordt eenmalig opgehaald en voor elke handtekening hergebruikt. Bij het koppelen opent je wallet om het te autoriseren.",
+      "Je ondertekencertificaat wordt eenmalig opgehaald en voor elke handtekening hergebruikt. Om het te koppelen identificeer je je met je wallet-app.",
     credentialIdLabel: "Certificaat-ID",
     keyAlgoLabel: "Sleutelalgoritme",
     notLinked: "Er is nog geen ondertekencertificaat gekoppeld.",
@@ -678,7 +2955,7 @@ export const nl: Translation<typeof en> = {
       "Het koppelen van het ondertekencertificaat is niet voltooid.",
     credentialLoadError: "Kon je ondertekencertificaat niet laden.",
     walletHint:
-      "Je wordt doorgestuurd naar de ondertekenprovider om te autoriseren met je wallet en daarna teruggebracht.",
+      "Je wordt doorgestuurd naar de ondertekenprovider om je te identificeren met je wallet-app en daarna teruggebracht.",
     signTitle: "Een document ondertekenen",
     signDescription:
       "Upload een PDF. De hash wordt met je wallet geautoriseerd, door de provider ondertekend en de ondertekende PDF wordt aan je teruggegeven.",
@@ -689,6 +2966,8 @@ export const nl: Translation<typeof en> = {
     requestCompleted: "{{filename}} is ondertekend.",
     requestFailed: "Ondertekenen mislukt: {{reason}}",
     requestFailedGeneric: "het verzoek is niet voltooid",
+    requestDeclined: "{{name}} heeft geweigerd dit document te ondertekenen.",
+    requestDeclinedReason: "Reden: {{reason}}",
     requestLoadError: "Kon het ondertekenverzoek niet laden.",
     downloadButton: "Ondertekende PDF downloaden",
     downloadedToast: "Ondertekend document gedownload.",
@@ -710,6 +2989,7 @@ export const nl: Translation<typeof en> = {
     documentReplace: "Bestand vervangen",
     documentRemove: "Verwijderen",
     documentNone: "Geen bestand gekozen",
+    documentTooLarge: "Het document is groter dan {{size}}.",
     signersLabel: "Ondertekenaars",
     signersHint:
       "Voeg iedereen toe die moet ondertekenen, in de volgorde waarin ze tekenen. Een lid tekent vanuit zijn eigen account; een externe ondertekenaar krijgt een link per e-mail en tekent met zijn eigen wallet.",
@@ -729,21 +3009,49 @@ export const nl: Translation<typeof en> = {
     sequentialHint:
       "Ondertekenaars ondertekenen na elkaar, in de gekozen volgorde.",
     recipientLabel: "Bezorgen aan",
-    recipientHint:
-      "Waar het voltooide document naartoe gaat zodra iedereen heeft ondertekend.",
     recipientEmailPlaceholder: "ontvanger@voorbeeld.nl",
     recipientQerdsPlaceholder: "QERDS-adres",
     recipientNamePlaceholder: "Naam ontvanger (optioneel)",
     messagePlaceholder: "Bericht aan de ontvanger (optioneel)",
-    createButton: "Verzoek aanmaken",
     createdToast: "Ondertekenverzoek aangemaakt.",
+    documentStepHint: "Upload de PDF die iedereen gaat ondertekenen.",
+    documentMeta_one: "{{count}} ondertekenaar",
+    documentMeta_other: "{{count}} ondertekenaars",
+    wizardBack: "Terug",
+    wizardNext: "Doorgaan",
+    sendRequest: "Verzoek versturen",
+    steps: {
+      document: "Document",
+      signees: "Ondertekenaars",
+      placement: "Plaatsing",
+      delivery: "Bezorging",
+    },
+    deliveryTitle: "Waar moet het ondertekende document naartoe?",
+    deliveryStepHint:
+      "Dit gebeurt zodra iedereen heeft ondertekend. Je kunt het altijd downloaden bij Geschiedenis.",
+    deliveryNoneDesc: "Er wordt niets verstuurd. Op te halen bij Geschiedenis.",
+    deliveryEmailDesc: "Gewone bijlage aan de ontvanger.",
+    deliveryQerdsDesc: "Aangetekende bezorging aan de genoemde ontvanger.",
+    summaryTitle: "Klaar om te versturen",
+    summaryMarksLabel: "Merktekens geplaatst",
+    summaryOrderLabel: "Volgorde",
+    summaryDeliveryLabel: "Bezorging",
+    noVisibleMarkWarning: "{{name}} ondertekent zonder zichtbaar merkteken.",
     placement: {
-      title: "Plaatsing van handtekening en paraaf",
-      hint: "Kies een ondertekenaar en klik op de pagina om daar het handtekeningveld of de paraaf te zetten. Laat dit leeg om zonder zichtbaar merkteken te ondertekenen.",
+      railTitle: "Waar tekent elke ondertekenaar?",
+      railHint:
+        "Kies een ondertekenaar, kies handtekening of paraaf en klik op de pagina. Een ondertekenaar zonder merkteken tekent nog steeds, alleen zonder zichtbaar veld.",
+      applyInitials: "Paraaf toepassen op",
+      thisPageOnly: "Alleen deze pagina",
+      everyPageCount: "Elke pagina ({{count}})",
+      noMark: "Geen merkteken",
+      onThisPage_one: "{{count}} merkteken op deze pagina",
+      onThisPage_other: "{{count}} merktekens op deze pagina",
+      clickToPlace:
+        "Klik op de pagina om een merkteken voor {{name}} te plaatsen. Sleep om te verplaatsen, of selecteer en gebruik de pijltjestoetsen.",
       signerLegend: "Plaatsen voor",
       markCount_one: "{{count}} merkteken",
       markCount_other: "{{count}} merktekens",
-      kindLegend: "Plaats",
       kindSignature: "Handtekeningveld",
       kindParaph: "Paraaf",
       firstPage: "Eerste pagina",
@@ -755,7 +3063,6 @@ export const nl: Translation<typeof en> = {
       widthLabel: "Breedte (pt)",
       heightLabel: "Hoogte (pt)",
       removeMark: "Van deze pagina verwijderen",
-      paraphEveryPage: "Paraaf op elke pagina zetten",
       removeParaphs: "Alle parafen verwijderen",
       markLabel:
         "{{kind}} voor {{name}} op pagina {{page}}, op {{x}} bij {{y}} punten. Gebruik de pijltjestoetsen om het te verplaatsen.",
@@ -769,6 +3076,7 @@ export const nl: Translation<typeof en> = {
     toSignError:
       "Kon de documenten die op jouw handtekening wachten niet laden.",
     requestedBy: "Aangevraagd door {{name}}",
+    requestedViaApi: "Aangevraagd via de API",
     alreadySigned: "Je hebt dit document al ondertekend.",
     notYourTurn: "Een eerdere ondertekenaar moet eerst tekenen.",
     signInProgress:
@@ -786,6 +3094,7 @@ export const nl: Translation<typeof en> = {
       pending: "In afwachting",
       signed: "Ondertekend",
       failed: "Mislukt",
+      declined: "Geweigerd",
     },
     signerKind: {
       internal: "Lid van de organisatie",
@@ -795,6 +3104,18 @@ export const nl: Translation<typeof en> = {
       awaitingSignatures: "Wacht op handtekeningen",
       completed: "Voltooid",
       failed: "Mislukt",
+      declined: "Geweigerd",
+    },
+    decline: {
+      button: "Weigeren",
+      dialogTitle: "Weigeren te ondertekenen",
+      dialogHint:
+        "De aanvrager krijgt te horen dat je hebt geweigerd. Dit kan niet ongedaan worden gemaakt.",
+      reasonLabel: "Reden (optioneel)",
+      reasonPlaceholder: "Laat de aanvrager weten waarom (optioneel)",
+      confirm: "Document weigeren",
+      toastSuccess: "Je hebt geweigerd dit document te ondertekenen.",
+      toastError: "Kon niet weigeren. Probeer het opnieuw.",
     },
     deliveryStatus: {
       notRequested: "Geen bezorging",
@@ -809,20 +3130,27 @@ export const nl: Translation<typeof en> = {
       progress: "{{signed}} van {{total}}",
       reviewDocument: "Het document openen",
       needsCredential:
-        "Koppel eerst een ondertekencertificaat. Daarvoor opent je wallet één keer; daarna kun je ondertekenen.",
+        "Koppel eerst je ondertekencertificaat. Daarvoor identificeer je je één keer met je wallet-app; daarna kun je ondertekenen.",
       linkButton: "Ondertekencertificaat koppelen",
       signButton: "Document ondertekenen",
+      declineButton: "Weigeren",
       notYourTurn:
         "Een eerdere ondertekenaar moet eerst tekenen. Kom later terug via deze link.",
       linkedToast: "Ondertekencertificaat gekoppeld.",
       linkFailedToast:
         "Het koppelen van het ondertekencertificaat is niet voltooid.",
       startError: "Kon niet starten. Probeer het opnieuw.",
+      declineError: "Kon niet weigeren. Probeer het opnieuw.",
       attemptFailed:
         "Je laatste poging is niet voltooid. Je kunt het opnieuw proberen.",
       signedTitle: "Je hebt dit document ondertekend",
       signedAllHint: "Iedereen heeft ondertekend. Het document is compleet.",
       signedWaitingHint: "De andere ondertekenaars moeten nog tekenen.",
+      declinedTitle: "Je hebt geweigerd te ondertekenen",
+      declinedHint: "De aanvrager is op de hoogte gebracht.",
+      requestDeclinedTitle: "Dit verzoek is geweigerd",
+      requestDeclinedHint:
+        "Een andere ondertekenaar heeft geweigerd dit document te ondertekenen.",
       failedTitle: "Dit verzoek is niet voltooid",
       failedHint:
         "Neem contact op met de organisatie die je om een handtekening vroeg.",
@@ -833,7 +3161,47 @@ export const nl: Translation<typeof en> = {
       errorHint:
         "Kon dit ondertekenverzoek niet laden. Probeer het later opnieuw.",
       walletHint:
-        "Je wordt doorgestuurd naar de ondertekenprovider om te autoriseren met je wallet en daarna teruggebracht.",
+        "Je wordt doorgestuurd naar de ondertekenprovider om je te identificeren met je wallet-app en daarna teruggebracht.",
+      returnTo: "Terug naar {{host}}",
+    },
+    authorize: {
+      link: {
+        title: "Identificeer je om je ondertekencertificaat te krijgen",
+        choose:
+          "In de Yivi-app kies je wat je deelt: je paspoort, identiteitskaart of verblijfsvergunning, of je geregistreerde persoonsgegevens (BRP).",
+        name: "De naam die je deelt is de naam bij je handtekening.",
+      },
+      sign: {
+        title: "Keur het ondertekenen van {{document}} goed",
+        titleUnnamed: "Keur het ondertekenen van dit document goed",
+        intro: "Keur deze handtekening goed in de Yivi-app.",
+        sourceMrtd:
+          "Deel je paspoort, identiteitskaart of verblijfsvergunning. Het moet hetzelfde document zijn als waarmee je ondertekencertificaat is uitgegeven.",
+        sourceBrp:
+          "Deel je geregistreerde persoonsgegevens (BRP). Het moeten dezelfde gegevens zijn als waarmee je ondertekencertificaat is uitgegeven.",
+      },
+      scanHint:
+        "Scan de QR-code met de Yivi-app, of open de app op dit apparaat.",
+      openYivi: "Open de Yivi-app",
+      cancelError: "Kon niet annuleren. Probeer het opnieuw.",
+      leaving: "Je wordt teruggebracht…",
+      denied: {
+        title: "Niet goedgekeurd",
+        identityMismatch:
+          "De identiteit die je deelde is niet die waarvoor je ondertekencertificaat is uitgegeven.",
+        identityIncomplete:
+          "Wat je deelde bevatte geen naam of geboortedatum en kan dus niet worden gebruikt om te ondertekenen.",
+        generic: "Dit is niet goedgekeurd.",
+        continue: "Doorgaan",
+      },
+      expired: {
+        title: "Deze autorisatie is verlopen",
+        message: "Begin opnieuw vanaf de ondertekenpagina.",
+      },
+      error: {
+        title: "Er ging iets mis",
+        message: "Kon deze autorisatie niet laden. Probeer het later opnieuw.",
+      },
     },
   },
   signedDocuments: {
@@ -857,7 +3225,11 @@ export const nl: Translation<typeof en> = {
     title: "Instellingen",
     subtitle: "Profiel en voorkeuren van de organisatie",
     tabOrg: "Organisatie",
-    tabBranding: "Branding",
+    tabMandates: "Mandaten",
+    tabIdentity: "Identiteit",
+    tabScreening: "Screening (VOG)",
+    tabBranding: "Huisstijl",
+    tabPrivacy: "Gegevens en privacy",
     tabCommunication: "Communicatie",
     tabEmail: "E-mail",
     tabMailTemplates: "E-mailteksten",
@@ -869,9 +3241,40 @@ export const nl: Translation<typeof en> = {
     tabSigning: "Ondertekenen",
     tabPostguard: "PostGuard",
     tabWallets: "Wallets",
+    brandingWallet: "Uitstraling",
+    brandingWalletHint:
+      "Eén uitstraling voor de business wallet, de verificatiemail, de gehoste pagina en de Idem-app.",
+    brandingExternal: "Naam en contact",
+    brandingExternalHint:
+      "Wat de verificatiemail, de gehoste pagina en de Idem-app zeggen tegen een persoon buiten de organisatie.",
+    unsaved: {
+      title: "Weggaan zonder op te slaan?",
+      message: "Je wijzigingen in de huisstijl zijn niet opgeslagen.",
+      leave: "Weggaan",
+    },
     adminOnly: "Alleen organisatiebeheerders kunnen instellingen beheren.",
-    orgProfile: "Organisatieprofiel",
     discard: "Verwerpen",
+    organisation: {
+      title: "Organisatie",
+      editName: "Naam wijzigen",
+      name: "Naam",
+      shortName: "Korte naam",
+      wallet: {
+        title: "Business wallet",
+        hint: "Uit je registratie; neem contact op met support om dit te wijzigen.",
+        kvkNumber: "KVK-nummer",
+        euid: "EUID",
+        address: "Digitaal adres",
+        noAddress: "Geen standaard digitaal adres",
+        status: "Status",
+      },
+      statuses: {
+        active: "Actief",
+        suspended: "Geschorst",
+        revoked: "Ingetrokken",
+      },
+      internalId: "Intern ID, voor support:",
+    },
   },
   notifications: {
     heading: "Gebeurtenisnotificaties",
@@ -899,6 +3302,121 @@ export const nl: Translation<typeof en> = {
     configureTeams: "Microsoft Teams configureren",
     loadError: "Kon notificatie-instellingen niet laden: {{message}}",
     saveError: "Kon notificatie-instellingen niet opslaan: {{message}}",
+  },
+  identitySettings: {
+    heading: "Heridentificatie",
+    description:
+      "Leden bewijzen hun identiteit met een paspoort, ID-kaart of verblijfsvergunning als ze lid worden. Stel in hoe vaak ze dat opnieuw moeten doen, en wat er gebeurt als dat niet gebeurt.",
+    intervals: "Hoe vaak",
+    employeeInterval: "Medewerkers",
+    externalInterval: "Externen",
+    intervalHint:
+      "Gerekend vanaf het moment dat het lid zijn identiteit voor het laatst bewees. Externen worden meestal vaker opnieuw gecontroleerd dan medewerkers.",
+    intervalOff: "Nooit",
+    intervalMonths_one: "Elke maand",
+    intervalMonths_other: "Elke {{count}} maanden",
+    reminders: "Herinneringen",
+    reminderDaysBefore: "Herinneren vóór de termijn",
+    reminderDaysBeforePlaceholder: "bijv. 30, 14, 7",
+    reminderDaysBeforeHint:
+      "Aantal dagen vóór de termijn, gescheiden door komma's. De hoogste waarde bepaalt ook wanneer een lid als binnenkort verlopen wordt weergegeven.",
+    overdueReminderIntervalDays: "Herhalen elke",
+    overdueReminderIntervalDaysHint:
+      "Het aantal dagen tussen herinneringen zodra een lid over de termijn is.",
+    overdueReminderMaxCount: "Maximaal",
+    overdueReminderMaxCountHint:
+      "Het totale aantal herinneringen dat één termijn oplevert, zodat niemand eindeloos wordt gemaild.",
+    days_one: "{{count}} dag",
+    days_other: "{{count}} dagen",
+    reminders_one: "{{count}} herinnering",
+    reminders_other: "{{count}} herinneringen",
+    credential: "Versheid van de credential",
+    credentialMaxAgeDays: "Accepteer een credential van maximaal",
+    credentialMaxAgeOff: "Elke leeftijd",
+    credentialMaxAgeHint:
+      "Weigert een heridentificatie waarvan de paspoort-, ID-kaart- of verblijfsvergunningcredential langer geleden bij de uitgever is opgehaald dan dit. Het lid moet dan eerst een nieuwe in de wallet ophalen. Staat standaard uit.",
+    consequence: "Als een lid over de termijn is",
+    consequenceFlag: "Alleen markeren",
+    consequenceFlagHint:
+      "Toont de status in de ledenlijst en op de detailpagina, stuurt de herinneringen, en verandert verder niets.",
+    consequenceBlock: "Markeren en blokkeren",
+    consequenceBlockHint:
+      "Weigert daarnaast credentials uit te geven aan het lid en weigert het lid als ondertekenaar tot het zich opnieuw identificeert. Leesrechten en bestaande sessies blijven ongemoeid.",
+    save: "Instellingen opslaan",
+    saveError:
+      "Instellingen voor heridentificatie opslaan mislukt: {{message}}",
+    loadError: "Instellingen voor heridentificatie laden mislukt: {{message}}",
+    reminderDaysInvalid:
+      "Voer herinneringsdagen in als hele getallen boven nul, gescheiden door komma's.",
+    unconfigured:
+      "Heridentificatie staat uit voor deze organisatie: er worden geen termijnen berekend en geen herinneringen verstuurd tot je een interval opslaat.",
+    recomputeNote:
+      "Bij opslaan wordt de termijn van elk lid opnieuw berekend vanaf het moment dat het zijn identiteit voor het laatst bewees.",
+  },
+  screeningSettings: {
+    heading: "Ledenscreening (VOG)",
+    description:
+      "Leden bewijzen dat zij een geldige Verklaring Omtrent het Gedrag (VOG) hebben door deze te uploaden, live gecontroleerd bij validatie.nl, of door de pbdf.vog-credential te delen zodra je dat toestaat. De organisatie bewaart alleen de uitkomst, nooit het document.",
+    requiredFor: "Vereist voor",
+    requiredForNobody: "Niemand",
+    requiredForEmployees: "Medewerkers",
+    requiredForExternals: "Externen",
+    requiredForBoth: "Medewerkers en externen",
+    requiredCodes: "Vereiste functieaspecten",
+    requiredCodesHint:
+      "De VOG van een lid moet elke hier geselecteerde code dekken. Codes zijn Justis' eigen nummering; een waarde die je sector vereist maar die hier niet staat, kun je hieronder toevoegen.",
+    aspectCode: "Aspect {{code}}",
+    extraCodes: "Overige vereiste codes",
+    extraCodesPlaceholder: "bijv. 43, 91",
+    extraCodesHint:
+      "Tweecijferige specifieke-screeningsprofielnummers, gescheiden door komma's, naast de functieaspecten hierboven.",
+    extraCodesInvalid: "Voer tweecijferige codes in, gescheiden door komma's.",
+    maxAge: "Maximale leeftijd bij upload",
+    maxAgeOff: "Elke leeftijd",
+    maxAgeHint:
+      "Weigert een VOG waarvan de afgiftedatum ouder is dan dit. Staat standaard uit.",
+    recheck: "Hercontrole-interval",
+    employeeInterval: "Medewerkers",
+    externalInterval: "Externen",
+    intervalOff: "Nooit",
+    intervalMonths_one: "Elke maand",
+    intervalMonths_other: "Elke {{count}} maanden",
+    recheckAnchor: "Reken het interval vanaf",
+    recheckAnchorIssueDate: "De afgiftedatum van de VOG",
+    recheckAnchorCheckedAt: "De controledatum",
+    reminders: "Herinneringen",
+    reminderDaysBefore: "Herinneren vóór verlopen",
+    reminderDaysBeforePlaceholder: "bijv. 30, 14, 7",
+    reminderDaysBeforeHint:
+      "Aantal dagen vóór verlopen, gescheiden door komma's. De hoogste waarde bepaalt ook wanneer een lid als binnenkort verlopen wordt weergegeven.",
+    overdueReminderIntervalDays: "Herhalen elke",
+    overdueReminderIntervalDaysHint:
+      "Het aantal dagen tussen herinneringen zodra de VOG van een lid is verlopen.",
+    overdueReminderMaxCount: "Maximaal",
+    overdueReminderMaxCountHint:
+      "Het totale aantal herinneringen dat één verlooptermijn oplevert, zodat niemand eindeloos wordt gemaild.",
+    days_one: "{{count}} dag",
+    days_other: "{{count}} dagen",
+    reminders_one: "{{count}} herinnering",
+    reminders_other: "{{count}} herinneringen",
+    consequence: "Als de VOG van een lid over de termijn is",
+    consequenceFlag: "Alleen markeren",
+    consequenceFlagHint:
+      "Toont de status in de ledenlijst en op de detailpagina, en stuurt de herinneringen.",
+    consequenceBlock: "Markeren en blokkeren",
+    consequenceBlockHint:
+      "Gereserveerd voor een volgende release; gedraagt zich vandaag als alleen markeren.",
+    credential: "pbdf.vog-credential",
+    acceptCredential: "De pbdf.vog-credential accepteren",
+    acceptCredentialHint:
+      "Deze credential wordt uitgegeven door Stichting Privacy by Design over een VOG die zij op het moment van uitgifte hebben gevalideerd - het is geen actuele verklaring van Justis, en Justis kan deze niet intrekken. Accepteer deze afweging alleen als dat past bij uw toepassing; de altijd actieve PDF-upload valideert rechtstreeks bij Justis.",
+    save: "Instellingen opslaan",
+    saveError: "Screeninginstellingen opslaan mislukt: {{message}}",
+    loadError: "Screeninginstellingen laden mislukt: {{message}}",
+    unconfigured:
+      "Screening staat uit voor deze organisatie: er wordt geen lid om een VOG gevraagd tot je een beleid opslaat.",
+    recomputeNote:
+      "Bij opslaan wordt de VOG-vervaldatum van elk lid herberekend onder het nieuwe hercontrole-interval.",
   },
   provisioningSettings: {
     heading: "Microsoft Entra ID",
@@ -1017,6 +3535,34 @@ export const nl: Translation<typeof en> = {
     bundleMetadata: "conf/metadata/{{instance}}.json",
     bundleVct: "conf/vct/{{name}}.json",
   },
+  walletUnit: {
+    title: "Attestatie van de wallet-unit",
+    intro:
+      "Als walletprovider attesteert deze omgeving de wallet-unit van de organisatie aan uitgevers en andere zakelijke wallets (WE BUILD CS-05). Elke attestatie is kort geldig en wordt één keer gebruikt. Intrekken van de unit maakt elke attestatie die eraan is uitgegeven ongeldig.",
+    states: {
+      notIssued: "Nog niet uitgegeven",
+      active: "Actief",
+      revoked: "Ingetrokken",
+    },
+    reasons: {
+      owner_request: "Verzoek van de organisatie",
+      key_compromise: "Sleutel gecompromitteerd",
+    },
+    loadError: "De wallet-unit kon niet worden geladen: {{message}}",
+    createdAt: "Unit aangemaakt",
+    issuedCount: "Uitgegeven attestaties",
+    lastIssuedAt: "Laatst uitgegeven",
+    revokedAt: "Ingetrokken",
+    reason: "Reden",
+    revoke: "Wallet-unit intrekken",
+    confirmRevoke:
+      "Elke attestatie die aan deze wallet-unit is uitgegeven wordt ongeldig, en er worden geen nieuwe uitgegeven tot je een nieuwe unit activeert. Intrekken?",
+    activateHint:
+      "Activeer een nieuwe wallet-unit om weer attestaties uit te geven. De sleutels mogen niet de gecompromitteerde zijn.",
+    activate: "Nieuwe wallet-unit activeren",
+    keysInHsm: "Sleutels in HSM · {{levels}}",
+    actionError: "De bewerking is mislukt: {{message}}",
+  },
   wscaWallet: {
     title: "Houder-wallet (WSCA)",
     intro:
@@ -1049,7 +3595,7 @@ export const nl: Translation<typeof en> = {
     actionError: "De bewerking is mislukt: {{message}}",
   },
   themeSettings: {
-    title: "Branding",
+    title: "Wallet-thema",
     intro:
       "Geef de wallet van deze organisatie een eigen uiterlijk. Stel de merkkleuren in en eventueel de navigatiekleuren (om de zijbalk en bovenbalk te onderscheiden van het werkoppervlak), het bredere palet en het tekstlettertype; het logo vervangt het Yivi-woordmerk. Kleuren blijven automatisch leesbaar (WCAG AA) in zowel de lichte als donkere modus. Laat een veld leeg om de standaard te behouden.",
     brandGroup: "Merk",
@@ -1083,13 +3629,13 @@ export const nl: Translation<typeof en> = {
     preview: "Voorbeeld",
     previewButton: "Voorbeeldknop",
     logoPreviewAlt: "Logovoorbeeld",
-    loadError: "Branding laden mislukt: {{message}}",
-    saveError: "Branding opslaan mislukt: {{message}}",
+    loadError: "Wallet-thema laden mislukt: {{message}}",
+    saveError: "Wallet-thema opslaan mislukt: {{message}}",
   },
   mailTemplates: {
     title: "E-mailteksten",
     intro:
-      "Stel de e-mail die deze organisatie verstuurt samen uit blokken. Elk bericht heeft een eigen indeling per taal, en een bericht dat je niet hebt aangepast gebruikt de standaardindeling. De huisstijl komt uit het tabblad Huisstijl.",
+      "Stel de e-mail die deze organisatie verstuurt samen uit blokken. Elk bericht heeft een eigen indeling per taal, en een bericht dat je niet hebt aangepast gebruikt de standaardindeling. De huisstijl komt uit het tabblad Wallet-thema. De verificatiemail neemt kleur en logo uit het tabblad Huisstijl, als die zijn ingesteld.",
     language: "Taal",
     message: "Bericht",
     status: "Status",
@@ -1110,6 +3656,7 @@ export const nl: Translation<typeof en> = {
       heading: "Kop",
       paragraph: "Alinea",
       button: "Knop",
+      qr: "QR-code",
       divider: "Scheidingslijn",
       footer: "Voettekst",
     },
@@ -1126,27 +3673,49 @@ export const nl: Translation<typeof en> = {
     kinds: {
       credential_offer: "Credential uitgegeven",
       event_notification: "Melding van een gebeurtenis",
+      identity_overdue: "Identiteit verlopen",
+      identity_proofing_requested: "Identiteitsverificatie gevraagd",
+      identity_reminder: "Herinnering identiteit",
+      identity_requested: "Identificatie aangevraagd",
       invitation: "Uitnodiging voor lidmaatschap",
       postguard_file: "Versleuteld bestand",
+      signature_declined: "Ondertekening geweigerd",
       signature_requested: "Ondertekenverzoek",
       signed_document: "Ondertekend document",
       smtp_test: "SMTP-test",
+      vog_expired: "VOG verlopen",
+      vog_reminder: "Herinnering VOG",
+      vog_requested: "VOG aangevraagd",
     },
     kindDescriptions: {
       credential_offer:
         "Gaat naar een persoon als deze organisatie een credential aan die persoon uitgeeft.",
       event_notification:
         "Gaat naar de beheerders van deze organisatie als er iets gebeurt waarop zij zich hebben geabonneerd.",
+      identity_overdue:
+        "Gaat naar een lid waarvan de heridentificatietermijn is verstreken, volgens het herinneringsritme.",
+      identity_proofing_requested:
+        "Verstuurd naar een persoon als een lid vraagt de identiteit te verifiëren met document en gezicht.",
+      identity_reminder:
+        "Gaat naar een lid vóór het verstrijken van de heridentificatietermijn.",
+      identity_requested:
+        "Gaat naar een lid als een beheerder vraagt om de identiteit nu opnieuw te bevestigen.",
       invitation:
         "Gaat naar iemand die is uitgenodigd om lid te worden van deze organisatie.",
       postguard_file:
         "Gaat naar de ontvanger van een versleuteld bestand, als deze organisatie via de eigen SMTP-server mailt.",
+      signature_declined:
+        "Gaat naar de aanvrager van een verzoek als een geselecteerde ondertekenaar weigert te tekenen.",
       signature_requested:
         "Gaat naar een lid dat is geselecteerd om een document mede te ondertekenen, met een link naar de ondertekenpagina.",
       signed_document:
         "Gaat naar een ontvanger met het voltooide, mede-ondertekende document als PDF-bijlage.",
       smtp_test:
         "De test die een beheerder verstuurt om de SMTP-instellingen te controleren.",
+      vog_expired: "Gaat naar een lid van wie de VOG is verlopen.",
+      vog_reminder: "Gaat naar een lid vóór het verlopen van de VOG.",
+      vog_requested:
+        "Gaat naar een lid als een beheerder vraagt nu een VOG in te dienen.",
     },
     locales: {
       en: "Engels",
@@ -1156,6 +3725,12 @@ export const nl: Translation<typeof en> = {
     removeBlock: "Blok {{number}} verwijderen",
     moveBlockUp: "Blok {{number}} omhoog verplaatsen",
     moveBlockDown: "Blok {{number}} omlaag verplaatsen",
+    qrFields: {
+      url: "Link van de QR-code",
+      label: "Onderschrift (optioneel)",
+    },
+    qrHint:
+      "De QR-code bevat één linkvariabele of een volledig https://-adres. Gebruik dezelfde link als een knop, zodat beide dezelfde pagina openen.",
     buttonHint:
       "De knoplink is één linkvariabele of een volledig https://-adres. De introductie is de korte regel boven de kale link onder de knop.",
     preview: "Voorbeeld",
@@ -1308,14 +3883,19 @@ export const nl: Translation<typeof en> = {
       "Kon de instellingen van de ondertekenprovider niet laden: {{message}}",
     heading: "CSC-ondertekenprovider",
     description:
-      "Verbind met een externe QTSP via de Cloud Signature Consortium (CSC) API v2 om gekwalificeerde handtekeningen te maken. Dit stelt de verbinding in; het ondertekenen zelf wordt apart toegevoegd.",
+      "Documenten worden ondertekend via een ondertekenprovider die de Cloud Signature Consortium (CSC) API v2 spreekt. De ingebouwde ondertekendienst werkt zonder instellen; verbind in plaats daarvan met een externe QTSP om gekwalificeerde handtekeningen te maken.",
     providerKind: "Provider",
     kinds: {
+      yivi: "Ingebouwde ondertekendienst (aanbevolen)",
       sample: "Voorbeeld-QTSP (zelf gehost)",
       custom: "Eigen CSC-endpoint",
     },
     sampleHint:
       "De voorbeeldprovider is onze gehoste demo-QTSP op https://csc-signer.staging.yivi.app. Vraag inloggegevens aan via support@yivi.app.",
+    builtInHint:
+      "De eigen ondertekendienst van de wallet, en de standaard. Ondertekenaars identificeren zich met de Yivi-app, met hun paspoort, identiteitskaart, verblijfsvergunning of geregistreerde persoonsgegevens (BRP), en ondertekenen met een geavanceerde elektronische handtekening. Er valt niets in te stellen.",
+    builtInUnavailable:
+      "Deze omgeving draait de ingebouwde ondertekendienst niet. Kies een andere provider.",
     baseUrl: "CSC-basis-URL",
     baseUrlPlaceholder: "https://qtsp.example.org",
     clientId: "OAuth-client-ID",
@@ -1359,6 +3939,100 @@ export const nl: Translation<typeof en> = {
     inUse: "Deze afdeling heeft nog leden. Wijs ze eerst opnieuw toe.",
     error: "Er is iets misgegaan: {{message}}",
   },
+  mandates: {
+    heading: "Mandaatregister",
+    description:
+      "Wie namens deze organisatie mag handelen, en binnen welke grenzen. Ingetrokken en verlopen mandaten blijven in de lijst staan, zodat het register de hele geschiedenis houdt.",
+    grant: "Mandaat verlenen",
+    grantTitle: "Een mandaat verlenen",
+    revoke: "Intrekken",
+    revokeTitle: "Een mandaat intrekken",
+    empty: "Er zijn nog geen mandaten verleend.",
+    loadError: "Mandaatregister laden mislukt: {{message}}",
+    delegatedFrom: "Gedelegeerd uit het mandaat van {{holder}}",
+    grantorGone: "Account verwijderd",
+    validityFrom: "Vanaf {{from}}, zonder einddatum",
+    validityRange: "{{from}} tot {{until}}",
+    revokeIntro:
+      "Hiermee eindigt het mandaat van {{holder}} ({{type}}). Het register houdt de regel, gemarkeerd als ingetrokken.",
+    cascadeWarning_one: "Eén mandaat dat hieruit is gedelegeerd eindigt mee:",
+    cascadeWarning_other:
+      "{{count}} mandaten die hieruit zijn gedelegeerd eindigen mee:",
+    cascadeSeparator: ", ",
+    jointAuthorityNote:
+      "Het register vermeldt je als bestuurder die alleen samen met een ander kan handelen, dus je kunt niet zelfstandig een mandaat verlenen. Samen verlenen is nog niet gebouwd. Tot die tijd laat dit scherm je alleen het register zien.",
+    noAuthorityNote:
+      "Verlenen en intrekken is voor een wettelijk vertegenwoordiger uit het handelsregister, of voor de houder van een actief organisatiebreed volledig mandaat. Beheerder zijn is daarvoor geen grondslag.",
+    columns: {
+      holder: "Houder",
+      grantedBy: "Verleend door",
+      type: "Soort",
+      scope: "Bereik",
+      validity: "Geldigheid",
+      status: "Status",
+      actions: "Acties",
+    },
+    types: {
+      full: "Volledig",
+      administrative: "Administratief",
+    },
+    typeHints: {
+      full: "Namens de organisatie handelen in het algemeen.",
+      administrative:
+        "Rollen en verantwoordelijkheden toewijzen binnen het bereik.",
+    },
+    scopes: {
+      organization: "Hele organisatie",
+      department: "Eén afdeling",
+    },
+    statuses: {
+      pending: "Nog niet begonnen",
+      active: "Actief",
+      revoked: "Ingetrokken",
+      expired: "Verlopen",
+    },
+    form: {
+      grantee: "Houder",
+      granteeHint: "De houder moet lid zijn van deze organisatie.",
+      granteeRequired: "Kies wie het mandaat houdt.",
+      selectGrantee: "Kies een lid",
+      type: "Soort",
+      scope: "Bereik",
+      scopeHint:
+        "Een mandaat geldt voor de hele organisatie of voor één afdeling. Beperken tot één resourcedomein kan nog niet.",
+      selectDepartment: "Kies een afdeling",
+      departmentRequired: "Kies de afdeling waartoe het mandaat beperkt is.",
+      validFrom: "Geldig vanaf",
+      validFromHint: "Laat leeg om nu te beginnen.",
+      validUntil: "Geldig tot",
+      validUntilHint: "Laat leeg voor geen einddatum.",
+      emptyWindow: "Het einde moet na het begin liggen.",
+      endInPast: "Het einde moet in de toekomst liggen.",
+      when: "Wanneer het ingaat",
+      immediately: "Direct",
+      onADate: "Op een datum",
+      effectiveAt: "Ingaand op",
+      effectiveAtHint:
+        "Het mandaat blijft tot dan actief en verloopt vanzelf. Moet in de toekomst liggen.",
+      effectiveAtRequired: "Kies wanneer de intrekking ingaat.",
+      effectiveAtPast:
+        "Dat moment is al voorbij. Kies een later moment, of kies Direct.",
+      reason: "Reden (optioneel)",
+      reasonHint: "Wordt met de intrekking in het auditlog vastgelegd.",
+    },
+    errors: {
+      granteeNotMember: "Die persoon is geen lid van deze organisatie.",
+      departmentNotFound: "Die afdeling bestaat niet meer.",
+      overDelegation:
+        "Een gedelegeerd mandaat kan niet verder gaan dan het mandaat waaruit het is gesneden. Kies een lagere soort, houd dezelfde afdeling aan, of maak de geldigheid korter.",
+      authorityRequired: "Je mag dit mandaat niet beheren.",
+      inactive: "Dit mandaat is al geëindigd en kan niet worden ingetrokken.",
+      notFound: "Dit mandaat bestaat niet meer.",
+      withdrawn:
+        "Je eigen mandaat voor deze organisatie is niet meer actief, dus het register is voor jou gesloten. Een wettelijk vertegenwoordiger kan je een nieuw mandaat verlenen.",
+      other: "Er is iets misgegaan: {{message}}",
+    },
+  },
   adminDashboard: {
     title: "Platformbeheer",
     subtitle: "Beheer organisaties in de hele deployment",
@@ -1367,6 +4041,22 @@ export const nl: Translation<typeof en> = {
       organizationsHint: "Totaal in deze deployment",
     },
     viewAll: "Alle organisaties bekijken",
+  },
+  testMode: {
+    banner:
+      "Testmodus: identiteitscontroles in deze organisatie zijn testsessies, gescheiden van de echte.",
+    label: "Test",
+    live: "Live",
+    hostedNotice: "Testsessie: {{organization}} test deze controle.",
+    column: "Modus",
+    switchToTest: "Naar testmodus",
+    switchToLive: "Live zetten",
+    confirmTestTitle: "{{name}} in testmodus zetten?",
+    confirmTestMessage:
+      "Nieuwe identiteitscontroles worden testsessies. De echte sessies zijn verborgen tot de organisatie weer live is; er wordt niets verwijderd.",
+    confirmLiveTitle: "{{name}} live zetten?",
+    confirmLiveMessage:
+      "Nieuwe identiteitscontroles zijn weer echt. De testsessies worden verborgen en komen terug als de organisatie weer in testmodus gaat; de bewaartermijn verwijdert ze nog steeds op tijd.",
   },
   allOrganizations: {
     title: "Organisaties",
@@ -1387,6 +4077,91 @@ export const nl: Translation<typeof en> = {
   rootEmpty: {
     title: "Nog geen organisaties",
     body: "Je bent geen lid van een organisatie. Neem contact op met je beheerder om toegang te krijgen.",
+  },
+  credentialRequests: {
+    title: "Gegevensverzoeken",
+    subtitle:
+      "Vraag andere organisaties via veilige bezorging om gegevens, en beslis over wat zij van u vragen.",
+    newRequest: "Gegevens opvragen",
+    adminOnly:
+      "Alleen beheerders kunnen gegevensverzoeken zien en erover beslissen.",
+    loadError: "Gegevensverzoeken konden niet worden geladen: {{message}}",
+    tabs: {
+      incoming: "Ontvangen",
+      sent: "Verzonden",
+    },
+    incoming: {
+      description:
+        "Andere organisaties die uw organisatie om gegevens vragen. Goedkeuren deelt precies wat zij vroegen, uit de attestaties die uw organisatie bezit. De aanvrager wordt genoemd zoals zijn certificaat hem noemt.",
+      empty: "Er wachten geen verzoeken op een beslissing.",
+      pending: "Wacht op beslissing",
+      expires: "Verloopt {{when}}",
+      shares: "Deelt: {{claims}}",
+      sharesNoClaims: "Deelt dat uw organisatie deze attestatie bezit",
+      approve: "Goedkeuren en delen",
+      decline: "Weigeren",
+      confirmApprove:
+        "De gevraagde gegevens delen met {{verifier}}? Dit kan niet ongedaan worden gemaakt.",
+      confirmDecline:
+        "Het verzoek van {{verifier}} weigeren? Er wordt niets gedeeld.",
+    },
+    sent: {
+      empty: "Uw organisatie heeft nog geen gegevens opgevraagd.",
+      to: "Aan {{recipient}}",
+      fetched: "geopend door de wallet van de ontvanger",
+      notFetched: "nog niet ontvangen",
+      asked: "Gevraagd: {{claims}}",
+      noClaims: "Alleen de attestatie zelf gevraagd, geen gegevens",
+      issuer: "Uitgever",
+      status: {
+        sent: "Wacht op antwoord",
+        completed: "Beantwoord",
+        failed: "Mislukt",
+        expired: "Verlopen",
+      },
+      failure: {
+        qerdsSendFailed: "Het verzoek kon niet worden bezorgd.",
+        verificationFailed:
+          "Het antwoord kon niet worden geverifieerd; er is niets bewaard.",
+        incompleteResponse:
+          "Het antwoord bevatte niet alle gevraagde attestaties.",
+      },
+    },
+    form: {
+      title: "Gegevens opvragen",
+      from: "Van",
+      fromDefault: "Standaardadres",
+      recipient: "Adres van de ontvanger",
+      recipientPlaceholder: "organisatie@qerds.example",
+      credentials: "Attestaties",
+      vct: "Type attestatie",
+      vctPlaceholder: "Type attestatie, bijv. nl.kvk.registration",
+      claims: "Gegevens",
+      claimsPlaceholder: "Gegevens, gescheiden door komma's (optioneel)",
+      addCredential: "Attestatie toevoegen",
+      removeCredential: "Attestatie verwijderen",
+      template: "Sjabloon",
+      templateNone: "Geen sjabloon",
+      deleteTemplate: "Sjabloon verwijderen",
+      saveAsTemplate: "Opslaan als sjabloon",
+      templateName: "Naam van het sjabloon",
+      templateNamePlaceholder:
+        "Naam van het sjabloon, bijv. Beschikking beschermingsbewind",
+      saveTemplate: "Opslaan",
+      send: "Verzoek versturen",
+      note: "Het verzoek wordt ondertekend als {{org}} en via veilige bezorging verstuurd. De beheerder van de ontvanger beslist of er wordt gedeeld.",
+      errors: {
+        recipientRequired: "Vul het adres van de ontvanger in.",
+        recipientInvalid: "Vul een geldig adres in.",
+        vctRequired: "Vul een type attestatie in.",
+        vctInvalid: "Een type attestatie mag geen spaties bevatten.",
+        claimInvalid: "Een gegevensnaam mag geen spaties bevatten.",
+        tooManyClaims: "Vraag maximaal 50 gegevens per attestatie.",
+        templateNameRequired: "Geef het sjabloon een naam.",
+        templateNameTooLong: "Gebruik maximaal 120 tekens.",
+        templateNameTaken: "Er bestaat al een sjabloon met deze naam.",
+      },
+    },
   },
   qerds: {
     title: "Veilige bezorging",
@@ -1426,6 +4201,16 @@ export const nl: Translation<typeof en> = {
       providerRef: "Providerreferentie",
       sentAt: "Verzonden",
       deliveredAt: "Bezorgd",
+    },
+    offer: {
+      title: "Credentialaanbod",
+      status: {
+        accepting: "Bezig met accepteren…",
+        accepted: "Toegevoegd aan de wallet",
+        declined: "Geweigerd",
+      },
+      review: "Bekijk bij Attestaties",
+      rawEnvelope: "Ruwe envelop",
     },
     evidence: {
       title: "Bezorgbewijs",
@@ -1492,6 +4277,14 @@ export const nl: Translation<typeof en> = {
       taken: "Dat digitale adres is al in gebruik.",
       outsideNamespace:
         "Een digitaal adres moet binnen de naamruimte van je organisatie vallen (de slug).",
+      delete: "Verwijderen",
+      deleteTitle: "Digitaal adres verwijderen",
+      deleteConfirm:
+        "“{{address}}” verwijderen? Berichtgeschiedenis behoudt dit adres, maar niets dat hiernaartoe is geadresseerd wordt nog bezorgd.",
+      isDefault:
+        "Dit is het standaardadres van je organisatie. Stel eerst een ander adres als standaard in.",
+      lastRemaining:
+        "Dit is het enige digitale adres van je organisatie. Maak eerst een ander adres aan.",
       error: "Er is iets misgegaan: {{message}}",
     },
     contacts: {
@@ -1512,6 +4305,8 @@ export const nl: Translation<typeof en> = {
       empty: "Nog geen contacten opgeslagen.",
       loadError: "Contacten laden mislukt: {{message}}",
       taken: "Er bestaat al een contact met dat adres.",
+      invalidEuid:
+        "Dat is geen geldige EUID. Gebruik een vorm als NLNHR.12345678.",
       error: "Er is iets misgegaan: {{message}}",
     },
   },
@@ -1558,7 +4353,90 @@ export const nl: Translation<typeof en> = {
         actions: "Acties",
       },
     },
+    offers: {
+      title: "Wacht op je beslissing",
+      description:
+        "Deze credentials zijn aan je organisatie aangeboden. Accepteren zet er een in de wallet; weigeren laat hem erbuiten.",
+      memberTitle: "Wacht op de beslissing van een beheerder",
+      memberDescription:
+        "Deze credentials zijn aan je organisatie aangeboden. Een organisatiebeheerder beslist of ze aan de wallet worden toegevoegd.",
+      from: "Aangeboden door {{sender}}",
+      pending: "Wacht op beslissing",
+      accept: "Accepteren",
+      decline: "Weigeren",
+      confirmDecline:
+        "“{{name}}” van {{sender}} weigeren? De credential wordt niet aan de wallet toegevoegd.",
+      unnamedCredential: "Credential",
+      loadError: "Kan de aanbiedingen niet laden: {{message}}",
+    },
     held: {
+      chip: "{{label}}  {{count}}",
+      shown_one: "{{shown}} van {{count}} credential",
+      shown_other: "{{shown}} van {{count}} credentials",
+      noMatchHint: "Probeer een ander filter of wis de zoekopdracht.",
+      credentialCount_one: "{{count}} credential",
+      credentialCount_other: "{{count}} credentials",
+      line: {
+        revoked: "ingetrokken door de uitgever",
+        expired: "verlopen {{date}}",
+        expiring_zero: "verloopt vandaag",
+        expiring_one: "verloopt over {{count}} dag",
+        expiring_other: "verloopt over {{count}} dagen",
+      },
+      reason: {
+        revoked: "Op de statuslijst van de uitgever",
+        revokedChecked: "Ingetrokken gezien {{date}}",
+        expired_zero: "Vandaag verlopen",
+        expired_one: "{{count}} dag geleden verlopen",
+        expired_other: "{{count}} dagen geleden verlopen",
+        expiring: "Vernieuwen voor {{date}}",
+      },
+      banner: {
+        revoked: "Ingetrokken door de uitgever",
+        revokedChecked: "Ingetrokken door de uitgever, gezien {{date}}",
+        revokedBody:
+          "De uitgever heeft deze credential op zijn statuslijst gezet. Hij kan niet meer worden getoond: elke verificateur die de statuslijst controleert, weigert hem.",
+        expired: "Verlopen op {{date}}",
+        expiredBody:
+          "De attributen hieronder zijn nog leesbaar, maar verificateurs weigeren hem totdat je een nieuwe van de uitgever ontvangt.",
+        expiring: "Verloopt op {{date}}",
+        expiringBody:
+          "Vraag de uitgever voor die datum om een nieuwe om onderbreking te voorkomen.",
+        valid: "Geldig tot {{date}}",
+        validForever: "Geldig, verloopt niet",
+        validBody:
+          "De handtekening en de uitgever zijn bij ontvangst gecontroleerd, en de status wordt opnieuw gecontroleerd tegen de statuslijst van de uitgever.",
+        validNoStatusBody:
+          "De handtekening en de uitgever zijn bij ontvangst gecontroleerd. De uitgever publiceert er geen statuslijst voor, dus hij kan niet worden ingetrokken.",
+      },
+      history: {
+        received: "Ontvangen",
+        via: "via {{source}}",
+        from: "van {{sender}}",
+        acceptedBy: "geaccepteerd door {{name}}",
+        revoked: "Ingetrokken door de uitgever",
+        revokedDetail: "gevonden op zijn statuslijst",
+        reinstated: "Weer geldig",
+        reinstatedDetail:
+          "de statuslijst van de uitgever markeert hem niet meer",
+        checked: "Statuslijst gecontroleerd",
+        checkedRevoked: "ingetrokken",
+        checkedValid: "niet ingetrokken",
+      },
+      checks: {
+        signature: "Handtekening geldig",
+        issuerTrusted: "Uitgever vertrouwd",
+        atReceipt: "bij ontvangst, {{date}}",
+        seeded: "Demo-credential uit de seed, niet gecontroleerd",
+        noStatusList: "Geen statuslijst: kan niet worden ingetrokken",
+        revoked: "Ingetrokken op de statuslijst van de uitgever",
+        notRevoked: "Niet op de statuslijst",
+        checked: "gecontroleerd {{when}}",
+        outsideValidity: "Buiten de geldigheidsperiode",
+        expired: "verlopen {{date}}",
+        withinValidity: "Binnen de geldigheidsperiode",
+        lastChecked: "laatst gecontroleerd {{when}}",
+      },
       empty: "Nog geen credentials ontvangen.",
       noMatch: "Geen credentials komen overeen met je zoekopdracht.",
       delete: "Verwijderen",
@@ -1566,14 +4444,11 @@ export const nl: Translation<typeof en> = {
       viewDetail: "Details van {{name}} bekijken",
       search: "Zoek op naam, type of uitgever…",
       reset: "Herstellen",
-      expires: "Verloopt {{date}}",
-      expiredOn: "Verlopen {{date}}",
       fields: {
+        validUntil: "Geldig tot",
         issuer: "Uitgegeven door",
         source: "Ontvangen via",
         received: "Ontvangen",
-        expires: "Verloopt",
-        expired: "Verlopen",
       },
       sections: {
         attention: "Vraagt aandacht",
@@ -1586,9 +4461,8 @@ export const nl: Translation<typeof en> = {
         revoked: "Ingetrokken",
       },
       filters: {
+        all: "Alle",
         status: "Status",
-        allStatuses: "Alle statussen",
-        attention: "Vraagt aandacht",
         source: "Ontvangen via",
         allSources: "Alle bronnen",
       },
@@ -1598,12 +4472,33 @@ export const nl: Translation<typeof en> = {
         bootstrap: "Onboarding",
       },
       detail: {
+        byline:
+          "Uitgegeven door {{issuer}} · ontvangen {{received}} via {{source}}",
+        export: "Exporteren als JSON",
+        recheck: "Status opnieuw controleren",
+        attributeCount_one: "{{count}} attribuut",
+        attributeCount_other: "{{count}} attributen",
+        attributesNote:
+          "Attributen worden alleen op je eigen wallet-infrastructuur opgeslagen. Elke vrijgave wordt vastgelegd in het auditlog.",
+        history: "Geschiedenis",
+        provenance: "Herkomst",
+        checks: "Controles",
+        issuerEndpoint: "Endpoint van de uitgever",
+        format: "Formaat",
+        receivedVia: "{{date}} · via {{source}}",
+        validity: "Geldigheid",
+        validityRevoked: "{{validity}}, ingetrokken",
+        heldBy: "In bezit van",
+        heldByValue: "Business wallet van {{org}}",
         title: "Credential",
         notFound: "Deze credential zit niet in de wallet.",
         type: "Type credential",
         attributes: "Attributen",
         noAttributes: "Deze credential geeft geen attributen vrij.",
         doesNotExpire: "Verloopt niet",
+        rulebookMatch: "Voldoet aan het WE BUILD-rulebook {{rulebook}}.",
+        rulebookMismatch:
+          "Voldoet niet aan het WE BUILD-rulebook {{rulebook}}. Andere WE BUILD-wallets kunnen hem weigeren.",
       },
     },
     schemas: {
@@ -1611,6 +4506,20 @@ export const nl: Translation<typeof en> = {
       newAction: "Nieuw schema",
       delete: "Schema verwijderen",
       confirmDelete: "Schema “{{name}}” verwijderen?",
+    },
+    rulebooks: {
+      openAction: "Importeren uit WE BUILD",
+      title: "Een WE BUILD-rulebook importeren",
+      intro:
+        "Een rulebook-schema volgt het WE BUILD-attestatierulebook precies. Type en attributen liggen vast, en elke uitgegeven credential wordt tegen het rulebook gecontroleerd.",
+      import: "Importeren",
+      imported: "Geïmporteerd",
+      importError: "Het rulebook importeren mislukt: {{message}}",
+      aboutOrganization: "Over een organisatie",
+      aboutPerson: "Over een persoon",
+      attributeCount_one: "{{count}} attribuut",
+      attributeCount_other: "{{count}} attributen",
+      tag: "WE BUILD",
     },
     keys: {
       empty: "Nog geen sleutels.",
@@ -1659,6 +4568,8 @@ export const nl: Translation<typeof en> = {
       status: "Status",
       qualified: "Gekwalificeerd credential",
       attributes: "Attributen",
+      rulebookFixed:
+        "WE BUILD legt de attributen en het onderwerp van dit schema vast. Die zijn hier niet te wijzigen.",
       addAttribute: "Attribuut toevoegen",
       attributesRequired: "Voeg minstens één attribuut toe.",
       attrKey: "Sleutel",
@@ -1753,17 +4664,12 @@ export const nl: Translation<typeof en> = {
         "Scan de QR-code met de wallet van de ontvanger om de attestatie te claimen.",
       offerEmailedHint:
         "Er is een claimlink gemaild naar {{recipient}}. Ze kunnen deze QR-code ook scannen om nu te claimen.",
+      offerSentTitle: "Offer verstuurd",
       offerOrgHint:
-        "De offer is via QERDS aan de organisatie bezorgd. Haar wallet verzilvert deze automatisch.",
-      offerSteps: {
-        sent: "Offer verstuurd",
-        claimed: "Ontvangen",
-      },
+        "De offer is via QERDS aan de organisatie bezorgd. Een beheerder daar moet deze accepteren via het Wallet-tabblad voordat de offer in de wallet van de organisatie terechtkomt.",
       openWallet: "Open wallet",
       txCode: "Transactiecode: {{code}}",
       waiting: "Wachten tot de ontvanger claimt…",
-      waitingOrg:
-        "Wachten tot de wallet van de organisatie de offer verzilvert…",
       claimedTitle: "Attestatie geclaimd",
       claimedHint:
         "De ontvanger heeft de attestatie aan zijn wallet toegevoegd.",
@@ -1772,6 +4678,15 @@ export const nl: Translation<typeof en> = {
       unknownAttribute:
         "Een van de attributen hoort niet bij het schema van dit sjabloon.",
       missingAttribute: "Een verplicht attribuut ontbreekt.",
+      invalidClaims: "De claims voldoen niet aan het rulebook. {{message}}",
+      rulebookClaimsIntro:
+        "Dit sjabloon volgt een WE BUILD-rulebook. Bewerk de claims als JSON. Ze beginnen bij het voorbeeld uit het rulebook en worden bij het uitgeven tegen het rulebook gecontroleerd.",
+      rulebookClaimsLabel: "Claims (JSON)",
+      rulebookClaimsReset: "Opnieuw beginnen bij het voorbeeld",
+      claims: {
+        invalidJson: "Dit is geen geldige JSON.",
+        notAnObject: "De claims moeten een JSON-object zijn.",
+      },
     },
   },
   postguard: {

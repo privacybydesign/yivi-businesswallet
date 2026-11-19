@@ -1,7 +1,9 @@
 package server
 
 import (
+	"compress/gzip"
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -137,5 +139,134 @@ func TestSPA_DisabledWhenNoStaticDir(t *testing.T) {
 
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("expected 404 with static serving disabled, got %d", rec.Code)
+	}
+}
+
+// framePolicy sets a CSP on /framed only, as a feature owning that route would.
+type framePolicy struct{ registered bool }
+
+func (f *framePolicy) Register(*http.ServeMux) { f.registered = true }
+
+func (*framePolicy) PageHeaders(r *http.Request, h http.Header) {
+	if r.URL.Path == "/framed" {
+		h.Set("Content-Security-Policy", "frame-ancestors https://portal.example")
+	}
+}
+
+func TestSPAFeatureHeadersScoped(t *testing.T) {
+	h := New(stubPinger{}, writeStaticSite(t), &framePolicy{})
+
+	for path, want := range map[string]string{
+		"/framed":        "frame-ancestors https://portal.example",
+		"/elsewhere":     "",
+		"/assets/app.js": "",
+	} {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		if got := rec.Header().Get("Content-Security-Policy"); got != want {
+			t.Errorf("%s: CSP = %q, want %q", path, got, want)
+		}
+	}
+}
+
+func TestSPA_CachesHashedAssetsForGood(t *testing.T) {
+	h := New(stubPinger{}, writeStaticSite(t))
+
+	asset := httptest.NewRecorder()
+	h.ServeHTTP(asset, httptest.NewRequest(http.MethodGet, "/assets/app.js", nil))
+	if got := asset.Header().Get(headerCacheControl); got != immutableCache {
+		t.Fatalf("asset Cache-Control = %q, want %q", got, immutableCache)
+	}
+
+	index := httptest.NewRecorder()
+	h.ServeHTTP(index, httptest.NewRequest(http.MethodGet, "/orgs/acme", nil))
+	if got := index.Header().Get(headerCacheControl); got != revalidateCache {
+		t.Fatalf("index Cache-Control = %q, want %q", got, revalidateCache)
+	}
+}
+
+func TestSPA_GzipsAssetWhenAccepted(t *testing.T) {
+	h := New(stubPinger{}, writeStaticSite(t))
+
+	// Twice: the second answer comes from the cache and must be the same.
+	for range 2 {
+		req := httptest.NewRequest(http.MethodGet, "/assets/app.js", nil)
+		req.Header.Set("Accept-Encoding", "gzip, br")
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+
+		if got := rec.Header().Get("Content-Encoding"); got != "gzip" {
+			t.Fatalf("Content-Encoding = %q, want gzip", got)
+		}
+		zr, err := gzip.NewReader(rec.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, err := io.ReadAll(zr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(body) != "console.log(1)" {
+			t.Fatalf("unzipped body = %q", body)
+		}
+	}
+}
+
+func TestSPA_RangeRequestIsNotGzipped(t *testing.T) {
+	h := New(stubPinger{}, writeStaticSite(t))
+
+	req := httptest.NewRequest(http.MethodGet, "/assets/app.js", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+	req.Header.Set("Range", "bytes=0-6")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Header().Get("Content-Encoding") != "" || rec.Body.String() != "console" {
+		t.Fatalf("range answer: encoding %q body %q", rec.Header().Get("Content-Encoding"), rec.Body.String())
+	}
+}
+
+func TestSPA_MissingHashedAssetIsNotFound(t *testing.T) {
+	h := New(stubPinger{}, writeStaticSite(t))
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/assets/old-chunk.js", nil))
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("missing asset: status %d, want 404 and not the index document", rec.Code)
+	}
+}
+
+// The compressed read goes through the static root: a name that climbs out of
+// it is refused, also if a request path ever reached it uncleaned.
+func TestSPA_GzippedAssetStaysInsideTheStaticRoot(t *testing.T) {
+	dir := writeStaticSite(t)
+	secret := filepath.Join(filepath.Dir(dir), "secret.js")
+	if err := os.WriteFile(secret, []byte("secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Remove(secret) })
+
+	h := newSPAHandler(dir, nil)
+	for _, name := range []string{"/assets/../../secret.js", "/../secret.js"} {
+		if body, err := h.gzippedAsset(name); err == nil {
+			t.Fatalf("gzippedAsset(%q) read %d bytes from outside the static root", name, len(body))
+		}
+	}
+	if _, err := h.gzippedAsset("/assets/app.js"); err != nil {
+		t.Fatalf("gzippedAsset of a real asset: %v", err)
+	}
+}
+
+// /assets/<page> is a client route of an org whose slug is "assets": only a
+// file-like path under /assets/ is a missing chunk.
+func TestSPA_AssetsSlugPageIsStillAClientRoute(t *testing.T) {
+	h := New(stubPinger{}, writeStaticSite(t))
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/assets/members", nil))
+
+	if rec.Code != http.StatusOK || rec.Body.String() != "<!doctype html>index" {
+		t.Fatalf("/assets/members: status %d body %q, want the index document", rec.Code, rec.Body.String())
 	}
 }

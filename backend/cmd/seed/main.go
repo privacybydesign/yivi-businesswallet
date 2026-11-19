@@ -3,12 +3,21 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log/slog"
 	"os"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/config"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/logging"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/seed"
+)
+
+// envSeedEnvironment names where a seed runs. --proofing-demo and --bewind-demo
+// create demo organisations named after real institutions, so they run only
+// where this is seedEnvironmentStaging, or on a local stack (DEV_MODE).
+const (
+	envSeedEnvironment     = "SEED_ENVIRONMENT"
+	seedEnvironmentStaging = "staging"
 )
 
 func main() {
@@ -24,7 +33,11 @@ func run() error {
 	orgOnly := flag.Bool("org", false,
 		"provision the anchor organisations — Yivi (with its team as admins + attestation catalogue) and the KVK register (authentic source); no demo members or activity, safe for staging/production")
 	partnersOnly := flag.Bool("partners", false,
-		"provision the staging pilot partner organisations (Anoigo, Gemeente Nijmegen, Ver.iD, PinkRoccade, Stichting Nuts, Secumail) with their teams as admins; no demo data, idempotent — staging only, not for production")
+		"provision the staging pilot partner organisations (Anoigo, Gemeente Nijmegen, Ver.iD, PinkRoccade, Stichting Nuts, Secumail) with their teams as admins — Gemeente Nijmegen also gets its APV standplaatsvergunning attestation catalogue; no other demo data, idempotent — staging only, not for production")
+	proofingDemo := flag.Bool("proofing-demo", false,
+		"provision the identity proofing demo orgs (Radboud, a.s.r., Unibet, CM) with their flows, and the Yivi team as their admins; idempotent; staging only: needs SEED_ENVIRONMENT=staging, or DEV_MODE")
+	bewindDemo := flag.Bool("bewind-demo", false,
+		"provision the beschermingsbewind demo: Rechtbank Gelderland (Demo) and Waalstad Bewindvoering (Demo) with its staff and mandate chain, plus a bijzondere bijstand credential for Gemeente Nijmegen; idempotent; staging only: needs SEED_ENVIRONMENT=staging, or DEV_MODE")
 	flag.Parse()
 
 	cfg, err := config.Load()
@@ -34,12 +47,25 @@ func run() error {
 
 	logging.Setup(cfg.LogLevel, cfg.LogFormat, cfg.LogSource)
 
+	if *proofingDemo {
+		if err := checkStagingOnly("--proofing-demo", cfg.DevMode, os.Getenv(envSeedEnvironment)); err != nil {
+			return err
+		}
+	}
+	if *bewindDemo {
+		if err := checkStagingOnly("--bewind-demo", cfg.DevMode, os.Getenv(envSeedEnvironment)); err != nil {
+			return err
+		}
+	}
+
 	ctx := context.Background()
 
-	// Both partial seeds create no demo data, so they can be combined and are
-	// safe to run on every deploy. Only when neither flag is set does the full
-	// dev demo seed run.
-	if *adminsOnly || *orgOnly || *partnersOnly {
+	// The partial seeds are idempotent, so they can be combined and run on
+	// every deploy of the environment they are for: --admins and --org on
+	// staging and production, --partners, --proofing-demo and --bewind-demo on
+	// staging only.
+	// Only when no flag is set does the full dev demo seed run.
+	if *adminsOnly || *orgOnly || *partnersOnly || *proofingDemo || *bewindDemo {
 		if *adminsOnly {
 			slog.Info("provisioning platform-admin accounts", slog.Int("count", len(cfg.PlatformAdminEmails)))
 			if err := seed.EnsurePlatformAdmins(ctx, cfg.DatabaseDSN, cfg.PlatformAdminEmails); err != nil {
@@ -67,6 +93,20 @@ func run() error {
 			}
 			slog.Info("partner organisation provisioning complete")
 		}
+		if *proofingDemo {
+			slog.Info("provisioning identity proofing demo")
+			if err := seed.EnsureProofingDemo(ctx, cfg.DatabaseDSN, cfg.QerdsDefaultAddressDomain); err != nil {
+				return err
+			}
+			slog.Info("identity proofing demo provisioning complete")
+		}
+		if *bewindDemo {
+			slog.Info("provisioning beschermingsbewind demo")
+			if err := seed.EnsureBewindDemo(ctx, cfg.DatabaseDSN, cfg.QerdsDefaultAddressDomain); err != nil {
+				return err
+			}
+			slog.Info("beschermingsbewind demo provisioning complete")
+		}
 		return nil
 	}
 
@@ -77,4 +117,14 @@ func run() error {
 	slog.Info("database seed complete")
 
 	return nil
+}
+
+// checkStagingOnly refuses a staging-only seed flag outside staging
+// (environment) and a local stack (devMode).
+func checkStagingOnly(flagName string, devMode bool, environment string) error {
+	if devMode || environment == seedEnvironmentStaging {
+		return nil
+	}
+	return fmt.Errorf("%s is for staging only: set %s=%s, or run it on a local stack (DEV_MODE)",
+		flagName, envSeedEnvironment, seedEnvironmentStaging)
 }

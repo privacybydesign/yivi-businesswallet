@@ -4,14 +4,20 @@ package wallet_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 
+	"github.com/google/uuid"
+
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/database"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/lifecycle"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/registryprovider"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/testdb"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/wallet"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/walletunit"
 )
 
 const stubKVK = "90001234"
@@ -24,12 +30,25 @@ func stubAttestation() registryprovider.RegistrationAttestation {
 	return registryprovider.RegistrationAttestation{
 		KVKNumber:                    stubKVK,
 		LegalName:                    "Stub Company B.V.",
-		EUID:                         "NL.KVK." + stubKVK,
+		EUID:                         "NLNHR." + stubKVK,
 		RequesterIsRepresentative:    true,
 		RequesterRepresentativeIndex: 0,
 		Representatives: []registryprovider.Representative{
 			{Kind: registryprovider.KindBestuurder, GivenNames: "Alice", FamilyName: "Owner", Authority: registryprovider.AuthoritySole},
 		},
+	}
+}
+
+// registration wraps the store inputs, with an EBWOID already in the org's holder.
+func registration(requesterID uuid.UUID, slug, address, kvkAddress string, att registryprovider.RegistrationAttestation) wallet.Registration {
+	return wallet.Registration{
+		OrgID:             uuid.New(),
+		RequestorUserID:   requesterID,
+		Slug:              slug,
+		DigitalAddress:    address,
+		KVKContactAddress: kvkAddress,
+		Attestation:       att,
+		EBWOID:            registryprovider.HeldEBWOID{Ref: "ebwoid-" + slug, Issuer: "https://ebwoid.test"},
 	}
 }
 
@@ -52,23 +71,36 @@ func TestRegisterOrganization(t *testing.T) {
 
 	att := stubAttestation()
 
-	store := wallet.NewStore(pool, audit.NopRecorder{})
+	store := wallet.NewStore(pool, audit.NopRecorder{}, walletunit.NewStore(pool, audit.NopRecorder{}))
 	const slug = "stub-co"
 	const address = slug + "@qerds.localhost"
 	const kvkAddress = "kvk-" + stubKVK + "@qerds.localhost"
 
-	org, err := store.RegisterOrganization(ctx, requester.ID, slug, address, kvkAddress, att)
+	org, err := store.RegisterOrganization(ctx, registration(requester.ID, slug, address, kvkAddress, att))
 	if err != nil {
 		t.Fatalf("RegisterOrganization: %v", err)
 	}
 	if org.Slug != slug || org.Name != att.LegalName || org.KVKNumber != stubKVK {
 		t.Fatalf("org = %q/%q/%q, want %q/%q/%q", org.Slug, org.Name, org.KVKNumber, slug, att.LegalName, stubKVK)
 	}
+	if !org.TestMode {
+		t.Error("a registered org starts live, want test mode")
+	}
 	if org.Status != organization.StatusActive {
 		t.Fatalf("status = %q, want active", org.Status)
 	}
 	if org.DigitalAddress != address {
 		t.Fatalf("digital address = %q, want %q", org.DigitalAddress, address)
+	}
+
+	// The EBWOID is held from the start, indexed under the org's own id.
+	var heldRef, heldSource string
+	if err := pool.QueryRow(ctx, `SELECT credential_ref, source FROM held_attestations WHERE organization_id = $1 AND vct = $2`,
+		org.ID, registryprovider.EBWOIDVCT).Scan(&heldRef, &heldSource); err != nil {
+		t.Fatalf("held EBWOID missing: %v", err)
+	}
+	if heldRef != "ebwoid-"+slug || heldSource != "bootstrap" {
+		t.Fatalf("held EBWOID = %q/%q, want %q/bootstrap", heldRef, heldSource, "ebwoid-"+slug)
 	}
 
 	// The requester is an admin member.
@@ -123,6 +155,48 @@ func TestRegisterOrganization(t *testing.T) {
 	if claimed != 1 {
 		t.Fatalf("claimed representations = %d, want 1 (the requester)", claimed)
 	}
+
+	var unitStatus string
+	if err := pool.QueryRow(ctx, `SELECT status FROM wallet_units WHERE organization_id = $1`, org.ID).Scan(&unitStatus); err != nil {
+		t.Fatalf("wallet unit missing: %v", err)
+	}
+	if unitStatus != walletunit.UnitActive {
+		t.Fatalf("wallet unit status = %q, want active", unitStatus)
+	}
+}
+
+// failOnBootstrap fails the last write of registration, after the wallet unit
+// was provisioned.
+type failOnBootstrap struct{}
+
+func (failOnBootstrap) Record(_ context.Context, _ database.Querier, action string, _ audit.Target, _ map[string]any) error {
+	if action == audit.WalletBootstrapped {
+		return errors.New("audit down")
+	}
+	return nil
+}
+
+// TestRegisterOrganizationRollsBackTheWalletUnit: a registration that fails
+// after provisioning leaves neither the org nor its wallet unit behind.
+func TestRegisterOrganizationRollsBackTheWalletUnit(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	ctx := context.Background()
+	requester, err := user.NewStore(pool).Create(ctx, user.User{Email: "carol@example.com", GivenNames: "Carol", LastName: "Owner"})
+	if err != nil {
+		t.Fatalf("create requester: %v", err)
+	}
+	store := wallet.NewStore(pool, failOnBootstrap{}, walletunit.NewStore(pool, audit.NopRecorder{}))
+	if _, err := store.RegisterOrganization(ctx, registration(requester.ID, "rollback-co", "rollback-co@qerds.localhost", "kvk@qerds.localhost", stubAttestation())); err == nil {
+		t.Fatal("RegisterOrganization succeeded, want the audit failure")
+	}
+	var orgs, units, held int
+	if err := pool.QueryRow(ctx, `SELECT (SELECT count(*) FROM organizations), (SELECT count(*) FROM wallet_units),
+		(SELECT count(*) FROM held_attestations)`).Scan(&orgs, &units, &held); err != nil {
+		t.Fatal(err)
+	}
+	if orgs != 0 || units != 0 || held != 0 {
+		t.Fatalf("after a failed registration: %d orgs, %d wallet units, %d held, want none", orgs, units, held)
+	}
 }
 
 // TestRegisterOrganizationRejectsDuplicateKVK covers "one wallet per company": a
@@ -136,12 +210,12 @@ func TestRegisterOrganizationRejectsDuplicateKVK(t *testing.T) {
 		t.Fatalf("create requester: %v", err)
 	}
 	att := stubAttestation()
-	store := wallet.NewStore(pool, audit.NopRecorder{})
+	store := wallet.NewStore(pool, audit.NopRecorder{}, walletunit.NewStore(pool, audit.NopRecorder{}))
 
-	if _, err := store.RegisterOrganization(ctx, requester.ID, "first", "a@qerds.localhost", "kvk-a@qerds.localhost", att); err != nil {
+	if _, err := store.RegisterOrganization(ctx, registration(requester.ID, "first", "a@qerds.localhost", "kvk-a@qerds.localhost", att)); err != nil {
 		t.Fatalf("first RegisterOrganization: %v", err)
 	}
-	_, err = store.RegisterOrganization(ctx, requester.ID, "second", "b@qerds.localhost", "kvk-b@qerds.localhost", att)
+	_, err = store.RegisterOrganization(ctx, registration(requester.ID, "second", "b@qerds.localhost", "kvk-b@qerds.localhost", att))
 	if err == nil {
 		t.Fatal("expected a duplicate-KVK registration to fail")
 	}
@@ -157,8 +231,8 @@ func TestSetStatus(t *testing.T) {
 		t.Fatalf("create requester: %v", err)
 	}
 	att := stubAttestation()
-	store := wallet.NewStore(pool, audit.NopRecorder{})
-	org, err := store.RegisterOrganization(ctx, requester.ID, "carol-co", "c@qerds.localhost", "kvk-c@qerds.localhost", att)
+	store := wallet.NewStore(pool, audit.NopRecorder{}, walletunit.NewStore(pool, audit.NopRecorder{}))
+	org, err := store.RegisterOrganization(ctx, registration(requester.ID, "carol-co", "c@qerds.localhost", "kvk-c@qerds.localhost", att))
 	if err != nil {
 		t.Fatalf("RegisterOrganization: %v", err)
 	}
@@ -169,5 +243,13 @@ func TestSetStatus(t *testing.T) {
 	}
 	if suspended.Status != organization.StatusSuspended {
 		t.Fatalf("status = %q, want suspended", suspended.Status)
+	}
+
+	if _, err := store.SetStatus(ctx, org.ID, organization.StatusRevoked); err != nil {
+		t.Fatalf("revoke a suspended wallet: %v", err)
+	}
+	// Revoked is final: suspending it must not bring it back.
+	if _, err := store.SetStatus(ctx, org.ID, organization.StatusSuspended); !errors.Is(err, lifecycle.ErrTransition) {
+		t.Fatalf("suspend a revoked wallet: err = %v, want lifecycle.ErrTransition", err)
 	}
 }

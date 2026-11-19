@@ -1,6 +1,7 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useParams, useSearchParams } from "react-router";
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import * as React from "react";
 import { ApiError } from "../api/http";
 import {
@@ -9,22 +10,44 @@ import {
   externalDocumentUrl,
 } from "../api/signing";
 import {
+  useDeclineExternalSignMutation,
   useExternalSigningQuery,
   useLinkExternalCredentialMutation,
   useStartExternalSignMutation,
 } from "../api/signing.queries";
+import { returnLinkHost } from "../lib/return-link";
 import { modeLabel } from "../lib/signing-labels";
 import { toast } from "../lib/toast";
-import { Button, Card, Logo, Outcome } from "../ui";
+import { Button, Card, Logo, Outcome, buttonClassName } from "../ui";
+import { DeclineDialog } from "./signing-decline-dialog";
 
 // The external signing page. An external signee was added to a co-signing request by
 // name + e-mail, so they have no account here and no session: this page is reached
 // with nothing but the one-time link from their mail, and every call it makes is keyed
 // by that token. They run the same two ceremonies a member does — link a signing
-// credential with their own EUDI wallet, then sign — which is what makes the finished
-// PDF carry one qualified signature per signer regardless of who is inside the org.
+// certificate by identifying with their own wallet app, then sign — which is what
+// makes the finished PDF carry one signature per signer regardless of who is inside
+// the org. A signee sent here by another site (a request made over the signing API)
+// is offered a link back to it once they are done; they are never sent there unasked.
 
 const NOT_FOUND_STATUS = 404;
+
+// The way back to the site that sent the signee here, for a signee who is done.
+// Nothing when there is no such site.
+function returnLink(
+  returnUrl: string | undefined,
+  t: TFunction,
+): React.ReactNode {
+  const host = returnLinkHost(returnUrl);
+  if (host === null) {
+    return undefined;
+  }
+  return (
+    <a href={returnUrl} className={buttonClassName("primary")}>
+      {t("signing.external.returnTo", { host })}
+    </a>
+  );
+}
 
 export default function SigningExternal(): React.JSX.Element {
   const { t } = useTranslation();
@@ -36,6 +59,8 @@ export default function SigningExternal(): React.JSX.Element {
   const view = useExternalSigningQuery(signToken);
   const link = useLinkExternalCredentialMutation(signToken);
   const sign = useStartExternalSignMutation(signToken);
+  const decline = useDeclineExternalSignMutation(signToken);
+  const [declining, setDeclining] = useState(false);
 
   // The ceremony returns here with ?link=ok|failed (credential link) or ?request=<id>
   // (signature). Announce the link outcome once, then strip the flag so a refresh does
@@ -67,6 +92,15 @@ export default function SigningExternal(): React.JSX.Element {
       onError: () => toast.error(t("signing.external.startError")),
     });
 
+  const onDecline = (reason: string): void =>
+    decline.mutate(reason, {
+      onSuccess: () => {
+        toast.success(t("signing.decline.toastSuccess"));
+        setDeclining(false);
+      },
+      onError: () => toast.error(t("signing.external.declineError")),
+    });
+
   const invalidLink =
     view.isError &&
     view.error instanceof ApiError &&
@@ -74,7 +108,7 @@ export default function SigningExternal(): React.JSX.Element {
 
   return (
     <div className="bg-surface-2 flex min-h-screen items-center justify-center p-6">
-      <Card className="w-full max-w-md p-8">
+      <Card className="w-full max-w-md p-6 sm:p-8">
         <div className="flex justify-center">
           <Logo />
         </div>
@@ -105,8 +139,19 @@ export default function SigningExternal(): React.JSX.Element {
             message={
               view.data.status === SIGNING_STATUS.completed
                 ? t("signing.external.signedAllHint")
-                : t("signing.external.signedWaitingHint")
+                : view.data.status === SIGNING_STATUS.declined
+                  ? t("signing.external.requestDeclinedHint")
+                  : t("signing.external.signedWaitingHint")
             }
+            action={returnLink(view.data.returnUrl, t)}
+          />
+        ) : view.data.signerStatus === SIGNER_STATUS.declined ? (
+          <Outcome
+            tone="info"
+            icon="close"
+            title={t("signing.external.declinedTitle")}
+            message={t("signing.external.declinedHint")}
+            action={returnLink(view.data.returnUrl, t)}
           />
         ) : view.data.status === SIGNING_STATUS.failed ? (
           <Outcome
@@ -114,6 +159,13 @@ export default function SigningExternal(): React.JSX.Element {
             icon="warning"
             title={t("signing.external.failedTitle")}
             message={t("signing.external.failedHint")}
+          />
+        ) : view.data.status === SIGNING_STATUS.declined ? (
+          <Outcome
+            tone="info"
+            icon="warning"
+            title={t("signing.external.requestDeclinedTitle")}
+            message={t("signing.external.requestDeclinedHint")}
           />
         ) : (
           <>
@@ -194,6 +246,17 @@ export default function SigningExternal(): React.JSX.Element {
                   {t("signing.external.notYourTurn")}
                 </p>
               )}
+
+              {/* Refusing up front does not require a linked credential or a
+                  completed turn — it is offered whenever this signee is still
+                  pending, same as the member's "To sign" list. */}
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => setDeclining(true)}
+              >
+                {t("signing.external.declineButton")}
+              </Button>
             </div>
 
             <p className="text-muted mt-4 text-[12px]">
@@ -202,6 +265,13 @@ export default function SigningExternal(): React.JSX.Element {
           </>
         )}
       </Card>
+      {declining && (
+        <DeclineDialog
+          busy={decline.isPending}
+          onConfirm={onDecline}
+          onClose={() => setDeclining(false)}
+        />
+      )}
     </div>
   );
 }

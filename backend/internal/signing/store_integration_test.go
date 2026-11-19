@@ -88,6 +88,9 @@ func testCredential(t *testing.T, id string) signingprovider.Credential {
 
 const samplePDF = "%PDF-1.4 sample"
 
+// testProviderURL is the provider the test credentials are linked at.
+const testProviderURL = "https://qtsp.example"
+
 // A request with one member and one external signee round-trips: both rows persist,
 // each carries its own kind, and only the external one has an address of its own.
 func TestCreateRequestPersistsMixedSigners(t *testing.T) {
@@ -319,18 +322,18 @@ func TestCredentialsAreKeyedPerSubject(t *testing.T) {
 	member := internalSubject(alice)
 	external := externalSubject("Outsider@Example.ORG")
 
-	if _, err := store.GetCredential(ctx, orgID, external); !errors.Is(err, ErrNoCredential) {
+	if _, err := store.GetCredential(ctx, orgID, external, testProviderURL); !errors.Is(err, ErrNoCredential) {
 		t.Errorf("unlinked external subject = %v, want ErrNoCredential", err)
 	}
 
-	if err := store.UpsertCredential(ctx, orgID, member, testCredential(t, "member-cred")); err != nil {
+	if err := store.UpsertCredential(ctx, orgID, member, testProviderURL, testCredential(t, "member-cred")); err != nil {
 		t.Fatalf("UpsertCredential (member): %v", err)
 	}
-	if err := store.UpsertCredential(ctx, orgID, external, testCredential(t, "external-cred")); err != nil {
+	if err := store.UpsertCredential(ctx, orgID, external, testProviderURL, testCredential(t, "external-cred")); err != nil {
 		t.Fatalf("UpsertCredential (external): %v", err)
 	}
 
-	gotMember, err := store.GetCredential(ctx, orgID, member)
+	gotMember, err := store.GetCredential(ctx, orgID, member, testProviderURL)
 	if err != nil {
 		t.Fatalf("GetCredential (member): %v", err)
 	}
@@ -338,7 +341,7 @@ func TestCredentialsAreKeyedPerSubject(t *testing.T) {
 		t.Errorf("member credential = %q, want member-cred", gotMember.ID)
 	}
 	// The address is normalised, so the same signee is one row however it was typed.
-	gotExternal, err := store.GetCredential(ctx, orgID, externalSubject("outsider@example.org"))
+	gotExternal, err := store.GetCredential(ctx, orgID, externalSubject("outsider@example.org"), testProviderURL)
 	if err != nil {
 		t.Fatalf("GetCredential (external): %v", err)
 	}
@@ -346,11 +349,17 @@ func TestCredentialsAreKeyedPerSubject(t *testing.T) {
 		t.Errorf("external credential = %q, want external-cred", gotExternal.ID)
 	}
 
+	// A credential belongs to the provider it was linked at: once the organisation
+	// signs with another, the signer has none there and must link again.
+	if _, err := store.GetCredential(ctx, orgID, member, "https://other-provider.example"); !errors.Is(err, ErrNoCredential) {
+		t.Errorf("credential at another provider = %v, want ErrNoCredential", err)
+	}
+
 	// Re-linking replaces that subject's row rather than adding a second one.
-	if err := store.UpsertCredential(ctx, orgID, external, testCredential(t, "external-cred-2")); err != nil {
+	if err := store.UpsertCredential(ctx, orgID, external, testProviderURL, testCredential(t, "external-cred-2")); err != nil {
 		t.Fatalf("UpsertCredential (relink): %v", err)
 	}
-	relinked, err := store.GetCredential(ctx, orgID, external)
+	relinked, err := store.GetCredential(ctx, orgID, external, testProviderURL)
 	if err != nil {
 		t.Fatalf("GetCredential (relinked): %v", err)
 	}
@@ -401,5 +410,175 @@ func TestListPendingForUserWaitsForAnEarlierExternalSignee(t *testing.T) {
 	}
 	if len(pending) != 1 || pending[0].ID != id {
 		t.Fatalf("after the external signee signed, the member's turn should be offered, got %d requests", len(pending))
+	}
+}
+
+// auditMetadataFor reads the metadata of every event of one action against a
+// target, oldest first — the audit-metadata mirror of mandateAudit in
+// internal/organization, for the one thing this package's tests need it for: the
+// decline reason must never appear here.
+func auditMetadataFor(t *testing.T, pool *pgxpool.Pool, orgID uuid.UUID, action, targetID string) []map[string]any {
+	t.Helper()
+	rows, err := pool.Query(context.Background(),
+		`SELECT metadata FROM audit_events
+		 WHERE organization_id = $1 AND action = $2 AND target_id = $3
+		 ORDER BY occurred_at, id`, orgID, action, targetID)
+	if err != nil {
+		t.Fatalf("read audit events: %v", err)
+	}
+	defer rows.Close()
+
+	var out []map[string]any
+	for rows.Next() {
+		var meta map[string]any
+		if err := rows.Scan(&meta); err != nil {
+			t.Fatalf("scan audit metadata: %v", err)
+		}
+		out = append(out, meta)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("audit event rows: %v", err)
+	}
+	return out
+}
+
+// DeclineSigner is the terminal counterpart to RecordSignature: one signer's
+// decline ends the whole request rather than leaving it half-signed, and the
+// free-text reason must reach the app (the signer row) without ever reaching the
+// audit metadata, which the notifications catalog republishes to Slack/Teams.
+func TestDeclineSignerEndsTheRequestButKeepsTheReasonOutOfAudit(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	store := NewStore(pool, audit.NewDBRecorder())
+	ctx := context.Background()
+	orgID := makeOrg(t, pool, "acme")
+	alice := makeUser(t, pool, "alice@acme.example")
+	bob := makeUser(t, pool, "bob@acme.example")
+
+	id, created, err := store.CreateRequest(ctx, orgID, alice, "Contract.pdf", []byte(samplePDF), ModeParallel,
+		[]SignerInput{
+			{Kind: KindInternal, UserID: alice, Order: 1},
+			{Kind: KindInternal, UserID: bob, Order: 2},
+		}, RecipientInput{Channel: ChannelNone})
+	if err != nil {
+		t.Fatalf("CreateRequest: %v", err)
+	}
+
+	const reason = "I no longer agree with the terms."
+	if err := store.DeclineSigner(ctx, orgID, id, created[0].ID, reason); err != nil {
+		t.Fatalf("DeclineSigner: %v", err)
+	}
+
+	req, err := store.GetRequest(ctx, orgID, id)
+	if err != nil {
+		t.Fatalf("GetRequest: %v", err)
+	}
+	if req.Status != StatusDeclined {
+		t.Fatalf("request status = %q, want %q", req.Status, StatusDeclined)
+	}
+	decliner, other := req.Signers[0], req.Signers[1]
+	if decliner.Status != SignerDeclined {
+		t.Fatalf("decliner status = %q, want %q", decliner.Status, SignerDeclined)
+	}
+	if decliner.DeclinedAt == nil {
+		t.Error("declinedAt should be set on the decliner")
+	}
+	if decliner.DeclineReason != reason {
+		t.Errorf("declineReason = %q, want %q", decliner.DeclineReason, reason)
+	}
+	// The decline stops the request from asking anyone else anything more, but does
+	// not retroactively touch a co-signer's own row.
+	if other.Status != SignerPending {
+		t.Errorf("other signer status = %q, want unchanged %q", other.Status, SignerPending)
+	}
+
+	events := auditMetadataFor(t, pool, orgID, audit.SigningDeclined, id.String())
+	if len(events) != 1 {
+		t.Fatalf("got %d signing.declined events, want 1", len(events))
+	}
+	if _, ok := events[0]["reason"]; ok {
+		t.Error("the decline reason must not reach the audit metadata")
+	}
+	after, _ := events[0]["after"].(map[string]any)
+	if after["signer"] != decliner.ID.String() {
+		t.Errorf("audit after.signer = %v, want %v", after["signer"], decliner.ID)
+	}
+
+	// A second decline race — by the same or another signer — must lose cleanly
+	// against the request no longer being awaiting_signatures.
+	if err := store.DeclineSigner(ctx, orgID, id, other.ID, "too late"); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("decline on an already-declined request = %v, want ErrInvalidRequest", err)
+	}
+}
+
+// A signer who has already signed cannot be declined out from under their own
+// completed signature — the guard closes the same race RecordSignature's own
+// RowsAffected check does.
+func TestDeclineSignerRefusesAnAlreadySignedSigner(t *testing.T) {
+	store, pool := newStore(t)
+	ctx := context.Background()
+	orgID := makeOrg(t, pool, "acme")
+	alice := makeUser(t, pool, "alice@acme.example")
+	bob := makeUser(t, pool, "bob@acme.example")
+
+	id, created, err := store.CreateRequest(ctx, orgID, alice, "Contract.pdf", []byte(samplePDF), ModeParallel,
+		[]SignerInput{
+			{Kind: KindInternal, UserID: alice, Order: 1},
+			{Kind: KindInternal, UserID: bob, Order: 2},
+		}, RecipientInput{Channel: ChannelNone})
+	if err != nil {
+		t.Fatalf("CreateRequest: %v", err)
+	}
+	if _, err := store.RecordSignature(ctx, orgID, id, created[0].ID, []byte(samplePDF+" signed")); err != nil {
+		t.Fatalf("RecordSignature: %v", err)
+	}
+
+	if err := store.DeclineSigner(ctx, orgID, id, created[0].ID, "changed my mind"); !errors.Is(err, ErrAlreadySigned) {
+		t.Fatalf("decline of an already-signed signer = %v, want ErrAlreadySigned", err)
+	}
+}
+
+// A completed request whose delivery is still pending long after it should
+// have gone out was lost with its process; a fresh one is still on its way.
+func TestListStalledDeliveries(t *testing.T) {
+	store, pool := newStore(t)
+	ctx := context.Background()
+	orgID := makeOrg(t, pool, "acme")
+	alice := makeUser(t, pool, "alice@acme.example")
+
+	newCompleted := func(filename string) uuid.UUID {
+		t.Helper()
+		id, _, err := store.CreateRequest(ctx, orgID, alice, filename, []byte(samplePDF), ModeSequential,
+			[]SignerInput{{Kind: KindInternal, UserID: alice, Order: 1}},
+			RecipientInput{Channel: ChannelEmail, Address: "recipient@example.org", Name: "Recipient"})
+		if err != nil {
+			t.Fatalf("CreateRequest: %v", err)
+		}
+		if err := store.CompleteRequest(ctx, orgID, id); err != nil {
+			t.Fatalf("CompleteRequest: %v", err)
+		}
+		return id
+	}
+	lost := newCompleted("lost.pdf")
+	fresh := newCompleted("fresh.pdf")
+	delivered := newCompleted("delivered.pdf")
+	if _, err := pool.Exec(ctx, `UPDATE signing_requests SET updated_at = now() - interval '1 hour' WHERE id = ANY($1)`,
+		[]uuid.UUID{lost, delivered}); err != nil {
+		t.Fatalf("age requests: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE signing_requests SET delivery_status = $2 WHERE id = $1`, delivered, DeliveryDelivered); err != nil {
+		t.Fatalf("mark delivered: %v", err)
+	}
+
+	stalled, err := store.ListStalledDeliveries(ctx, 10*time.Minute)
+	if err != nil {
+		t.Fatalf("ListStalledDeliveries: %v", err)
+	}
+	if len(stalled) != 1 || stalled[0].RequestID != lost || stalled[0].OrgID != orgID {
+		t.Fatalf("stalled = %+v, want only %s (not the fresh %s)", stalled, lost, fresh)
+	}
+
+	// Completing again changes nothing: the guard matches no row.
+	if err := store.CompleteRequest(ctx, orgID, lost); err != nil {
+		t.Fatalf("CompleteRequest twice: %v", err)
 	}
 }

@@ -1,9 +1,12 @@
-import { NavLink, useMatches } from "react-router";
+import { NavLink, useLocation, useMatches } from "react-router";
 import { useTranslation } from "react-i18next";
 import type { IconName } from "./icon";
 import type { Me } from "../api/auth";
 import type { Organization } from "../api/organization";
 import { useOrganizationQuery } from "../api/organization.queries";
+import { useReviewItemCountsQuery } from "../api/identity-proofing.queries";
+import { waitingCount } from "../lib/proofing-reviews";
+import { listedCount } from "../lib/identity-proofing";
 import { useSigningAvailabilityQuery } from "../api/signing.queries";
 import { personInitials, fullName } from "../lib/name";
 import { Icon } from "./icon";
@@ -11,14 +14,21 @@ import { Avatar } from "./avatar";
 import { Logo } from "./logo";
 import { OrgSwitcher } from "./org-switcher";
 import * as React from "react";
+import { useOrgEvents } from "../api/org-events.queries";
 
 type NavLabelKey =
   | "nav.dashboard"
   | "nav.members"
+  | "nav.identityProofing"
+  | "nav.identityProofingOverview"
+  | "nav.flows"
+  | "nav.reviews"
+  | "nav.developers"
   | "nav.qerds"
   | "nav.attestations"
   | "nav.postguard"
   | "nav.signing"
+  | "nav.credentialRequests"
   | "nav.auditLog"
   | "nav.settings"
   | "nav.adminDashboard"
@@ -30,14 +40,63 @@ interface NavItem {
   labelKey: NavLabelKey;
   icon: IconName;
   end?: boolean;
+  // A section's pages, listed under it while one of them is open.
+  children?: NavChild[];
+  // How many things wait on the reader here, shown beside the name.
+  count?: number;
 }
 
-// showSigning gates the "Sign documents" item on the org having a CSC signing
-// provider configured (see the sidebar body); it is a plugin, absent otherwise.
-function orgNavItems(slug: string, showSigning: boolean): NavItem[] {
+type NavChild = Omit<NavItem, "icon" | "children">;
+
+// Which optional items the org nav shows. signing gates "Sign documents" on the
+// org having a CSC signing provider configured (see the sidebar body); it is a
+// plugin, absent otherwise. admin adds the items only an organization admin can
+// use. reviewer adds Reviews, which an admin or a member with the reviewer right
+// can use.
+interface OrgNavVisibility {
+  signing: boolean;
+  admin: boolean;
+  reviewer: boolean;
+  // What waits for the reader's decision under Identity proofing › Reviews.
+  waitingReviews: number;
+}
+
+function orgNavItems(slug: string, visible: OrgNavVisibility): NavItem[] {
   const items: NavItem[] = [
     { to: `/${slug}`, labelKey: "nav.dashboard", icon: "view", end: true },
     { to: `/${slug}/members`, labelKey: "nav.members", icon: "personal" },
+  ];
+  // Identity proofing is the org's flows. Defining them, and the API keys and
+  // webhook, is for an admin. A member is sent a proofing request from their
+  // detail page, not from here.
+  const proofing = `/${slug}/identity-proofing`;
+  const proofingChildren: NavChild[] = [
+    { to: proofing, labelKey: "nav.identityProofingOverview", end: true },
+  ];
+  if (visible.admin) {
+    proofingChildren.push({ to: `${proofing}/flows`, labelKey: "nav.flows" });
+  }
+  if (visible.reviewer) {
+    proofingChildren.push({
+      to: `${proofing}/reviews`,
+      labelKey: "nav.reviews",
+      count: visible.waitingReviews,
+    });
+  }
+  if (visible.admin) {
+    proofingChildren.push({
+      to: `${proofing}/developers`,
+      labelKey: "nav.developers",
+    });
+  }
+  items.push({
+    to: proofing,
+    labelKey: "nav.identityProofing",
+    icon: "scan_qrcode",
+    children: proofingChildren,
+    count: visible.waitingReviews,
+  });
+  items.push(
     { to: `/${slug}/qerds`, labelKey: "nav.qerds", icon: "email" },
     {
       to: `/${slug}/attestations`,
@@ -45,12 +104,19 @@ function orgNavItems(slug: string, showSigning: boolean): NavItem[] {
       icon: "valid",
     },
     { to: `/${slug}/postguard`, labelKey: "nav.postguard", icon: "lock" },
-  ];
-  if (showSigning) {
+  );
+  if (visible.signing) {
     items.push({
       to: `/${slug}/signing`,
       labelKey: "nav.signing",
       icon: "edit",
+    });
+  }
+  if (visible.admin) {
+    items.push({
+      to: `/${slug}/credential-requests`,
+      labelKey: "nav.credentialRequests",
+      icon: "scan_qrcode",
     });
   }
   items.push(
@@ -75,6 +141,27 @@ const ADMIN_NAV_ITEMS: NavItem[] = [
 ];
 
 const NAV_ICON_SIZE = 16;
+
+// The number of things that wait, read aloud with what it counts.
+function CountBadge({
+  count,
+}: Readonly<{
+  count: number;
+}>): React.JSX.Element {
+  const { t } = useTranslation();
+  return (
+    <span className="bg-ink text-surface ml-auto min-w-5 rounded-full px-1.5 text-center text-[11.5px] leading-5">
+      {listedCount(count, false, t)}
+      <span className="sr-only"> {t("nav.reviewsWaiting")}</span>
+    </span>
+  );
+}
+const ORG_ADMIN_ROLE = "admin";
+
+// Whether pathname is the section at base or one of its pages.
+function isWithin(pathname: string, base: string): boolean {
+  return pathname === base || pathname.startsWith(`${base}/`);
+}
 
 interface SidebarProps {
   me: Me;
@@ -102,9 +189,10 @@ export function Sidebar({
   onNavigate,
   brandLogoUri,
   brandName,
-}: SidebarProps): React.JSX.Element {
+}: Readonly<SidebarProps>): React.JSX.Element {
   const { t } = useTranslation();
   const matches = useMatches();
+  const { pathname } = useLocation();
 
   // The org slug (if any) is on a descendant route match, not on this layout.
   const activeSlug = matches.find(
@@ -119,15 +207,31 @@ export function Sidebar({
     activeSlug !== undefined,
   );
   const showSigning = Boolean(signing.data?.available);
-  const navItems = activeSlug
-    ? orgNavItems(activeSlug, showSigning)
-    : me.isPlatformAdmin
-      ? ADMIN_NAV_ITEMS
-      : [];
 
   // Platform admins outrank any single org; otherwise show the membership role
   // for the org currently in the URL.
   const activeOrg = useOrganizationQuery(activeSlug ?? "");
+  const isOrgAdmin = activeOrg.data?.role === ORG_ADMIN_ROLE;
+  const canReview = activeOrg.data?.canReview === true;
+  // Asked with the page, not after the org read: the backend counts nothing
+  // for who cannot decide.
+  const waiting = useReviewItemCountsQuery(activeSlug ?? "", {
+    enabled: activeSlug !== undefined,
+  });
+  // Every member follows what changes in the org, once the org is known to be
+  // theirs to read.
+  useOrgEvents(activeSlug ?? "", activeOrg.data !== undefined);
+  const navItems = activeSlug
+    ? orgNavItems(activeSlug, {
+        signing: showSigning,
+        admin: isOrgAdmin,
+        reviewer: canReview,
+        waitingReviews: waiting.data ? waitingCount(waiting.data) : 0,
+      })
+    : me.isPlatformAdmin
+      ? ADMIN_NAV_ITEMS
+      : [];
+
   const roleLabel = me.isPlatformAdmin
     ? t("nav.platformAdmin")
     : activeOrg.data?.role;
@@ -154,30 +258,62 @@ export function Sidebar({
 
       <nav className="flex-1 overflow-y-auto px-2.5 py-1.5">
         {navItems.map((item) => (
-          <NavLink
-            key={item.to}
-            to={item.to}
-            end={item.end}
-            onClick={onNavigate}
-            className={({ isActive }) =>
-              [
-                "relative flex h-8.5 items-center gap-2.5 rounded-md px-2.5 text-[13.5px] transition-colors",
-                isActive
-                  ? "bg-sidebar-active text-sidebar-fg font-semibold"
-                  : "text-sidebar-fg-soft hover:bg-sidebar-active hover:text-sidebar-fg font-medium",
-              ].join(" ")
-            }
-          >
-            {({ isActive }) => (
-              <>
-                {isActive && (
-                  <span className="bg-primary absolute left-0 h-4.5 w-0.75 rounded-r-[3px]" />
-                )}
-                <Icon name={item.icon} size={NAV_ICON_SIZE} />
-                {t(item.labelKey)}
-              </>
+          <React.Fragment key={item.to}>
+            <NavLink
+              to={item.to}
+              end={item.end}
+              onClick={onNavigate}
+              className={({ isActive }) =>
+                [
+                  "relative flex h-8.5 items-center gap-2.5 rounded-md px-2.5 text-[13.5px] transition-colors",
+                  isActive
+                    ? "bg-sidebar-active text-sidebar-fg font-semibold"
+                    : "text-sidebar-fg-soft hover:bg-sidebar-active hover:text-sidebar-fg font-medium",
+                ].join(" ")
+              }
+            >
+              {({ isActive }) => (
+                <>
+                  {isActive && (
+                    <span className="bg-primary absolute left-0 h-4.5 w-0.75 rounded-r-[3px]" />
+                  )}
+                  <Icon name={item.icon} size={NAV_ICON_SIZE} />
+                  {t(item.labelKey)}
+                  {/* Open, the section lists its pages and the count sits on Reviews. */}
+                  {item.count !== undefined &&
+                    item.count > 0 &&
+                    !isWithin(pathname, item.to) && (
+                      <CountBadge count={item.count} />
+                    )}
+                </>
+              )}
+            </NavLink>
+            {item.children && isWithin(pathname, item.to) && (
+              <div className="my-0.5 flex flex-col gap-0.5 pl-6.5">
+                {item.children.map((child) => (
+                  <NavLink
+                    key={child.to}
+                    to={child.to}
+                    end={child.end}
+                    onClick={onNavigate}
+                    className={({ isActive }) =>
+                      [
+                        "flex h-7.5 items-center rounded-md px-2.5 text-[13px] transition-colors",
+                        isActive
+                          ? "bg-sidebar-active text-sidebar-fg font-semibold"
+                          : "text-sidebar-fg-soft hover:bg-sidebar-active hover:text-sidebar-fg font-medium",
+                      ].join(" ")
+                    }
+                  >
+                    {t(child.labelKey)}
+                    {child.count !== undefined && child.count > 0 && (
+                      <CountBadge count={child.count} />
+                    )}
+                  </NavLink>
+                ))}
+              </div>
             )}
-          </NavLink>
+          </React.Fragment>
         ))}
       </nav>
 

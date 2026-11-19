@@ -11,6 +11,8 @@ user/session/cookie/invite logic below the seam is unchanged.
 **Enables:** the "PID" seam that `.ai/features/wallet-bootstrap.md` depends on.
 **Reference integration:** `/Users/dibranmulder/code/openid4vp-demo-frontend` (working
 OpenID4VP + EUDI verifier demo).
+**Opposite role:** `.ai/features/openid4vp-inbound.md` — an external verifier invoking the
+business wallet itself as the holder of an organization's credentials.
 
 ---
 
@@ -63,8 +65,9 @@ New package replacing `internal/irmarequestor`. Two calls, mirroring the demo
   `POST {EUDI_VERIFIER_URL}/ui/presentations` with the envelope:
   ```jsonc
   { "type": "vp_token", "dcql_query": <DCQL>, "nonce": <random>,
-    "jar_mode": "by_reference", "request_uri_method": "post",
-    "issuer_chain": <trusted-issuer CA PEM> }
+    "jar_mode": "by_reference", "request_uri_method": "get",
+    "issuer_chain": <trusted-issuer CA PEM>,
+    "intended_use_id": <configured intent> | "registration_certificate": <JWS> }
   ```
   Returns `{ transactionId, walletParams }`; `walletLink = openid4vp://?<urlencode(walletParams)>`.
   **Generate a real random `nonce`** (the demo hardcodes `"nonce"` — must NOT copy).
@@ -78,19 +81,67 @@ The `RequestAuthenticator` seam carries over conceptually: today it auths to the
 daemon; here it auths to the verifier backend if the deployment requires it (the demo's
 EUDI calls are unauthenticated; self-hosted may differ).
 
+### `request_uri_method` must be `get`, because the wallet only GETs
+
+irmago's OpenID4VP client fetches the request object with `common.HTTPClient.Get(requestUri)`
+(`eudi/openid4vp/client.go`) and never reads `request_uri_method`, so it cannot POST and
+sends no `wallet_metadata`. v0.11.0 binds the request to the method the start call
+announced and answers the other one `400` (`RetrieveRequestObjectError.InvalidRequestUriMethod`),
+which the app surfaces as "openid4vp authorization request returned HTTP 400". Announcing
+`get` is therefore the only value that works with this wallet.
+
+The POST path additionally negotiates five things against `wallet_metadata` — vp formats,
+client-id prefix, JAR signing algorithm, response type, response mode — and a wallet that
+omits `client_id_prefixes_supported` or `response_modes_supported` is refused, since the
+spec defaults cover neither `x509_san_dns` nor `direct_post`. GET skips all of it.
+
+### The registration certificate a start request must carry
+
+Verifier Endpoint **v0.11.0** (upstream PR #582, released 2026-07-24) made a Wallet
+Relying Party Registration Certificate mandatory on every start: `resolveRegistrationCertificate`
+ends in `?: raise(ValidationError.MissingRegistrationCertificate)`, and there is no
+setting that turns it off. A request naming neither is refused `400
+{"error":"MissingRegistrationCertificate"}`. The certificate is carried on to the wallet
+as `verifier_info` in the request object, so it is the RP identity the holder is shown.
+
+Two ways to satisfy it, mutually exclusive (`EUDI_INTENDED_USE_ID`,
+`EUDI_REGISTRATION_CERTIFICATE`; `config.Load` refuses both, `cmd/api` fails the boot
+probe on a bad one):
+
+- **`intended_use_id`** names an intent the verifier itself has configured
+  (`VERIFIER_INTENDEDUSES_XX_*` on its side), listed at `GET /ui/intended-uses`.
+- **`registration_certificate`** carries our own, JWS compact serialization.
+
+The id defaults to `1` **only when the verifier URL is also the default**, because an
+intent id is one verifier's own configuration and means nothing on another. That
+particular id is not Yivi's choice: it is the demo intent v0.11.0 ships in
+`src/main/resources/application.properties` (`CN=Verifier Dev, O=Niscy`, `sub
+LEIEU-987654321`, PID-only), and `privacybydesign/openid4vc-poc-ops` sets no
+`VERIFIER_INTENDEDUSES_*` of its own — so staging currently presents the wallet that
+demo identity. When Yivi registers a real one the id will change, which is what the
+environment variable is for. The verifier does **not** check the DCQL query against the
+certificate's declared credentials at start (a `pbdf-*` query is accepted under the
+PID-only demo intent); whether a wallet enforces it at presentation is untested here.
+
 ### Credential requests are DCQL (not IRMA condiscon, not Presentation Exchange)
 
 Format `dc+sd-jwt`, identified by `vct_values`, claims by `path`. From the demo's presets
 (`verifiers.ts:34-307`), the schemes we use (staging):
 
+The `pbdf-staging.` prefix is `EUDI_CREDENTIAL_SCHEME`: `pbdf-staging` (default) or `pbdf`
+in production, which `config.Load` enforces. `openid4vpverifier.vctsFor` builds every vct
+below from it, so on prod they read `pbdf.pbdf.passport`, `pbdf.sidn-pbdf.email` and so on.
+
 | Purpose | vct | claims |
 |---|---|---|
 | Identity (passport) | `pbdf-staging.pbdf.passport` | firstName, lastName, dateOfBirth, nationality, gender, documentNumber, dateOfExpiry |
 | Identity (id-card) | `pbdf-staging.pbdf.idcard` | same set as passport |
+| Identity (residence permit) | `pbdf-staging.pbdf.residencepermit` | same set as passport |
 | Email (account key) | `pbdf-staging.sidn-pbdf.email` | email, domain |
 | Phone | `pbdf-staging.sidn-pbdf.mobilenumber` | mobilenumber |
+| Registered address (proofing, optional) | `pbdf.gemeente.address` in every scheme | street, houseNumber, zipcode, city |
 
-**Login DCQL** = one identity credential (passport **OR** id-card, via
+**Login DCQL** = one identity credential (passport **OR** id-card **OR** residence permit, via
 `credential_sets.options`, demo `verifiers.ts:139`) **AND** email **AND** mobilenumber:
 ```jsonc
 { "credentials": [
@@ -98,10 +149,12 @@ Format `dc+sd-jwt`, identified by `vct_values`, claims by `path`. From the demo'
      "claims":[{"path":["firstName"]},{"path":["lastName"]},{"path":["dateOfBirth"]},{"path":["nationality"]}]},
     {"id":"idcard","format":"dc+sd-jwt","meta":{"vct_values":["pbdf-staging.pbdf.idcard"]},
      "claims":[{"path":["firstName"]},{"path":["lastName"]},{"path":["dateOfBirth"]},{"path":["nationality"]}]},
+    {"id":"residencepermit","format":"dc+sd-jwt","meta":{"vct_values":["pbdf-staging.pbdf.residencepermit"]},
+     "claims":[{"path":["firstName"]},{"path":["lastName"]},{"path":["dateOfBirth"]},{"path":["nationality"]}]},
     {"id":"email","format":"dc+sd-jwt","meta":{"vct_values":["pbdf-staging.sidn-pbdf.email"]},"claims":[{"path":["email"]}]},
     {"id":"phone","format":"dc+sd-jwt","meta":{"vct_values":["pbdf-staging.sidn-pbdf.mobilenumber"]},"claims":[{"path":["mobilenumber"]}]} ],
   "credential_sets": [
-    {"options":[["passport"],["idcard"]]}, {"options":[["email"]]}, {"options":[["phone"]]} ] }
+    {"options":[["passport"],["idcard"],["residencepermit"]]}, {"options":[["email"]]}, {"options":[["phone"]]} ] }
 ```
 DCQL definitions live in config/constants (no magic strings), one per request purpose
 (login; and, for the wallet bootstrap, the identity-for-KVK request).

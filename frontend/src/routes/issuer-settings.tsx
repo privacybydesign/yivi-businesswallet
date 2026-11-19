@@ -9,9 +9,11 @@ import {
 } from "../api/issuer.queries";
 import { Button, Card } from "../ui";
 import { JsonSnippet } from "./json-snippet";
+import { draftChanged } from "../lib/form-draft";
+import { UnsavedChanges } from "./unsaved-changes";
 
 const EYEBROW =
-  "text-muted font-mono text-[11px] font-medium tracking-[0.06em] uppercase";
+  "text-muted font-label text-[11px] font-medium tracking-[0.06em] uppercase";
 const CONTROL =
   "rounded-yivi border-line-strong bg-surface text-ink h-9 w-full border px-3 text-[13.5px] outline-none transition-colors focus:border-ink focus:ring-ink/10 focus:ring-3";
 
@@ -31,9 +33,9 @@ const MAX_LOGO_BYTES = 512 * 1024;
 
 export function IssuerSettingsPanel({
   slug,
-}: {
+}: Readonly<{
   slug: string;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const settings = useIssuerSettingsQuery(slug);
 
@@ -69,10 +71,10 @@ export function IssuerSettingsPanel({
 function IssuerForm({
   slug,
   settings,
-}: {
+}: Readonly<{
   slug: string;
   settings: IssuerSettings;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const save = useUpdateIssuerSettingsMutation(slug);
 
@@ -146,8 +148,21 @@ function IssuerForm({
     });
   }
 
+  const dirty =
+    logoFile !== null ||
+    removeLogo ||
+    draftChanged(
+      { instanceName, displayName, enabled },
+      {
+        instanceName: settings.instanceName,
+        displayName: settings.displayName,
+        enabled: settings.enabled,
+      },
+    );
+
   return (
     <Card className="p-7">
+      <UnsavedChanges dirty={dirty && !save.isPending} />
       <h2 className="text-[16px] font-semibold">{t("issuerSettings.title")}</h2>
       <p className="text-ink-soft mt-1 text-[13px]">
         {t("issuerSettings.intro")}
@@ -239,7 +254,7 @@ function IssuerForm({
 
 // BundlePanel generates the GitOps files (issuer/did/metadata/vct) an operator
 // commits to the issuer ops repo (openid4vc-poc-ops) and redeploys.
-function BundlePanel({ slug }: { slug: string }): React.JSX.Element {
+function BundlePanel({ slug }: Readonly<{ slug: string }>): React.JSX.Element {
   const { t } = useTranslation();
   const [show, setShow] = useState(false);
   const bundle = useIssuerBundleQuery(slug, show);

@@ -1,0 +1,261 @@
+package proofing
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"slices"
+	"strings"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/database"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/email"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingprovider"
+)
+
+// ErrHostedDisabled is a hosted link for a flow whose hosted page is off.
+var ErrHostedDisabled = errors.New("proofing: this flow's hosted page is switched off")
+
+// Completion is how a flow's hosted page ends.
+type Completion string
+
+const (
+	// CompletionRedirect sends the subject to the session's redirect when it
+	// has one, else shows the page's own thank-you screen.
+	CompletionRedirect Completion = "redirect"
+	// CompletionDone always ends on the page's own thank-you screen: a session
+	// on the flow may not carry a redirect.
+	CompletionDone Completion = "done"
+)
+
+// FlowHosted is how a flow's hosted page behaves in an org. Locales empty is
+// every supported language. ReturnURL is where a link sends its subject when
+// the request names no redirect of its own: on one of the org's redirect
+// origins, empty for none, and always empty under CompletionDone.
+type FlowHosted struct {
+	Enabled    bool
+	Locales    []email.Locale
+	Completion Completion
+	ReturnURL  string
+}
+
+// DefaultFlowHosted is a flow's hosted page before an admin set it.
+func DefaultFlowHosted() FlowHosted {
+	return FlowHosted{Enabled: true, Locales: []email.Locale{}, Completion: CompletionRedirect}
+}
+
+// Offers reports whether the page may be shown in locale.
+func (f FlowHosted) Offers(locale email.Locale) bool {
+	return len(f.Locales) == 0 || slices.Contains(f.Locales, locale)
+}
+
+func (f FlowHosted) auditFields() map[string]any {
+	return map[string]any{
+		"enabled": f.Enabled, "locales": f.Locales, "completion": string(f.Completion), "returnUrl": f.ReturnURL,
+	}
+}
+
+// FlowHostedStore persists each flow's hosted page settings per org.
+type FlowHostedStore struct {
+	db    database.DB
+	audit audit.Recorder
+}
+
+func NewFlowHostedStore(db database.DB, recorder audit.Recorder) *FlowHostedStore {
+	return &FlowHostedStore{db: db, audit: recorder}
+}
+
+// Get returns the flow's settings; a flow never set reads as DefaultFlowHosted.
+func (s *FlowHostedStore) Get(ctx context.Context, orgID uuid.UUID, flowID string) (FlowHosted, error) {
+	return getFlowHosted(ctx, s.db, orgID, flowID)
+}
+
+func getFlowHosted(ctx context.Context, q database.Querier, orgID uuid.UUID, flowID string) (FlowHosted, error) {
+	var f FlowHosted
+	var completion string
+	err := q.QueryRow(ctx, `SELECT hosted_enabled, hosted_locales, hosted_completion, hosted_return_url
+		FROM identity_proofing_flow_settings WHERE organization_id = $1 AND flow_id = $2`,
+		orgID, flowID).Scan(&f.Enabled, &f.Locales, &completion, &f.ReturnURL)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return DefaultFlowHosted(), nil
+	}
+	if err != nil {
+		return FlowHosted{}, fmt.Errorf("proofing: read hosted settings flow %s: %w", flowID, err)
+	}
+	f.Completion = Completion(completion)
+	return f, nil
+}
+
+// Disabled returns the org's flows whose hosted page is switched off: the ones
+// not sent as a link.
+func (s *FlowHostedStore) Disabled(ctx context.Context, orgID uuid.UUID) ([]string, error) {
+	rows, err := s.db.Query(ctx, `SELECT flow_id FROM identity_proofing_flow_settings
+		WHERE organization_id = $1 AND NOT hosted_enabled`, orgID)
+	if err != nil {
+		return nil, fmt.Errorf("proofing: list unhosted flows org %s: %w", orgID, err)
+	}
+	ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return nil, fmt.Errorf("proofing: list unhosted flows org %s: %w", orgID, err)
+	}
+	return ids, nil
+}
+
+// ReturnURLs is the return page of each of the org's flows that has one.
+func (s *FlowHostedStore) ReturnURLs(ctx context.Context, orgID uuid.UUID) (map[string]string, error) {
+	rows, err := s.db.Query(ctx, `SELECT flow_id, hosted_return_url FROM identity_proofing_flow_settings
+		WHERE organization_id = $1 AND hosted_return_url <> ''`, orgID)
+	if err != nil {
+		return nil, fmt.Errorf("proofing: list return pages org %s: %w", orgID, err)
+	}
+	out := map[string]string{}
+	var flowID, returnURL string
+	if _, err := pgx.ForEachRow(rows, []any{&flowID, &returnURL}, func() error {
+		out[flowID] = returnURL
+		return nil
+	}); err != nil {
+		return nil, fmt.Errorf("proofing: list return pages org %s: %w", orgID, err)
+	}
+	return out, nil
+}
+
+// Save replaces the flow's settings and audits
+// identity_proofing.flow_hosted_configured with before and after. Saving what
+// it already has changes and audits nothing.
+func (s *FlowHostedStore) Save(ctx context.Context, orgID uuid.UUID, flowID string, f FlowHosted) (FlowHosted, error) {
+	err := database.InTx(ctx, s.db, func(q database.Querier) error {
+		before, err := getFlowHosted(ctx, q, orgID, flowID)
+		if err != nil {
+			return err
+		}
+		if before.Enabled == f.Enabled && before.Completion == f.Completion && before.ReturnURL == f.ReturnURL &&
+			slices.Equal(before.Locales, f.Locales) {
+			return nil
+		}
+		if _, err := q.Exec(ctx, `INSERT INTO identity_proofing_flow_settings
+				(organization_id, flow_id, hosted_enabled, hosted_locales, hosted_completion, hosted_return_url)
+			VALUES ($1, $2, $3, $4, $5, $6)
+			ON CONFLICT (organization_id, flow_id) DO UPDATE SET
+				hosted_enabled = EXCLUDED.hosted_enabled, hosted_locales = EXCLUDED.hosted_locales,
+				hosted_completion = EXCLUDED.hosted_completion, hosted_return_url = EXCLUDED.hosted_return_url,
+				updated_at = now()`,
+			orgID, flowID, f.Enabled, f.Locales, string(f.Completion), f.ReturnURL); err != nil {
+			return fmt.Errorf("proofing: save hosted settings flow %s: %w", flowID, err)
+		}
+		return s.audit.Record(ctx, q, audit.IdentityProofingFlowHostedConfigured,
+			audit.Target{Type: audit.TargetIdentityProofingFlow, ID: flowID, OrgID: &orgID},
+			audit.Updated(before.auditFields(), f.auditFields()))
+	})
+	if err != nil {
+		return FlowHosted{}, err
+	}
+	return f, nil
+}
+
+// flowHosted is the flow's hosted page settings; a service without a store
+// has the defaults.
+func (s *Service) flowHosted(ctx context.Context, orgID uuid.UUID, flowID string) (FlowHosted, error) {
+	if s.flowHostedSettings == nil {
+		return DefaultFlowHosted(), nil
+	}
+	return s.flowHostedSettings.Get(ctx, orgID, flowID)
+}
+
+// flowReturnURLs is the return page of each of the org's flows that has one;
+// none without a store.
+func (s *Service) flowReturnURLs(ctx context.Context, orgID uuid.UUID) (map[string]string, error) {
+	if s.flowHostedSettings == nil {
+		return nil, nil
+	}
+	return s.flowHostedSettings.ReturnURLs(ctx, orgID)
+}
+
+// hostedDisabledFlows is the org's flows whose hosted page is switched off;
+// none without a store.
+func (s *Service) hostedDisabledFlows(ctx context.Context, orgID uuid.UUID) ([]string, error) {
+	if s.flowHostedSettings == nil {
+		return nil, nil
+	}
+	return s.flowHostedSettings.Disabled(ctx, orgID)
+}
+
+// FlowHosted returns one of the org's flows' hosted page settings.
+func (s *Service) FlowHosted(ctx context.Context, org Org, flowID string) (FlowHosted, error) {
+	if err := s.orgHasFlow(ctx, org, flowID); err != nil {
+		return FlowHosted{}, err
+	}
+	return s.flowHosted(ctx, org.ID, flowID)
+}
+
+// SaveFlowHosted replaces one of the org's flows' hosted page settings: the
+// languages are supported ones, kept once in the order given, and ones the
+// flow's active version gives its reasons in (hostedOffersReasons); the return
+// page is on one of the org's redirect origins, and only on a flow that
+// redirects. A data request flow's stay the defaults.
+func (s *Service) SaveFlowHosted(ctx context.Context, org Org, flowID string, f FlowHosted) (FlowHosted, error) {
+	if s.flowHostedSettings == nil {
+		return FlowHosted{}, errors.New("proofing: no hosted settings store configured")
+	}
+	if f.Completion != CompletionRedirect && f.Completion != CompletionDone {
+		return FlowHosted{}, fmt.Errorf("%w: completion is redirect or done", ErrInvalidInput)
+	}
+	f.ReturnURL = strings.TrimSpace(f.ReturnURL)
+	if f.ReturnURL != "" {
+		if f.Completion == CompletionDone {
+			return FlowHosted{}, fmt.Errorf("%w: a flow that ends on its own thank-you page has no return page", ErrInvalidInput)
+		}
+		settings, err := s.orgSettings.Get(ctx, org.ID)
+		if err != nil {
+			return FlowHosted{}, err
+		}
+		if err := checkRedirect(f.ReturnURL, settings); err != nil {
+			return FlowHosted{}, err
+		}
+	}
+	locales := make([]email.Locale, 0, len(f.Locales))
+	for _, raw := range f.Locales {
+		locale, ok := email.ParseLocale(string(raw))
+		if !ok {
+			return FlowHosted{}, fmt.Errorf("%w: unsupported language %q", ErrInvalidInput, raw)
+		}
+		if !slices.Contains(locales, locale) {
+			locales = append(locales, locale)
+		}
+	}
+	f.Locales = locales
+	flow, err := s.orgFlow(ctx, org, flowID)
+	if err != nil {
+		return FlowHosted{}, err
+	}
+	if err := s.refuseDataRequestFlow(ctx, org, flowID); err != nil {
+		return FlowHosted{}, err
+	}
+	if err := hostedOffersReasons(flow, f); err != nil {
+		return FlowHosted{}, err
+	}
+	return s.flowHostedSettings.Save(ctx, org.ID, flowID, f)
+}
+
+// orgHasFlow is ErrFlowNotFound for a flow that is not one of the org's.
+func (s *Service) orgHasFlow(ctx context.Context, org Org, flowID string) error {
+	_, err := s.orgFlow(ctx, org, flowID)
+	return err
+}
+
+// orgFlow is the active version of one of the org's flows; ErrFlowNotFound
+// for a flow that is not one of the org's.
+func (s *Service) orgFlow(ctx context.Context, org Org, flowID string) (proofingprovider.Flow, error) {
+	tenant := orgTenant(org.ID)
+	flows, err := s.ips.ListFlows(ctx, tenant)
+	if err != nil {
+		return proofingprovider.Flow{}, fmt.Errorf("proofing: list flows org %s: %w", org.ID, err)
+	}
+	i := slices.IndexFunc(flows, func(f proofingprovider.Flow) bool { return f.ID == flowID })
+	if i < 0 {
+		return proofingprovider.Flow{}, ErrFlowNotFound
+	}
+	return flows[i], nil
+}

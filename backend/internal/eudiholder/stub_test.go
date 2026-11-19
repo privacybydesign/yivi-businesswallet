@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/eudiholder"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/openid4vciissuer"
 )
 
 func TestStubHolderStoreDeleteRoundTrip(t *testing.T) {
@@ -48,6 +49,56 @@ func TestStubHolderStoreDeleteRoundTrip(t *testing.T) {
 	// Deleting for an org that never stored anything is a no-op.
 	if err := h.Delete(ctx, uuid.New(), "whatever"); err != nil {
 		t.Fatalf("delete unknown org should be a no-op: %v", err)
+	}
+}
+
+// An offer from the stub issuer is held as what was issued: its type and
+// claims, not the placeholder.
+func TestStubHolderRedeemsStubOfferContent(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	offer, err := openid4vciissuer.NewStubIssuer().CreateOffer(ctx, openid4vciissuer.OfferRequest{
+		CredentialConfigID: "RechtbankBeschermingsbewindSdJwt",
+		VCT:                "nl.rechtspraak.beschermingsbewind",
+		DisplayName:        "Beschikking beschermingsbewind",
+		IssuerName:         "Rechtbank Gelderland (Demo)",
+		Claims:             map[string]any{"zaaknummer": "C/05/412345"},
+	})
+	if err != nil {
+		t.Fatalf("create offer: %v", err)
+	}
+
+	h := eudiholder.NewStubHolder()
+	org := uuid.New()
+	got, err := h.Redeem(ctx, org, offer.OfferURI)
+	if err != nil {
+		t.Fatalf("redeem: %v", err)
+	}
+	if got.VCT != "nl.rechtspraak.beschermingsbewind" {
+		t.Errorf("vct = %q, want the issued type", got.VCT)
+	}
+	claims, err := h.Claims(ctx, org, got.Ref, got.VCT, "en")
+	if err != nil {
+		t.Fatalf("claims: %v", err)
+	}
+	if v := attributeValue(claims.Attributes, "zaaknummer"); v != "C/05/412345" {
+		t.Errorf("claims[zaaknummer] = %v, want the issued value", v)
+	}
+	if hasAttribute(claims.Attributes, "company_name") {
+		t.Error("claims carry the placeholder's attributes")
+	}
+	if claims.DisplayName != "Beschikking beschermingsbewind" || claims.IssuerName != "Rechtbank Gelderland (Demo)" {
+		t.Errorf("display = %q by %q, want the offered names", claims.DisplayName, claims.IssuerName)
+	}
+	if got.Issuer != "Rechtbank Gelderland (Demo)" {
+		t.Errorf("issuer = %q, want the issuing organization", got.Issuer)
+	}
+	displays, err := h.Displays(ctx, org, "en")
+	if err != nil {
+		t.Fatalf("displays: %v", err)
+	}
+	if displays[got.VCT].DisplayName != "Beschikking beschermingsbewind" {
+		t.Errorf("displays = %+v", displays)
 	}
 }
 

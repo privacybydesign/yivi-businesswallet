@@ -15,7 +15,7 @@ import {
   useUpdateAttestationSchemaMutation,
   useUploadAttestationSchemaLogoMutation,
 } from "../api/attestations.queries";
-import { Button, Modal } from "../ui";
+import { Button, Modal, Select } from "../ui";
 import { control } from "../lib/attestation-form";
 import { Field } from "./attestations-fields";
 import { JsonSnippet } from "./json-snippet";
@@ -98,9 +98,11 @@ export function AttestationSchemaForm({
   slug,
   schema,
   onClose,
-}: Props): React.JSX.Element {
+}: Readonly<Props>): React.JSX.Element {
   const { t } = useTranslation();
   const isEdit = schema !== undefined;
+  // A rulebook schema's subject type and attributes are fixed by WE BUILD.
+  const fromRulebook = schema?.rulebook !== undefined;
   const create = useCreateAttestationSchemaMutation(slug);
   const update = useUpdateAttestationSchemaMutation(slug);
   const uploadLogo = useUploadAttestationSchemaLogoMutation(slug);
@@ -428,9 +430,9 @@ export function AttestationSchemaForm({
           id="schema-subject-type"
           label={t("attestations.schemaForm.subjectType")}
         >
-          <select
+          <Select
             id="schema-subject-type"
-            className={`${control(false)} h-9`}
+            disabled={fromRulebook}
             value={subjectType}
             onChange={(event) =>
               setSubjectType(event.target.value as AttestationSubjectType)
@@ -443,7 +445,7 @@ export function AttestationSchemaForm({
                   : t("attestations.schemaForm.subjectOrganization")}
               </option>
             ))}
-          </select>
+          </Select>
         </Field>
 
         <div className="grid grid-cols-2 gap-4">
@@ -467,7 +469,28 @@ export function AttestationSchemaForm({
           </div>
         </div>
 
-        <div className="flex flex-col gap-2">
+        {fromRulebook && schema && (
+          <div className="flex flex-col gap-2">
+            <span className="text-ink-soft text-[12px] font-semibold">
+              {t("attestations.schemaForm.attributes")}
+            </span>
+            <p className="text-ink-soft text-[12.5px]">
+              {t("attestations.schemaForm.rulebookFixed")}
+            </p>
+            <div className="flex flex-wrap gap-1.5">
+              {schema.attributes.map((attribute) => (
+                <span
+                  key={attribute.key}
+                  className="bg-surface-3 text-ink-soft rounded-full px-2 py-0.5 text-[11.5px] font-medium"
+                >
+                  {attribute.label || attribute.key}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className={fromRulebook ? "hidden" : "flex flex-col gap-2"}>
           <div className="flex items-center justify-between">
             <span className="text-ink-soft text-[12px] font-semibold">
               {t("attestations.schemaForm.attributes")}
@@ -506,8 +529,8 @@ export function AttestationSchemaForm({
                     placeholder={t("attestations.schemaForm.attrLabel")}
                     aria-label={t("attestations.schemaForm.attrLabel")}
                   />
-                  <select
-                    className={`${control(false)} h-8`}
+                  <Select
+                    size="compact"
                     value={row.type}
                     onChange={(event) =>
                       setRow(index, { type: event.target.value })
@@ -519,7 +542,7 @@ export function AttestationSchemaForm({
                         {t(`attestations.schemaForm.types.${value}`)}
                       </option>
                     ))}
-                  </select>
+                  </Select>
                 </div>
                 <div className="flex items-center justify-between">
                   <label className="text-ink-soft flex cursor-pointer items-center gap-2 text-[12.5px]">
@@ -644,12 +667,12 @@ function TranslationList({
   onChange,
   textLabel,
   textPlaceholder,
-}: {
+}: Readonly<{
   entries: Translation[];
   onChange: (next: Translation[]) => void;
   textLabel: string;
   textPlaceholder: string;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
 
   function update(index: number, patch: Partial<Translation>): void {

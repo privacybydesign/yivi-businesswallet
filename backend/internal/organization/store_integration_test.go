@@ -250,3 +250,85 @@ func TestStoreListForUserResolvesThemeLogoURI(t *testing.T) {
 		t.Errorf("ListForUser LogoURI = %q, want prefix %q with a version", got, wantPrefix)
 	}
 }
+
+// Deleting an org strips whom its proofing requests' audit events name: the
+// events outlive the org (org id set null), beyond every later purge.
+func TestStoreDeleteStripsProofingSubjects(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	store := organization.NewStore(pool, audit.NewDBRecorder())
+	ctx := context.Background()
+	org := makeOrg(t, pool, "Acme", "acme")
+	requestID := uuid.NewString()
+	userID := uuid.NewString()
+	if err := (audit.DBRecorder{}).Record(ctx, pool, audit.IdentityProofingRequested,
+		audit.Target{Type: audit.TargetIdentityProofingRequest, ID: requestID, OrgID: &org.ID},
+		map[string]any{"subjectUserId": userID, "subjectName": "Anna"}); err != nil {
+		t.Fatalf("record: %v", err)
+	}
+	if err := (audit.DBRecorder{}).Record(ctx, pool, audit.IdentityProofingSessionCancelled,
+		audit.Target{Type: audit.TargetIdentityProofingRequest, ID: requestID, OrgID: &org.ID},
+		audit.Updated(map[string]any{"status": "pending", "subjectName": "Anna", "subjectEmail": "anna@example.org"},
+			map[string]any{"status": "cancelled", "subjectName": "Anna", "subjectEmail": "anna@example.org"})); err != nil {
+		t.Fatalf("record: %v", err)
+	}
+
+	if err := store.Delete(ctx, org.ID); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+
+	var named int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE target_id = $1
+		AND (metadata::text LIKE '%Anna%' OR metadata::text LIKE '%anna@example.org%'
+			OR metadata::text LIKE '%' || $2 || '%')`, requestID, userID).Scan(&named); err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if named != 0 {
+		t.Errorf("%d audit events still name the subject after the org was deleted", named)
+	}
+	var kept int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE target_id = $1
+		AND metadata->'after'->>'status' = 'cancelled'`, requestID).Scan(&kept); err != nil || kept != 1 {
+		t.Errorf("event without its subject = %d, %v; want the event kept", kept, err)
+	}
+}
+
+// Test mode is audited only when it changes, and reads back on the org.
+func TestStoreSetTestMode(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	store := organization.NewStore(pool, audit.NewDBRecorder())
+	ctx := context.Background()
+	created := makeOrg(t, pool, "Acme", "acme")
+	if created.TestMode {
+		t.Fatal("a new org is in test mode")
+	}
+
+	for _, on := range []bool{true, true, false} {
+		org, err := store.SetTestMode(ctx, created.ID, on)
+		if err != nil || org.TestMode != on {
+			t.Fatalf("SetTestMode(%v) = %+v, %v", on, org, err)
+		}
+	}
+	if _, err := store.SetTestMode(ctx, created.ID, true); err != nil {
+		t.Fatalf("SetTestMode: %v", err)
+	}
+	if access, err := store.ResolveAccess(ctx, "acme", uuid.New()); err != nil || !access.Org.TestMode {
+		t.Errorf("ResolveAccess = %+v, %v; want the org in test mode", access.Org, err)
+	}
+	if _, err := store.SetTestMode(ctx, created.ID, false); err != nil {
+		t.Fatalf("SetTestMode: %v", err)
+	}
+	if got, err := store.GetBySlug(ctx, "acme"); err != nil || got.TestMode {
+		t.Errorf("GetBySlug = %+v, %v; want live", got, err)
+	}
+	var n int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE action = $1 AND organization_id = $2`,
+		audit.OrganizationTestModeChanged, created.ID).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 4 {
+		t.Errorf("test mode audited %d times, want 4 (a repeat changes nothing)", n)
+	}
+	if _, err := store.SetTestMode(ctx, uuid.New(), true); !errors.Is(err, organization.ErrNotFound) {
+		t.Errorf("unknown org = %v, want ErrNotFound", err)
+	}
+}

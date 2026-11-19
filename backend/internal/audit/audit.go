@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 
 	"github.com/google/uuid"
 
@@ -15,6 +16,8 @@ const (
 	OrganizationCreated = "organization.created"
 	OrganizationUpdated = "organization.updated"
 	OrganizationDeleted = "organization.deleted"
+	// OrganizationTestModeChanged is a platform admin moving an org into or out of test mode.
+	OrganizationTestModeChanged = "organization.test_mode_changed"
 
 	MembershipInvited        = "membership.invited"
 	MembershipInviteResent   = "membership.invite_resent"
@@ -26,6 +29,37 @@ const (
 	MembershipRevoked        = "membership.revoked"
 	MembershipRoleChanged    = "membership.role_changed"
 	MembershipExpired        = "membership.expired"
+	MembershipTypeChanged    = "membership.type_changed"
+	MembershipReviewChanged  = "membership.review_changed"
+
+	// Re-identification lifecycle (#240): verified-at/overdue status, per-type
+	// intervals, reminder emails and admin on-demand request.
+	MembershipIdentityRequested        = "membership.identity_requested"
+	MembershipIdentityReverified       = "membership.identity_reverified"
+	MembershipIdentityReverifyRejected = "membership.identity_reverify_rejected"
+	MembershipIdentityReminderSent     = "membership.identity_reminder_sent"
+	MembershipIdentityOverdue          = "membership.identity_overdue"
+
+	IdentitySettingsUpdated = "identity.settings_updated"
+
+	// Member screening / VOG (#242): validatie.nl real-time PDF check, the
+	// pbdf.vog credential disclosure, org screening policy, reminders and admin
+	// on-demand request.
+	MembershipVogRequested         = "membership.vog_requested"
+	MembershipVogChecked           = "membership.vog_checked"
+	MembershipVogRejected          = "membership.vog_rejected"
+	MembershipVogMismatch          = "membership.vog_mismatch"
+	MembershipVogInsufficientScope = "membership.vog_insufficient_scope"
+	MembershipVogReminderSent      = "membership.vog_reminder_sent"
+	MembershipVogExpired           = "membership.vog_expired"
+
+	ScreeningSettingsUpdated = "screening.settings_updated"
+
+	// Mandates granted inside the wallet (Recital 18, Art 5(1)(j)). A delegation is
+	// a grant with a parent, and a cascaded revocation records one event per
+	// mandate it reached, so the chain is readable from the log alone.
+	MandateGranted = "mandate.granted"
+	MandateRevoked = "mandate.revoked"
 
 	DepartmentCreated = "department.created"
 	DepartmentUpdated = "department.updated"
@@ -41,6 +75,7 @@ const (
 	QerdsMessageReceived       = "qerds.message_received"
 	QerdsAddressProvisioned    = "qerds.address_provisioned"
 	QerdsAddressDefaultChanged = "qerds.address_default_changed"
+	QerdsAddressDeleted        = "qerds.address_deleted"
 	QerdsContactAdded          = "qerds.contact_added"
 	QerdsContactDeleted        = "qerds.contact_deleted"
 
@@ -57,6 +92,10 @@ const (
 	WalletRevoked         = "wallet.revoked"
 	RepresentationClaimed = "wallet.representation_claimed"
 	RepresentationRevoked = "wallet.representation_revoked"
+	WalletUnitActivated   = "wallet.unit_activated"
+	WalletUnitRevoked     = "wallet.unit_revoked"
+	WscaAccountActivated  = "wsca.account_activated"
+	WscaAccountRotated    = "wsca.account_rotated"
 
 	// KVK-side decisions, recorded against the KVK register's own audit log when
 	// it consults its authentic source for a registration request.
@@ -73,10 +112,17 @@ const (
 	AttestationClaimed         = "attestation.claimed"
 	AttestationRevoked         = "attestation.revoked"
 	AttestationOfferCancelled  = "attestation.offer_cancelled"
+	AttestationDeclined        = "attestation.declined"
 	AttestationKeyAdded        = "attestation.key_added"
 	AttestationKeySuspended    = "attestation.key_suspended"
 	AttestationKeyRevoked      = "attestation.key_revoked"
 	AttestationHeldDeleted     = "attestation.held_deleted"
+	// A credential the organization holds entered the wallet (an accepted offer),
+	// and the issuer's status list changed its state; target is the held id.
+	AttestationHeldReceived      = "attestation.held_received"
+	AttestationHeldStatusChanged = "attestation.held_status_changed"
+	AttestationOfferAccepted     = "attestation.offer_accepted"
+	AttestationOfferDeclined     = "attestation.offer_declined"
 
 	EmailSettingsUpdated = "email.settings_updated"
 	EmailTemplateUpdated = "email.template_updated"
@@ -106,12 +152,136 @@ const (
 	SigningCompleted        = "signing.completed"
 	SigningDelivered        = "signing.delivered"
 	SigningFailed           = "signing.failed"
+	SigningDeclined         = "signing.declined"
+
+	// Inbound OpenID4VP presentations (#188): the business wallet acting as the
+	// holder toward an external verifier. Requested is written pre-auth (no actor,
+	// no org); the rest are org-scoped once an organization has been selected.
+	// The consent decision itself is #113's; completed/denied here record the
+	// transaction outcome, never the disclosed claims or the response URI.
+	PresentationRequested   = "presentation.requested"
+	PresentationOrgSelected = "presentation.org_selected"
+	PresentationCompleted   = "presentation.completed"
+	PresentationDenied      = "presentation.denied"
+	PresentationExpired     = "presentation.expired"
+	// PresentationRequestReceived (#271) is the QERDS counterpart of
+	// PresentationRequested: the organization is already known from the
+	// receiving digital address, so the row is written org-scoped from the start.
+	PresentationRequestReceived = "presentation.request_received"
+	// Outbound org-to-org requests (#271): this organization, as relying party,
+	// asked another organization for credentials over QERDS. Sent records the
+	// recipient and the credential types asked for; ResponseReceived a verified
+	// answer and the types presented, never the disclosed claim values;
+	// RequestFailed a request that ended without one — an answer refused at
+	// verification, or an invocation that could not be delivered — with the
+	// reason. Kept distinct so a refused answer never reads as a disclosure.
+	PresentationRequestSent      = "presentation.request_sent"
+	PresentationResponseReceived = "presentation.response_received"
+	PresentationRequestFailed    = "presentation.request_failed"
+	// A saved credential request: created or deleted by an admin, recording
+	// its name and the credential types it asks for.
+	PresentationRequestTemplateCreated = "presentation.request_template_created"
+	PresentationRequestTemplateDeleted = "presentation.request_template_deleted"
+
+	// identity proofing service
+	IdentityProofingFlowCreated     = "identity_proofing.flow_created"
+	IdentityProofingFlowsConfigured = "identity_proofing.flows_configured"
+
+	// flow versioning and request lifecycle
+	IdentityProofingFlowVersionCreated   = "identity_proofing.flow_version_created"
+	IdentityProofingFlowVersionActivated = "identity_proofing.flow_version_activated"
+	IdentityProofingRequested            = "identity_proofing.requested"
+	IdentityProofingSessionCreated       = "identity_proofing.session_created"
+	IdentityProofingSessionStarted       = "identity_proofing.session_started"
+	IdentityProofingSessionHandover      = "identity_proofing.session_handover"
+	// IdentityProofingDocumentScanStarted is the browser starting the
+	// document scan service for the document photo; its result is in the
+	// session's own log.
+	IdentityProofingDocumentScanStarted = "identity_proofing.document_scan_started"
+	// IdentityProofingDocumentScanFailed is the scan using up the document
+	// scan service's own attempts at a task, which rejects the session.
+	IdentityProofingDocumentScanFailed = "identity_proofing.document_scan_failed"
+	// The device trail of a session, as the engine reports it: which device
+	// claimed it, took it over, was handed a code, failed a claim, or was
+	// refused.
+	IdentityProofingDeviceClaimed       = "identity_proofing.device_claimed"
+	IdentityProofingDeviceHandedOver    = "identity_proofing.device_handed_over"
+	IdentityProofingHandoverIssued      = "identity_proofing.handover_issued"
+	IdentityProofingHandoverClaimFailed = "identity_proofing.handover_claim_failed"
+	IdentityProofingAccessDenied        = "identity_proofing.access_denied"
+	IdentityProofingSessionEnded        = "identity_proofing.session_ended"
+	IdentityProofingSessionCancelled    = "identity_proofing.session_cancelled"
+	IdentityProofingSessionPurged       = "identity_proofing.session_purged"
+	IdentityProofingResultRead          = "identity_proofing.result_read"
+	// an engine outcome, one action per decision so a rejection never reads as a success
+	IdentityProofingApproved    = "identity_proofing.approved"
+	IdentityProofingRejected    = "identity_proofing.rejected"
+	IdentityProofingNeedsReview = "identity_proofing.needs_review"
+	// a member's decision on a request under review, before its outcome lands
+	IdentityProofingReviewDecided = "identity_proofing.review_decided"
+	// the data an approved "see my data" request found, downloaded by the
+	// person, an admin or an API caller
+	IdentityProofingDataExported = "identity_proofing.data_exported"
+	// a flow's kind set: an identity check, or "see my data" / "delete my data"
+	IdentityProofingFlowKindConfigured = "identity_proofing.flow_kind_configured"
+
+	// the org's proofing settings (session lifetime, retention, branding,
+	// redirect origins), its API keys and its webhook endpoint
+	IdentityProofingSettingsUpdated      = "identity_proofing.settings_updated"
+	IdentityProofingAPIKeyCreated        = "identity_proofing.api_key_created"
+	IdentityProofingAPIKeyRevoked        = "identity_proofing.api_key_revoked"
+	IdentityProofingAPIKeyRevealed       = "identity_proofing.api_key_revealed"
+	IdentityProofingWebhookConfigured    = "identity_proofing.webhook_configured"
+	IdentityProofingWebhookSecretRotated = "identity_proofing.webhook_secret_rotated"
+	IdentityProofingWebhookRemoved       = "identity_proofing.webhook_removed"
+
+	// identity proofing paused or resumed for an org by a platform admin
+	IdentityProofingPaused  = "identity_proofing.paused"
+	IdentityProofingResumed = "identity_proofing.resumed"
+
+	// a flow's hosted page settings
+	IdentityProofingFlowHostedConfigured = "identity_proofing.flow_hosted_configured"
+
+	// a flow's own branding, over the org's
+	IdentityProofingFlowBrandingConfigured = "identity_proofing.flow_branding_configured"
+
+	// whether a flow asks for DUO diploma extracts, and an extract a subject
+	// uploaded: kept, or refused with its reason
+	IdentityProofingFlowDiplomasConfigured = "identity_proofing.flow_diplomas_configured"
+	IdentityProofingDiplomaAdded           = "identity_proofing.diploma_added"
+	IdentityProofingDiplomaRejected        = "identity_proofing.diploma_rejected"
+
+	// whether a flow asks for the subject's postal address, the address a
+	// subject entered (never its content), and a reviewer's decision on a
+	// self-declared one
+	IdentityProofingFlowAddressConfigured = "identity_proofing.flow_address_configured"
+	IdentityProofingAddressAdded          = "identity_proofing.address_added"
+	IdentityProofingAddressReviewed       = "identity_proofing.address_reviewed"
+
+	// a decision on one part of a session a reviewer reviews on its own (a
+	// review item): by a reviewer, or lapsed past its due time
+	IdentityProofingReviewItemDecided = "identity_proofing.review_item_decided"
+
+	// a link to the hosted review page of one session, made by an API key for
+	// the reviewer it names
+	IdentityProofingReviewLinkCreated = "identity_proofing.review_link_created"
+
+	// whether a flow asks for the UWV Verzekeringsbericht, and a statement a
+	// subject uploaded: kept (never its relations), or refused with its reason
+	IdentityProofingFlowEmploymentConfigured = "identity_proofing.flow_employment_configured"
+	IdentityProofingEmploymentAdded          = "identity_proofing.employment_added"
+	IdentityProofingEmploymentRejected       = "identity_proofing.employment_rejected"
+
+	// a diploma extract or Verzekeringsbericht kept for a reviewer, as its
+	// seal could not be checked at upload
+	IdentityProofingDocumentUnchecked = "identity_proofing.document_unchecked"
 )
 
 const (
 	TargetOrganization = "organization"
 	TargetMembership   = "membership"
 	TargetDepartment   = "department"
+	TargetMandate      = "mandate"
 	TargetUser         = "user"
 	TargetQerdsMessage = "qerds_message"
 	TargetQerdsAddress = "qerds_address"
@@ -120,6 +290,8 @@ const (
 	TargetWalletInstance  = "wallet_instance"
 	TargetRepresentation  = "wallet_representation"
 	TargetKVKRegistration = "kvk_registration"
+	TargetWalletUnit      = "wallet_unit"
+	TargetWscaAccount     = "wsca_account"
 
 	TargetPostGuardKey           = "postguard_key"
 	TargetPostGuardEncryptionKey = "postguard_encryption_key"
@@ -131,6 +303,7 @@ const (
 	TargetIssuedAttestation   = "issued_attestation"
 	TargetAttestationKey      = "attestation_key"
 	TargetHeldAttestation     = "held_attestation"
+	TargetCredentialOffer     = "credential_offer"
 
 	TargetEmailSettings = "org_email_settings"
 	TargetEmailTemplate = "org_email_template"
@@ -143,6 +316,10 @@ const (
 
 	TargetNotificationSettings = "org_notification_settings"
 
+	TargetIdentitySettings = "org_identity_settings"
+
+	TargetScreeningSettings = "org_screening_settings"
+
 	TargetSlackSettings = "org_slack_settings"
 
 	TargetTeamsSettings = "org_teams_settings"
@@ -153,16 +330,34 @@ const (
 
 	TargetSigningCredential = "signing_credentials"
 	TargetSigningRequest    = "signing_requests"
+
+	TargetPresentationTransaction     = "presentation_transaction"
+	TargetOutboundPresentationRequest = "outbound_presentation_request"
+	TargetPresentationRequestTemplate = "presentation_request_template"
+
+	TargetIdentityProofingSettings = "org_identity_proofing_settings"
+	TargetIdentityProofingFlow     = "identity_proofing_flow"
+	TargetIdentityProofingRequest  = "identity_proofing_request"
 )
 
+// Actor is who a request acts for: a user, or a non-user caller named by Label
+// (an API key, `api_key:<prefix>`), with UserID uuid.Nil.
 type Actor struct {
 	UserID uuid.UUID
+	Label  string
 }
 
 type ctxKey struct{}
 
 func ContextWithActor(ctx context.Context, a Actor) context.Context {
 	return context.WithValue(ctx, ctxKey{}, a)
+}
+
+// WithoutActor clears the actor for what ctx records next: a change the system
+// makes on its own account while serving someone (e.g. an outcome read from an
+// external service during a list read) is not that person's doing.
+func WithoutActor(ctx context.Context) context.Context {
+	return context.WithValue(ctx, ctxKey{}, nil)
 }
 
 // ActorFromContext returns the actor behind the current request, if one was
@@ -212,8 +407,14 @@ func (DBRecorder) Record(ctx context.Context, q database.Querier, action string,
 	}
 
 	var actorID *uuid.UUID
+	var actorLabel *string
 	if a, ok := ActorFromContext(ctx); ok {
-		actorID = &a.UserID
+		if a.UserID != uuid.Nil {
+			actorID = &a.UserID
+		}
+		if a.Label != "" {
+			actorLabel = &a.Label
+		}
 	}
 
 	var requestID *string
@@ -221,10 +422,20 @@ func (DBRecorder) Record(ctx context.Context, q database.Querier, action string,
 		requestID = &id
 	}
 
+	// An event about a test proofing session is marked test, whatever recorded it.
+	var requestTarget *uuid.UUID
+	if target.Type == TargetIdentityProofingRequest {
+		if id, err := uuid.Parse(target.ID); err == nil {
+			requestTarget = &id
+		}
+	}
+
 	const insert = `INSERT INTO audit_events
-		(actor_user_id, organization_id, action, target_type, target_id, metadata, request_id)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)`
-	if _, err := q.Exec(ctx, insert, actorID, target.OrgID, action, target.Type, target.ID, meta, requestID); err != nil {
+		(actor_user_id, organization_id, action, target_type, target_id, metadata, request_id, actor_label, test)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8,
+			EXISTS (SELECT 1 FROM identity_proofing_requests r WHERE r.id = $9 AND r.test))`
+	if _, err := q.Exec(ctx, insert, actorID, target.OrgID, action, target.Type, target.ID, meta, requestID, actorLabel,
+		requestTarget); err != nil {
 		return fmt.Errorf("audit: record %s: %w", action, err)
 	}
 	return nil
@@ -233,5 +444,38 @@ func (DBRecorder) Record(ctx context.Context, q database.Querier, action string,
 type NopRecorder struct{}
 
 func (NopRecorder) Record(context.Context, database.Querier, string, Target, map[string]any) error {
+	return nil
+}
+
+// IdentityProofingPersonalKeys are the fields of a proofing request's audit
+// events that name or describe its subject: who it is, their diplomas, and a
+// reviewer's free-text reason, which may name them, and the name of a file
+// they uploaded.
+var IdentityProofingPersonalKeys = []string{
+	"subjectName", "subjectEmail",
+	"reason", "fileName",
+	"documentType", "qualification", "institution", "dateAwarded", "nlqfLevel", "documentNumber",
+}
+
+// IdentityProofingOrphanKeys are the fields stripped from a proofing request's
+// audit events once the request itself is gone with its org: its personal
+// keys, and the member it was sent to, which a purged request still names
+// but nothing ties to an outcome once the request row is deleted.
+var IdentityProofingOrphanKeys = append(slices.Clone(IdentityProofingPersonalKeys), "subjectUserId")
+
+// StripFields removes keys from orgID's audit events on targetType, at the
+// top and in their before and after: one target's events when targetID is
+// set, every one of the type's otherwise.
+func StripFields(ctx context.Context, q database.Querier, orgID uuid.UUID, targetType, targetID string, keys []string) error {
+	if _, err := q.Exec(ctx, `UPDATE audit_events
+		SET metadata = (metadata - $4::text[])
+			|| CASE WHEN jsonb_typeof(metadata->'before') = 'object'
+				THEN jsonb_build_object('before', (metadata->'before') - $4::text[]) ELSE '{}'::jsonb END
+			|| CASE WHEN jsonb_typeof(metadata->'after') = 'object'
+				THEN jsonb_build_object('after', (metadata->'after') - $4::text[]) ELSE '{}'::jsonb END
+		WHERE organization_id = $1 AND target_type = $2 AND ($3 = '' OR target_id = $3)`,
+		orgID, targetType, targetID, keys); err != nil {
+		return fmt.Errorf("audit: strip fields %s %s: %w", targetType, targetID, err)
+	}
 	return nil
 }

@@ -44,11 +44,15 @@ const ExternalInviteTTL = 30 * 24 * time.Hour
 
 // Request statuses. A request is awaiting_signatures until every selected signer
 // has signed; then completed (delivery, if any, is tracked separately on
-// DeliveryStatus). failed means a signer's ceremony errored out.
+// DeliveryStatus). failed means a signer's ceremony errored out. declined is
+// terminal like completed: incremental PAdES cannot produce a document one
+// selected signer refused, so a single decline ends the request rather than
+// leaving it half-signed.
 const (
 	StatusAwaitingSignatures = "awaiting_signatures"
 	StatusCompleted          = "completed"
 	StatusFailed             = "failed"
+	StatusDeclined           = "declined"
 )
 
 // Signing modes: parallel signers may sign in any order (serialized by an
@@ -74,11 +78,13 @@ const (
 	DeliveryFailed       = "failed"
 )
 
-// Per-signer statuses.
+// Per-signer statuses. declined is terminal for the signer and, unlike failed
+// (a retryable ceremony error), also ends the whole request — see decline.go.
 const (
-	SignerPending = "pending"
-	SignerSigned  = "signed"
-	SignerFailed  = "failed"
+	SignerPending  = "pending"
+	SignerSigned   = "signed"
+	SignerFailed   = "failed"
+	SignerDeclined = "declined"
 )
 
 // Signer kinds: an internal org member (identified by their user id) or an
@@ -98,6 +104,9 @@ var (
 	ErrNotFound = errors.New("signing: signing request not found")
 	// ErrNotCompleted means the signed document is not ready yet.
 	ErrNotCompleted = errors.New("signing: signing request is not completed")
+	// ErrAuthorizationDenied means the signer came back from the provider without
+	// an authorization: they cancelled, or the provider refused them.
+	ErrAuthorizationDenied = errors.New("signing: the authorization was denied or cancelled")
 	// ErrSessionExpired means the authorization was not completed within SessionTTL.
 	ErrSessionExpired = errors.New("signing: authorization session expired")
 	// ErrInvalidPDF means the uploaded bytes are not a usable PDF.
@@ -114,6 +123,10 @@ var (
 	ErrInvalidRequest = errors.New("signing: invalid signing request")
 	// ErrInvalidToken means an external signee's invitation link is unknown or expired.
 	ErrInvalidToken = errors.New("signing: the signing link is not valid or has expired")
+	// ErrSignerIdentityBlocked means a selected internal signer's
+	// re-identification is overdue and the org's policy blocks them from signing
+	// until they re-identify (#240 §3).
+	ErrSignerIdentityBlocked = errors.New("signing: a selected signer's identity re-confirmation is overdue")
 )
 
 // provider is the consumer-defined view of internal/signingprovider that this
@@ -146,6 +159,11 @@ type OrgMember struct {
 	UserID uuid.UUID
 	Name   string
 	Email  string
+	// IdentityBlocked reports that the org's overdue re-identification policy
+	// (#240 §3) currently refuses this member as a signer — their
+	// re-identification is overdue and the org has opted into "block" rather
+	// than "flag only". Checked by validateSigners.
+	IdentityBlocked bool
 }
 
 // memberDirectory lists an org's active members, so a create-request call can
@@ -182,6 +200,11 @@ type signerNotifier interface {
 	// (built from the raw token) that lets them link a credential and sign without an
 	// org membership.
 	NotifyExternalSignatureRequested(ctx context.Context, orgID uuid.UUID, signeeEmail, documentName, token string) error
+	// NotifyRequesterDeclined tells the request's creator that a selected signer
+	// refused to sign, so a request that will otherwise never complete has a
+	// signal rather than sitting in awaiting_signatures silently. reason is the
+	// signer's optional free text; best-effort like every other notification here.
+	NotifyRequesterDeclined(ctx context.Context, orgID uuid.UUID, requesterEmail, documentName, signerName, reason string) error
 }
 
 // LinkedCredential is a user's cached signing credential (fetched once, so the
@@ -208,6 +231,12 @@ type Signer struct {
 	// block plus a paraph per page. Empty for a signer whose signature is invisible.
 	Placements []Placement `json:"placements"`
 	SignedAt   *time.Time  `json:"signedAt,omitempty"`
+	// DeclinedAt and DeclineReason are set together, only when Status is
+	// SignerDeclined. The reason is free text a person wrote; it is shown here (to
+	// whoever can already see this request) and in the mail to the requester, but
+	// deliberately never reaches audit metadata or the notifications catalog.
+	DeclinedAt    *time.Time `json:"declinedAt,omitempty"`
+	DeclineReason string     `json:"declineReason,omitempty"`
 }
 
 // subject reports whose linked signing credential this signer signs with: their
@@ -244,12 +273,20 @@ type RecipientInput struct {
 
 // Request is the non-document view of a signing request.
 type Request struct {
-	ID               uuid.UUID  `json:"id"`
-	Status           string     `json:"status"`
-	Filename         string     `json:"filename"`
-	Mode             string     `json:"mode"`
-	CreatedBy        uuid.UUID  `json:"createdBy"`
-	CreatedByName    string     `json:"createdByName"`
+	ID            uuid.UUID `json:"id"`
+	Status        string    `json:"status"`
+	Filename      string    `json:"filename"`
+	Mode          string    `json:"mode"`
+	CreatedBy     uuid.UUID `json:"createdBy"`
+	CreatedByName string    `json:"createdByName"`
+	// CreatedVia is how the request was made: by a member in the wallet, or by the
+	// organisation's own software over the API (which leaves CreatedBy zero).
+	CreatedVia string `json:"createdVia"`
+	// NotifySigners is false for an API request whose caller hands out the signing
+	// links itself; no signee is then mailed, at create or when their turn comes.
+	NotifySigners bool `json:"-"`
+	// ReturnURL is where a signee's signing page sends them back to when done.
+	ReturnURL        string     `json:"returnUrl,omitempty"`
 	RecipientChannel string     `json:"recipientChannel"`
 	RecipientName    string     `json:"recipientName,omitempty"`
 	RecipientAddress string     `json:"recipientAddress,omitempty"`
@@ -260,6 +297,40 @@ type Request struct {
 	Signers          []Signer   `json:"signers"`
 	CreatedAt        time.Time  `json:"createdAt"`
 	CompletedAt      *time.Time `json:"completedAt,omitempty"`
+}
+
+// How a request was made (Request.CreatedVia).
+const (
+	CreatedViaMember = "member"
+	CreatedViaAPI    = "api"
+)
+
+// Origin is who made a request: a member in the wallet, or the organisation's own
+// software with one of its API keys.
+type Origin struct {
+	createdBy     *uuid.UUID
+	apiKeyID      *uuid.UUID
+	notifySigners bool
+	returnURL     string
+}
+
+// MemberOrigin is a request a member made in the wallet.
+func MemberOrigin(userID uuid.UUID) Origin {
+	return Origin{createdBy: &userID, notifySigners: true}
+}
+
+// APIOrigin is a request made with an API key. notifySigners false sends no mail:
+// the caller hands each signee their link. returnURL is where a signee's signing
+// page sends them back to; empty for none.
+func APIOrigin(apiKeyID uuid.UUID, notifySigners bool, returnURL string) Origin {
+	return Origin{apiKeyID: &apiKeyID, notifySigners: notifySigners, returnURL: returnURL}
+}
+
+func (o Origin) via() string {
+	if o.createdBy == nil {
+		return CreatedViaAPI
+	}
+	return CreatedViaMember
 }
 
 // Start is what StartLink/StartSign return to the frontend: the authorization URL
@@ -290,4 +361,7 @@ type ExternalView struct {
 	HasCredential bool      `json:"hasCredential"`
 	CanSign       bool      `json:"canSign"`
 	CreatedAt     time.Time `json:"createdAt"`
+	// ReturnURL is where the page sends the signee back to once they signed or
+	// declined: the site that sent them here. Empty for none.
+	ReturnURL string `json:"returnUrl,omitempty"`
 }

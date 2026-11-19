@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/crypto"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/testdb"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/wsca"
@@ -23,7 +24,7 @@ func seedOrg(t *testing.T, ctx context.Context, pool *pgxpool.Pool, slug string)
 	var id uuid.UUID
 	err := pool.QueryRow(ctx, `INSERT INTO organizations (name, slug, kvk_number, euid, digital_address)
 		VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-		slug, slug, "kvk-"+slug, "NL.KVK."+slug, slug+"@qerds.localhost").Scan(&id)
+		slug, slug, "kvk-"+slug, "NLNHR."+slug, slug+"@qerds.localhost").Scan(&id)
 	if err != nil {
 		t.Fatalf("create org %q: %v", slug, err)
 	}
@@ -39,7 +40,7 @@ func TestStoreActivateSecretRotate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cipher: %v", err)
 	}
-	s := wsca.NewStore(pool, cipher)
+	s := wsca.NewStore(pool, cipher, audit.NopRecorder{})
 
 	// Not activated yet.
 	if _, err := s.Get(ctx, org); !errors.Is(err, wsca.ErrNotActivated) {

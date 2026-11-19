@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -72,20 +73,6 @@ func (s *Store) RecordHeld(ctx context.Context, orgID uuid.UUID, in HeldInput) (
 	return h, nil
 }
 
-// HeldForMessage reports whether an active held credential already indexes the
-// given source QERDS message. The receive flow uses it as an idempotency guard so
-// a re-delivered credential offer is not redeemed and recorded twice.
-func (s *Store) HeldForMessage(ctx context.Context, orgID, messageID uuid.UUID) (bool, error) {
-	const query = `SELECT EXISTS (
-		SELECT 1 FROM held_attestations
-		WHERE organization_id = $1 AND source_message_id = $2 AND deleted_at IS NULL)`
-	var exists bool
-	if err := s.db.QueryRow(ctx, query, orgID, messageID).Scan(&exists); err != nil {
-		return false, fmt.Errorf("attestation: held for message %s org %s: %w", messageID, orgID, err)
-	}
-	return exists, nil
-}
-
 // GetHeld returns a single active held credential by id. Returns ErrHeldNotFound
 // when the row is absent or already soft-deleted.
 func (s *Store) GetHeld(ctx context.Context, orgID, id uuid.UUID) (HeldAttestation, error) {
@@ -145,4 +132,89 @@ func (s *Store) SoftDeleteHeld(ctx context.Context, orgID, id uuid.UUID) error {
 			audit.Target{Type: audit.TargetHeldAttestation, ID: id.String(), OrgID: &orgID},
 			audit.Deleted(map[string]any{"vct": vct}))
 	})
+}
+
+// HeldStatus is a held credential's status on its issuer's status list.
+type HeldStatus int
+
+const (
+	HeldValid HeldStatus = iota
+	HeldRevoked
+)
+
+// heldStatusOf is the HeldStatus a status list's revoked flag means.
+func heldStatusOf(revoked bool) HeldStatus {
+	if revoked {
+		return HeldRevoked
+	}
+	return HeldValid
+}
+
+// RecordHeldStatusChange audits that the issuer's status list moved a held
+// credential between valid and revoked, to status, found by a status re-check.
+// It reports false, recording nothing, when the credential's last audited
+// status already is status: two re-checks of one org (two tabs, two replicas)
+// both see the same move, and the row lock lets only the first record it. A
+// credential without a status change on record was valid on receipt.
+func (s *Store) RecordHeldStatusChange(ctx context.Context, orgID, id uuid.UUID, vct string, status HeldStatus) (bool, error) {
+	revoked := status == HeldRevoked
+	recorded := false
+	err := database.InTx(ctx, s.db, func(q database.Querier) error {
+		var locked uuid.UUID
+		err := q.QueryRow(ctx, `SELECT id FROM held_attestations
+			WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL FOR UPDATE`, id, orgID).Scan(&locked)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("attestation: lock held %s: %w", id, err)
+		}
+
+		lastRevoked := false
+		err = q.QueryRow(ctx, `SELECT coalesce((metadata->'after'->>'revoked')::boolean, false) FROM audit_events
+			WHERE organization_id = $1 AND target_type = $2 AND target_id = $3 AND action = $4
+			ORDER BY occurred_at DESC, id DESC LIMIT 1`,
+			orgID, audit.TargetHeldAttestation, id.String(), audit.AttestationHeldStatusChanged).Scan(&lastRevoked)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("attestation: last held status %s: %w", id, err)
+		}
+		if lastRevoked == revoked {
+			return nil
+		}
+
+		recorded = true
+		return s.audit.Record(ctx, q, audit.AttestationHeldStatusChanged,
+			audit.Target{Type: audit.TargetHeldAttestation, ID: id.String(), OrgID: &orgID},
+			audit.Updated(map[string]any{"vct": vct, "revoked": !revoked}, map[string]any{"vct": vct, "revoked": revoked}))
+	})
+	if err != nil {
+		return false, err
+	}
+	return recorded, nil
+}
+
+// HeldHistory is a held credential's audit trail, oldest first: received and
+// status changes, the newest audit.MaxListLimit of them. Existence is the
+// caller's check (Service.HeldHistory refuses a removed credential).
+func (s *Store) HeldHistory(ctx context.Context, orgID, id uuid.UUID) ([]audit.Event, error) {
+	page, err := audit.NewReader(s.db).ListForTarget(ctx, orgID, audit.TargetHeldAttestation, id.String(), nil, audit.MaxListLimit)
+	if err != nil {
+		return nil, fmt.Errorf("attestation: held history %s: %w", id, err)
+	}
+	slices.Reverse(page.Events)
+	return page.Events, nil
+}
+
+// HolderOrgs lists the organizations that hold at least one credential: the
+// ones a scheduled status re-check visits.
+func (s *Store) HolderOrgs(ctx context.Context) ([]uuid.UUID, error) {
+	rows, err := s.db.Query(ctx, `SELECT DISTINCT organization_id FROM held_attestations WHERE deleted_at IS NULL`)
+	if err != nil {
+		return nil, fmt.Errorf("attestation: holder orgs: %w", err)
+	}
+	ids, err := pgx.CollectRows(rows, pgx.RowTo[uuid.UUID])
+	if err != nil {
+		return nil, fmt.Errorf("attestation: holder orgs: %w", err)
+	}
+	return ids, nil
 }

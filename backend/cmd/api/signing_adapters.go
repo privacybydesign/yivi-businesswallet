@@ -2,6 +2,9 @@ package main
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"net/http"
 	"net/url"
 	"strings"
 
@@ -9,10 +12,42 @@ import (
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/email"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofing"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/qerds"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/qerdsprovider"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/respond"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/signing"
 )
+
+// signingAPIAuth adapts the org's API keys to signing.APIAuth. The keys are the
+// proofing slice's (the ones on the Developers page), so the signing API is one
+// more thing a key opens rather than a second set of keys to manage.
+type signingAPIAuth struct {
+	keys *proofing.Handler
+	orgs *organization.Store
+}
+
+func (a signingAPIAuth) RequireRead(next respond.HandlerFunc) http.Handler {
+	return a.keys.RequireAPIKey(proofing.ScopeSigningRead, next)
+}
+
+func (a signingAPIAuth) RequireWrite(next respond.HandlerFunc) http.Handler {
+	return a.keys.RequireAPIKey(proofing.ScopeSigningWrite, next)
+}
+
+// Caller resolves the org's slug too: the key knows only the org's id and name,
+// and a member signer's mail links to the org's own signing page.
+func (a signingAPIAuth) Caller(ctx context.Context) (signing.APICaller, error) {
+	caller, ok := proofing.APICallerFromContext(ctx)
+	if !ok {
+		return signing.APICaller{}, errors.New("signing api: request carries no API key caller")
+	}
+	org, err := a.orgs.GetByID(ctx, caller.Org.ID)
+	if err != nil {
+		return signing.APICaller{}, fmt.Errorf("signing api: resolve org: %w", err)
+	}
+	return signing.APICaller{OrgID: org.ID, Slug: org.Slug, KeyID: caller.KeyID}, nil
+}
 
 // signingMembers adapts organization.Store to signing.memberDirectory, mapping the
 // full member record to the minimal (id, name, email) view the signing slice needs
@@ -24,12 +59,19 @@ func (m signingMembers) ListMembers(ctx context.Context, orgID uuid.UUID) ([]sig
 	if err != nil {
 		return nil, err
 	}
+	// Empty (not an error) whenever the org's overdue consequence is "flag only"
+	// (the default) or unconfigured — see organization.Store.IdentityBlockedSet.
+	blocked, err := m.store.IdentityBlockedSet(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
 	out := make([]signing.OrgMember, 0, len(members))
 	for _, mem := range members {
 		out = append(out, signing.OrgMember{
-			UserID: mem.UserID,
-			Name:   memberDisplayName(mem),
-			Email:  mem.Email,
+			UserID:          mem.UserID,
+			Name:            memberDisplayName(mem),
+			Email:           mem.Email,
+			IdentityBlocked: blocked[mem.UserID],
 		})
 	}
 	return out, nil
@@ -116,4 +158,19 @@ func (n signingNotifier) NotifyExternalSignatureRequested(ctx context.Context, o
 	}
 	signingURL := strings.TrimRight(n.appBaseURL, "/") + signing.ExternalSignPath(token)
 	return n.email.SendSignatureRequested(ctx, orgID, signeeEmail, org.Name, documentName, signingURL)
+}
+
+// NotifyRequesterDeclined mails the request's creator that a selected signer
+// refused to sign, linking to the org's signing page. Unlike the two notify
+// methods above, the caller has no org slug to build that link from (a decline
+// reaches this from the external-signee route too, which has none), so it is
+// resolved here from the org itself, the same way DeliverEmail resolves the org's
+// display name.
+func (n signingNotifier) NotifyRequesterDeclined(ctx context.Context, orgID uuid.UUID, requesterEmail, documentName, signerName, reason string) error {
+	org, err := n.orgs.GetByID(ctx, orgID)
+	if err != nil {
+		return err
+	}
+	signingURL := strings.TrimRight(n.appBaseURL, "/") + "/" + url.PathEscape(org.Slug) + "/signing"
+	return n.email.SendSignatureDeclined(ctx, orgID, requesterEmail, org.Name, documentName, signerName, reason, signingURL)
 }

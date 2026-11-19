@@ -1,5 +1,6 @@
 import { useParams } from "react-router";
 import { useTranslation } from "react-i18next";
+import type { AuditEvent } from "../api/organization";
 import {
   useOrganizationAuditEventsQuery,
   useOrganizationQuery,
@@ -7,6 +8,8 @@ import {
 import { accessMessage } from "../lib/access-message";
 import {
   auditActionLabel,
+  auditActorLabel,
+  auditDetailFields,
   auditSubject,
   auditTargetLabel,
   auditVisual,
@@ -14,10 +17,11 @@ import {
 } from "../lib/audit-event";
 import { fullName, personInitials } from "../lib/name";
 import { useWhenFormatter } from "../lib/format-when";
-import { Avatar, Button, Card, Icon, Table, TopBar } from "../ui";
+import { Avatar, Button, Card, Icon, Table, Tag, TopBar } from "../ui";
 import * as React from "react";
 
-const COLUMN_COUNT = 5;
+const COLUMN_COUNT = 6;
+const OPEN_ICON_SIZE = 18;
 
 export default function AuditLog(): React.JSX.Element {
   const { t, i18n } = useTranslation();
@@ -27,8 +31,11 @@ export default function AuditLog(): React.JSX.Element {
 
   const org = useOrganizationQuery(slug);
   const isAdmin = org.data?.role === "admin";
-  const audit = useOrganizationAuditEventsQuery(slug, isAdmin);
+  const audit = useOrganizationAuditEventsQuery(slug, org.isSuccess);
   const events = audit.data?.pages.flatMap((page) => page.events) ?? [];
+  // The server decides: an admin whose mandate was withdrawn reads the log
+  // as a member does.
+  const detailHidden = !isAdmin || events.some((event) => event.detailHidden);
 
   const dateFormatter = React.useMemo(
     () =>
@@ -40,6 +47,7 @@ export default function AuditLog(): React.JSX.Element {
     [i18n.language],
   );
   const formatWhen = useWhenFormatter();
+  const [open, setOpen] = React.useState<string | null>(null);
 
   return (
     <>
@@ -68,17 +76,11 @@ export default function AuditLog(): React.JSX.Element {
         }
       />
 
-      <div className="p-8">
+      <div className="p-4 sm:p-8">
         {org.isError ? (
           <Card className="p-6">
             <p className="text-error text-[14px]">
               {accessMessage(org.error, t)}
-            </p>
-          </Card>
-        ) : !org.isPending && !isAdmin ? (
-          <Card className="p-6">
-            <p className="text-ink-soft text-[14px]">
-              {t("auditLog.adminOnly")}
             </p>
           </Card>
         ) : audit.isError ? (
@@ -89,6 +91,11 @@ export default function AuditLog(): React.JSX.Element {
           </Card>
         ) : (
           <>
+            {org.isSuccess && detailHidden && (
+              <p className="text-ink-soft mb-4 text-[13px]">
+                {t("auditLog.detailHidden")}
+              </p>
+            )}
             <Card className="overflow-hidden">
               <Table>
                 <Table.Head>
@@ -107,6 +114,9 @@ export default function AuditLog(): React.JSX.Element {
                   <Table.HeaderCell>
                     {t("auditLog.columns.subject")}
                   </Table.HeaderCell>
+                  <Table.HeaderCell scope="col" srOnly>
+                    {t("auditLog.columns.details")}
+                  </Table.HeaderCell>
                 </Table.Head>
                 <Table.Body>
                   {org.isPending || audit.isPending ? (
@@ -118,59 +128,21 @@ export default function AuditLog(): React.JSX.Element {
                       {t("auditLog.empty")}
                     </Table.State>
                   ) : (
-                    events.map((event) => {
-                      const visual = auditVisual(event.action);
-                      const subject = auditSubject(event, dateFormatter);
-                      return (
-                        <Table.Row key={event.id}>
-                          <Table.Cell>
-                            <span className="text-ink-soft text-[12.5px]">
-                              {formatWhen(event.occurredAt)}
-                            </span>
-                          </Table.Cell>
-                          <Table.Cell>
-                            <div className="flex items-center gap-2.5">
-                              <span
-                                className={[
-                                  "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full",
-                                  AUDIT_TONE_CLASSES[visual.tone],
-                                ].join(" ")}
-                              >
-                                <Icon name={visual.icon} size={14} />
-                              </span>
-                              {event.actor && (
-                                <Avatar
-                                  initials={personInitials(event.actor)}
-                                  src={event.actor.avatarUri}
-                                  fit="cover"
-                                />
-                              )}
-                              <span className="text-ink truncate">
-                                {event.actor
-                                  ? fullName(event.actor)
-                                  : t("auditLog.system")}
-                              </span>
-                            </div>
-                          </Table.Cell>
-                          <Table.Cell>
-                            <span className="font-semibold">
-                              {auditActionLabel(event.action, t)}
-                            </span>
-                          </Table.Cell>
-                          <Table.Cell className="text-ink-soft">
-                            {auditTargetLabel(event.targetType, t)}
-                          </Table.Cell>
-                          <Table.Cell>
-                            <span
-                              className="text-ink-soft block max-w-[24rem] truncate text-[12.5px]"
-                              title={subject ?? undefined}
-                            >
-                              {subject ?? t("auditLog.noSubject")}
-                            </span>
-                          </Table.Cell>
-                        </Table.Row>
-                      );
-                    })
+                    events.map((event) => (
+                      <AuditRow
+                        key={event.id}
+                        event={event}
+                        showDetails={isAdmin && !event.detailHidden}
+                        expanded={open === event.id}
+                        onToggle={() =>
+                          setOpen((current) =>
+                            current === event.id ? null : event.id,
+                          )
+                        }
+                        dateFormatter={dateFormatter}
+                        formatWhen={formatWhen}
+                      />
+                    ))
                   )}
                 </Table.Body>
               </Table>
@@ -192,6 +164,147 @@ export default function AuditLog(): React.JSX.Element {
           </>
         )}
       </div>
+    </>
+  );
+}
+
+function AuditRow({
+  event,
+  showDetails,
+  expanded,
+  onToggle,
+  dateFormatter,
+  formatWhen,
+}: Readonly<{
+  event: AuditEvent;
+  showDetails: boolean;
+  expanded: boolean;
+  onToggle: () => void;
+  dateFormatter: Intl.DateTimeFormat;
+  formatWhen: (iso: string) => string;
+}>): React.JSX.Element {
+  const { t } = useTranslation();
+  const visual = auditVisual(event.action);
+  const action = auditActionLabel(event.action, t);
+  const subject = auditSubject(event, dateFormatter, t);
+  const detailsId = `audit-event-details-${event.id}`;
+  const fields = showDetails ? auditDetailFields(event, dateFormatter, t) : [];
+
+  return (
+    <>
+      <Table.Row
+        className="hover:bg-surface-2 cursor-pointer transition-colors"
+        onClick={onToggle}
+      >
+        <Table.Cell>
+          <span className="text-ink-soft text-[12.5px]">
+            {formatWhen(event.occurredAt)}
+          </span>
+        </Table.Cell>
+        <Table.Cell>
+          <div className="flex items-center gap-2.5">
+            <span
+              className={[
+                "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full",
+                AUDIT_TONE_CLASSES[visual.tone],
+              ].join(" ")}
+            >
+              <Icon name={visual.icon} size={14} />
+            </span>
+            {event.actor && (
+              <Avatar
+                initials={personInitials(event.actor)}
+                src={event.actor.avatarUri}
+                fit="cover"
+              />
+            )}
+            <span className="text-ink truncate">
+              {event.detailHidden
+                ? t("auditLog.hiddenActor")
+                : event.actor
+                  ? fullName(event.actor)
+                  : (auditActorLabel(event.actorLabel, t) ??
+                    t("auditLog.system"))}
+            </span>
+          </div>
+        </Table.Cell>
+        <Table.Cell>
+          <span className="flex items-center gap-2">
+            <span className="font-semibold">{action}</span>
+            {event.test && <Tag tone="amber">{t("testMode.label")}</Tag>}
+          </span>
+        </Table.Cell>
+        <Table.Cell className="text-ink-soft">
+          {auditTargetLabel(event.targetType, t)}
+        </Table.Cell>
+        <Table.Cell>
+          <span
+            className="text-ink-soft block max-w-[24rem] truncate text-[12.5px]"
+            title={subject ?? undefined}
+          >
+            {subject ?? t("auditLog.noSubject")}
+          </span>
+        </Table.Cell>
+        <Table.Cell className="w-10 text-right">
+          <button
+            type="button"
+            aria-expanded={expanded}
+            aria-controls={detailsId}
+            aria-label={t("auditLog.detailsToggle", {
+              action,
+              when: dateFormatter.format(new Date(event.occurredAt)),
+            })}
+            onClick={(clickEvent) => {
+              clickEvent.stopPropagation();
+              onToggle();
+            }}
+            className="text-muted hover:text-ink"
+          >
+            <Icon
+              name={expanded ? "chevron_down" : "chevron_right"}
+              size={OPEN_ICON_SIZE}
+            />
+          </button>
+        </Table.Cell>
+      </Table.Row>
+      {expanded && (
+        <tr id={detailsId}>
+          <td
+            colSpan={COLUMN_COUNT}
+            className="border-line bg-surface-2 border-b px-5 py-4"
+          >
+            {showDetails ? (
+              <dl className="grid content-start gap-x-8 gap-y-2 text-[13px] sm:grid-cols-[auto_1fr]">
+                <dt className="text-muted">{t("auditLog.columns.when")}</dt>
+                <dd>{dateFormatter.format(new Date(event.occurredAt))}</dd>
+                <dt className="text-muted">{t("auditLog.columns.subject")}</dt>
+                <dd className="break-words">
+                  {subject ?? t("auditLog.noSubject")}
+                </dd>
+                {fields.map((field) => (
+                  <React.Fragment key={field.key}>
+                    <dt className="text-muted">{field.label}</dt>
+                    <dd className="break-words">
+                      {field.before === undefined
+                        ? field.value
+                        : `${field.before} → ${field.value}`}
+                    </dd>
+                  </React.Fragment>
+                ))}
+                {fields.length === 0 && (
+                  <dd className="text-muted sm:col-span-2">
+                    {t("auditLog.noDetails")}
+                  </dd>
+                )}
+              </dl>
+            ) : (
+              <p className="text-ink-soft text-[13px]">
+                {t("auditLog.detailHidden")}
+              </p>
+            )}
+          </td>
+        </tr>
+      )}
     </>
   );
 }

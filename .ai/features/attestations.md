@@ -27,6 +27,14 @@ recipient step and the delivery route. On issue, the created offer is persisted
   UI :8025); the seeder points the demo org's SMTP at it. Managed in Org Settings.
 - **organization → QERDS.** The offer is sent as a QERDS message to the recipient's
   digital address, picked from the QERDS **address book** (`qerds_contacts`).
+  - The recipient accepts in its own wallet, often another deployment, and sends
+    nothing back. Listing the Issued tab (`Service.ListIssued`) asks the issuer
+    about each open offer and marks it `claimed` once collected.
+  - The stub issuer keeps such an offer (`AwaitRedeem`) pending until the stub
+    holder redeems it.
+  - A decline is sent back over QERDS (`eaa-credential-offer-declined/v1`).
+    `DeclineReceiver` marks the issued row `declined`.
+    - It carries the offer's SHA-256, never the offer: the deeplink is a bearer token.
 - Both link to a **public claim page** (`GET /api/v1/attestations/claim/{token}`,
   unauthenticated, opaque-token-keyed) that renders the QR + open-wallet link and
   polls to `claimed`. Delivery failures are non-fatal (the issuing UI still shows the
@@ -88,6 +96,31 @@ recipient step and the delivery route. On issue, the created offer is persisted
 - **Holder side (irmago + `held_attestations`) is NOT built** — deferred to a v2 plan
   (§6.5, open Qs 6–8). No Held tab; the KVK attestation does not yet surface here.
 - Chained-attestation `linked_schema_ids` column exists; no wizard step (§7).
+
+**WE BUILD rulebook schemas (YIV-530):**
+- `internal/attestation/rulebook` vendors the WE BUILD SD-JWT JSON schemas and samples
+  (EUCC, EU-PoA, VAT-ID, UBO) at a pinned upstream commit.
+  - `TestVendoredFilesUnchanged` checks their sha256. A new upstream version means
+    replacing the files and the hashes together.
+  - LEI has no upstream JSON schema. `lei-sd-jwt.json` is ours, written from `rb-lei`.
+    Like the upstream EUCC, EU-PoA and UBO schemas it refuses claims the rulebook does not define.
+- `attestation_schemas.rulebook` marks an imported schema
+  (`POST .../attestations/rulebooks/{id}/import`).
+  - Its vct, subject type and attributes are fixed (`keepRulebookFields`).
+  - A rulebook's vct is only available through the import: creating a normal schema
+    with it is refused (`vct_rulebook`).
+  - Issued claims are any JSON and are validated against the rulebook schema
+    (`invalid_claims`). Organization-defined schemas still take string values only.
+- Validation leaves out what the issuer sets:
+  - Protocol claims (`iss`, `iat`, `exp`, `cnf`, …) are not required before issuance.
+  - `status` accepts any shape. EUCC, EU-PoA, UBO and LEI define a W3C-style status
+    object, but our issuer emits the IETF Token Status List shape (which VAT-ID uses).
+- The issuer config lists every nested claim path, with `null` for array elements.
+  LEI claims are `sd: never`, as its rulebook says.
+- Holder: nested claim labels come back as `nestedLabels`. The held detail view says
+  whether a rulebook-type credential matches its rulebook (`rulebookViolations`).
+- Real issuance needs each rulebook's credential config (`we-build-<id>`) on the Veramo
+  instance, through the generated GitOps bundle. Until then only the stub issuer issues them.
 **Regulation:** COM(2025) 838 Art 5(1)(a), (f), (g), (h), Art 6(1)(a), (b), (k), (l),
 Art 8; eIDAS (EU 910/2014) Art 3(16), 45a–45f (EAA), Art 5(1)(d)/(h) qualified
 sign/seal. See `regulation/FEATURE_LIST.md`, `regulation/COM_2025_838_act.md`.
@@ -450,11 +483,61 @@ carries no validity columns: both facts live in the engine, so `Holder.Validitie
 reads them per credential-instance ref — the batch's `expires_at` (the `exp` claim) and
 the instance's `last_known_status` (the Token Status List bit, non-VALID/non-UNKNOWN =
 revoked, irmago's own policy). Nothing is fetched over the network on a list read, and
-"expiring soon" is a frontend window over the expiry, not an engine state. Open follow-up:
-irmago seeds the bit at receive and its `RevocationService.RefreshStatuses` sweep
-maintains it, but **we run no sweep yet** — so a credential revoked after it was received
-keeps reading as valid until one is scheduled (a periodic per-org refresh, like the
-provisioning scheduler).
+"expiring soon" is a frontend window over the expiry, not an engine state.
+
+**Status re-check.** `Engine.RefreshStatuses` runs irmago's
+`RevocationService.RefreshStatuses` with the same trust material a receive uses
+(`configuration` + `trustContext`, so a partner's status list verifies like its
+credential), writing `last_known_status` and `last_status_check_at` back. irmago checks
+one representative instance per batch, so `Validities` aggregates the status facts per
+batch (revoked if any copy is; last check is the latest).
+
+- Status lists are fetched through a `safehttp` client (`newStatusClient`): https only
+  (http only with `AllowInsecureHTTP`), no private addresses, and redirects followed up
+  to `maxStatusListRedirects` (the Token Status List spec asks for that; an issuer that
+  moves its lists can only redirect), each hop checked like the first. Receiving a
+  credential uses the same client, and irmago's status check at receipt is
+  fail-closed: a credential whose status list is on plain http, on a private address or
+  behind too many redirects is refused when it arrives.
+- Each per-org engine closes idle connections after `engineConnMaxIdleTime`: the
+  sweep opens an engine for every holder org, and engines stay cached.
+- It runs at boot and then every 6 hours for every org holding a credential
+  (`RecheckAllHeld`, `heldStatusRecheckEvery`), and on `POST /held/{id}/recheck`
+  (admin). That one re-reads only that credential's list (`Engine.RefreshStatus`
+  hands irmago a `batchStatusStore` narrowed to its batch) and answers `changed`
+  for it.
+- After every refresh, also a failed or timed-out one, each held credential with a
+  status list whose current status differs from its last audited one is audited
+  `attestation.held_status_changed` on the held target (`auditHeldStatuses`).
+  `RecordHeldStatusChange` locks the held row and skips a status already on record,
+  so concurrent re-checks audit a move once. One credential's error does not stop
+  the rest.
+- A re-check runs detached from the request's cancellation and actor (the issuer
+  moved the status, not the admin), bounded by `heldRecheckTimeout`, with its own
+  `heldAuditTimeout` for the audit: irmago commits each status it reads as it goes,
+  so the audit reconciles against that state rather than a before/after diff.
+- `Validities` also carries `issuedAt`, `format`, `hasStatusList` and
+  `statusCheckedAt`, which the detail page's Checks card shows. The stub's refresh
+  is a no-op.
+
+**History.** Accepting an offer now also audits `attestation.held_received` on the held
+target (sender, source, offer id), so `GET /held/{id}/history` (the audit trail for the
+target, oldest first) is the credential's history; the frontend adds the receipt for a
+row received before that event existed, and the last status check. A member who is not
+an admin reads it as the audit log shows it (who acted and what changed withheld), except
+a status change: the issuer made it, so it names no one, and it comes whole, direction
+included (`hideHeldHistoryDetail`). Disclosures are not in it: presentations are
+audited on the transaction and deliberately never name the credential or claims (see
+§12), so "Disclosed to …" from the design is not shown.
+
+**Wallet view.** Status chips with counts and the "Received via" source filter,
+"Needs attention" rows (revoked, expired, expiring soon, worst first) with the reason,
+"Valid" cards; an admin removes a credential from its row or card, or from its page. The
+detail page has a status banner (Re-check status), attributes, history, provenance,
+checks and a client-side "Export as JSON" of what the page shows (not the signed
+credential). Not built from the design: "Request a new credential" / "Request renewal" /
+"Contact issuer" (no renewal channel to an issuer yet) and the revocation reason and date
+(a status list carries a bit, not a reason).
 
 ### 6.6 `org_onboarding_attestations` — the onboarding auto-issue set
 
@@ -591,9 +674,33 @@ covers both issued and held.
 The `source=qerds` path — delivering a real OpenID4VCI Credential Offer over the
 secure channel (not a claim link) and redeeming it via the holder's OpenID4VCI
 flow — is designed in [`oid4vci-over-qerds.md`](./oid4vci-over-qerds.md) (pre-auth
-vs. authorization-code grants for business wallets).
+vs. authorization-code grants for business wallets). Receiving such an offer does
+**not** hold the credential: it queues a `credential_offers` row for the org, and
+an admin accepting it is what redeems and indexes it (§9.6).
 
-### 9.6 Auto-issue on onboarding (member accept)
+### 9.6 Accept / decline an inbound offer (Art 5(1)(a))
+
+A credential offer that arrives over QERDS waits for a human. `credential_offers`
+is the queue between "the message arrived" and "the wallet holds it": one row per
+inbound message (unique, so a re-delivery neither asks twice nor reopens a
+decision), `pending` until an admin accepts or declines from the Wallet tab.
+
+- **Accept** claims the offer (`pending` → `accepting`, one guarded `UPDATE`, so
+  concurrent accepts cannot both reach the issuer), redeems it through the holder
+  engine, then writes the `held_attestations` row in the same transaction as the
+  status flip, so an accepted offer and the credential it produced cannot
+  disagree. A redemption that fails releases the claim, so the offer can be
+  accepted again once the issuer is reachable or the org's wallet is activated —
+  the offer is never spent on a failed attempt.
+- **Decline** is terminal and redeems nothing; the QERDS message and its evidence
+  stay in the inbox.
+- The offer deeplink is a **bearer token** and is never served to the console
+  (`json:"-"`): accepting replays it server-side.
+- The trusted-sender allowlist (`QERDS_TRUSTED_OFFER_SENDERS` /
+  `…_PARTIES`) still gates what is queued at all, so an untrusted party cannot put
+  an offer in front of an admin.
+
+### 9.7 Auto-issue on onboarding (member accept)
 
 An org admin configures the onboarding auto-issue set (§6.6) from the member-invite
 screen. When a member **accepts** an invitation and their identity is disclosed
@@ -648,6 +755,8 @@ All org-scoped (`auth.RequireUser` → `organization.Handler.Authorize`, org via
 - `POST .../attestations/{id}/revoke` — admin, revoke a claimed credential (§9.4)
 **Key material** (admin): `GET|POST .../attestations/keys`, `POST .../attestations/keys/{id}/suspend|revoke`
 **Held** (member read; admin delete): `GET .../attestations/held`, `DELETE .../attestations/held/{id}`
+**Inbound offers** (member read; admin decides, §9.6): `GET .../attestations/offers`,
+`POST .../attestations/offers/{id}/accept` → `200` the held row, `POST .../attestations/offers/{id}/decline` → `204`
 **Export** (Art 5(1)(l)): `GET .../attestations/export` — structured, machine-readable
 (issued + held), admin. The bundle contract (manifest schema, format profile,
 container, versioning) is [`export.md`](./export.md); the unified org-scoped endpoint

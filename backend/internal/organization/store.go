@@ -36,13 +36,13 @@ type rowScanner interface {
 }
 
 const (
-	orgColumns  = `id, name, slug, kvk_number, euid, digital_address, status, bootstrapped_at`
-	orgColumnsQ = `o.id, o.name, o.slug, o.kvk_number, o.euid, o.digital_address, o.status, o.bootstrapped_at`
+	orgColumns  = `id, name, slug, kvk_number, euid, digital_address, status, bootstrapped_at, test_mode`
+	orgColumnsQ = `o.id, o.name, o.slug, o.kvk_number, o.euid, o.digital_address, o.status, o.bootstrapped_at, o.test_mode`
 )
 
 func scanOrg(row rowScanner) (Organization, error) {
 	var o Organization
-	err := row.Scan(&o.ID, &o.Name, &o.Slug, &o.KVKNumber, &o.EUID, &o.DigitalAddress, &o.Status, &o.BootstrappedAt)
+	err := row.Scan(&o.ID, &o.Name, &o.Slug, &o.KVKNumber, &o.EUID, &o.DigitalAddress, &o.Status, &o.BootstrappedAt, &o.TestMode)
 	return o, err
 }
 
@@ -53,7 +53,7 @@ func scanOrgWithLogo(row rowScanner) (Organization, error) {
 	var o Organization
 	var hasLogo bool
 	var themeUpdatedAt *time.Time
-	if err := row.Scan(&o.ID, &o.Name, &o.Slug, &o.KVKNumber, &o.EUID, &o.DigitalAddress, &o.Status, &o.BootstrappedAt, &hasLogo, &themeUpdatedAt); err != nil {
+	if err := row.Scan(&o.ID, &o.Name, &o.Slug, &o.KVKNumber, &o.EUID, &o.DigitalAddress, &o.Status, &o.BootstrappedAt, &o.TestMode, &hasLogo, &themeUpdatedAt); err != nil {
 		return Organization{}, err
 	}
 	o.LogoURI = logoURL(o.Slug, hasLogo, themeUpdatedAt)
@@ -104,6 +104,12 @@ func (s *Store) GetBySlug(ctx context.Context, slug string) (Organization, error
 // ON DELETE CASCADE; audit events survive with a null org id.
 func (s *Store) Delete(ctx context.Context, id uuid.UUID) error {
 	return database.InTx(ctx, s.db, func(q database.Querier) error {
+		// The proofing requests go with the org, but their audit events stay
+		// (org id set null), out of every purge's reach: strip whom they name now.
+		if err := audit.StripFields(ctx, q, id, audit.TargetIdentityProofingRequest, "",
+			audit.IdentityProofingOrphanKeys); err != nil {
+			return err
+		}
 		const del = `DELETE FROM organizations WHERE id = $1 RETURNING name, slug`
 		var name, slug string
 		err := q.QueryRow(ctx, del, id).Scan(&name, &slug)
@@ -133,7 +139,7 @@ func (s *Store) Update(ctx context.Context, id uuid.UUID, name string) (Organiza
 		var oldName string
 		err := q.QueryRow(ctx, update, id, name).Scan(
 			&org.ID, &org.Name, &org.Slug, &org.KVKNumber, &org.EUID,
-			&org.DigitalAddress, &org.Status, &org.BootstrappedAt, &oldName)
+			&org.DigitalAddress, &org.Status, &org.BootstrappedAt, &org.TestMode, &oldName)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrNotFound
 		}
@@ -143,6 +149,35 @@ func (s *Store) Update(ctx context.Context, id uuid.UUID, name string) (Organiza
 		return s.audit.Record(ctx, q, audit.OrganizationUpdated,
 			audit.Target{Type: audit.TargetOrganization, ID: id.String(), OrgID: &id},
 			audit.Updated(map[string]any{"name": oldName}, map[string]any{"name": name}))
+	})
+	return org, err
+}
+
+// SetTestMode moves the org into or out of test mode; only a change is audited.
+func (s *Store) SetTestMode(ctx context.Context, id uuid.UUID, on bool) (Organization, error) {
+	var org Organization
+	err := database.InTx(ctx, s.db, func(q database.Querier) error {
+		const update = `
+			WITH old AS (SELECT test_mode FROM organizations WHERE id = $1 FOR UPDATE)
+			UPDATE organizations o SET test_mode = $2, updated_at = now()
+			FROM old WHERE o.id = $1
+			RETURNING ` + orgColumnsQ + `, old.test_mode`
+		var was bool
+		err := q.QueryRow(ctx, update, id, on).Scan(
+			&org.ID, &org.Name, &org.Slug, &org.KVKNumber, &org.EUID,
+			&org.DigitalAddress, &org.Status, &org.BootstrappedAt, &org.TestMode, &was)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("organization: set test mode %s: %w", id, err)
+		}
+		if was == on {
+			return nil
+		}
+		return s.audit.Record(ctx, q, audit.OrganizationTestModeChanged,
+			audit.Target{Type: audit.TargetOrganization, ID: id.String(), OrgID: &id},
+			audit.Updated(map[string]any{"testMode": was}, map[string]any{"testMode": on}))
 	})
 	return org, err
 }

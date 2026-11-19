@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Breadcrumbs } from "./breadcrumb";
+import { ColorSchemeSwitcher } from "./color-scheme-switcher";
 import { Icon } from "./icon";
 import { LanguageSwitcher } from "./language-switcher";
 import { useMobileNav } from "./mobile-nav";
@@ -9,19 +10,28 @@ interface TopBarProps {
   title: string;
   subtitle?: string;
   actions?: ReactNode;
+  // Shown before the title block, e.g. the avatar of the record it is about.
+  leading?: ReactNode;
+  // Shown beside the title, e.g. status tags.
+  badges?: ReactNode;
 }
 
 export function TopBar({
   title,
   subtitle,
   actions,
-}: TopBarProps): React.JSX.Element {
+  leading,
+  badges,
+}: Readonly<TopBarProps>): React.JSX.Element {
   const { t } = useTranslation();
   const nav = useMobileNav();
   return (
     <div className="border-topbar-line bg-topbar text-topbar-fg sticky top-0 z-10 border-b px-4 pt-[22px] pb-[18px] sm:px-8">
-      <div className="flex items-end justify-between gap-5">
-        <div className="flex min-w-0 items-start gap-3">
+      {/* On phones the actions drop to their own wrapping row below the title
+          (order + basis-full); from sm up they sit between title and switcher,
+          and wrap below the title once it would shrink under basis-44. */}
+      <div className="flex flex-wrap items-end justify-between gap-x-5 gap-y-3">
+        <div className="flex min-w-0 grow basis-44 items-start gap-3">
           {nav && (
             <button
               type="button"
@@ -32,11 +42,21 @@ export function TopBar({
               <Icon name="menu" size={22} />
             </button>
           )}
+          {leading && (
+            // The title already names the record; on phones the avatar would
+            // only squeeze it.
+            <div className="hidden shrink-0 self-end sm:block">{leading}</div>
+          )}
           <div className="min-w-0">
             <Breadcrumbs />
-            <h1 className="text-[22px] leading-[1.15] font-bold tracking-[-0.01em] sm:text-[26px]">
-              {title}
-            </h1>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              {/* text-topbar-fg: the base h1 colour is the page's ink, which
+                  a coloured top bar would hide it in. */}
+              <h1 className="text-topbar-fg text-[22px] leading-[1.15] font-bold tracking-[-0.01em] sm:text-[26px]">
+                {title}
+              </h1>
+              {badges}
+            </div>
             {subtitle && (
               <div className="text-topbar-fg-soft mt-1 text-[12.5px]">
                 {subtitle}
@@ -44,8 +64,13 @@ export function TopBar({
             )}
           </div>
         </div>
-        <div className="flex shrink-0 items-center gap-4">
-          {actions && <div className="flex shrink-0 gap-2">{actions}</div>}
+        {actions && (
+          <div className="order-3 flex basis-full flex-wrap gap-2 sm:order-2 sm:basis-auto">
+            {actions}
+          </div>
+        )}
+        <div className="order-2 flex shrink-0 gap-2 sm:order-3">
+          <ColorSchemeSwitcher />
           <LanguageSwitcher />
         </div>
       </div>

@@ -26,7 +26,7 @@ export function OrgSwitcher({
   isPending,
   isPlatformAdmin,
   onNavigate,
-}: OrgSwitcherProps): React.JSX.Element {
+}: Readonly<OrgSwitcherProps>): React.JSX.Element {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const matches = useMatches();

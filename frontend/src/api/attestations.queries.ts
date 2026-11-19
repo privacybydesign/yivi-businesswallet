@@ -2,20 +2,27 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { UseMutationResult, UseQueryResult } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import {
+  acceptCredentialOffer,
   cancelIssuedAttestation,
   createAttestationKey,
   createAttestationSchema,
   createAttestationTemplate,
   deleteAttestationSchema,
   deleteAttestationTemplate,
+  declineCredentialOffer,
   deleteHeldAttestation,
   getAttestationClaim,
   getAttestationKeys,
+  getAttestationRulebooks,
+  importAttestationRulebook,
   getAttestationSchemaIssuerConfig,
   getAttestationSchemas,
   getAttestationTemplates,
+  getCredentialOffers,
   getHeldAttestations,
   getHeldAttestationClaims,
+  getHeldAttestationHistory,
+  recheckHeldAttestation,
   getIssuedAttestation,
   getIssuedAttestations,
   getOnboardingAttestations,
@@ -33,6 +40,7 @@ import type {
   AttestationIssuerConfig,
   AttestationKey,
   AttestationKeyInput,
+  AttestationRulebook,
   AttestationSchema,
   AttestationSchemaInput,
   AttestationSchemaUpdate,
@@ -40,6 +48,7 @@ import type {
   AttestationTemplate,
   AttestationTemplateInput,
   AttestationTemplateUpdate,
+  CredentialOffer,
   HeldAttestation,
   HeldAttestationClaims,
   IssuedAttestation,
@@ -47,6 +56,7 @@ import type {
   IssueResult,
   OnboardingAttestation,
 } from "./attestations";
+import type { AuditEvent } from "./organization";
 import { toast } from "../lib/toast";
 
 // The ledger reconciles status on read, so an offered attestation is re-fetched
@@ -71,6 +81,10 @@ export function attestationSchemaIssuerConfigQueryKey(
     schemaId,
     "issuer-config",
   ];
+}
+
+export function attestationRulebooksQueryKey(slug: string): readonly string[] {
+  return ["organizations", "detail", slug, "attestations", "rulebooks"];
 }
 
 export function attestationTemplatesQueryKey(slug: string): readonly string[] {
@@ -109,20 +123,25 @@ export function heldAttestationsQueryKey(
   return ["organizations", "detail", slug, "attestations", "held", lang];
 }
 
+export function credentialOffersQueryKey(slug: string): readonly string[] {
+  return ["organizations", "detail", slug, "attestations", "offers"];
+}
+
+// One held credential's detail in every language it was read in: the prefix
+// of heldAttestationClaimsQueryKey.
+export function heldClaimsBaseQueryKey(
+  slug: string,
+  heldId: string,
+): readonly string[] {
+  return ["organizations", "detail", slug, "attestations", "held", heldId];
+}
+
 export function heldAttestationClaimsQueryKey(
   slug: string,
   heldId: string,
   lang: string,
 ): readonly string[] {
-  return [
-    "organizations",
-    "detail",
-    slug,
-    "attestations",
-    "held",
-    heldId,
-    lang,
-  ];
+  return [...heldClaimsBaseQueryKey(slug, heldId), lang];
 }
 
 // Public claim polling: re-fetches while the attestation is still offered so the
@@ -245,6 +264,37 @@ export function useIssuedAttestationQuery(
       query.state.data?.status === OFFERED_STATUS
         ? OFFERED_POLL_INTERVAL_MS
         : false,
+  });
+}
+
+export function useAttestationRulebooksQuery(
+  slug: string,
+  enabled = true,
+): UseQueryResult<AttestationRulebook[], Error> {
+  return useQuery({
+    queryKey: attestationRulebooksQueryKey(slug),
+    queryFn: ({ signal }) => getAttestationRulebooks(slug, signal),
+    enabled: enabled && slug !== "",
+    staleTime: Infinity,
+  });
+}
+
+// Imports a WE BUILD rulebook as a schema plus nothing else: the admin makes a
+// template for it like for any schema.
+export function useImportAttestationRulebookMutation(
+  slug: string,
+): UseMutationResult<AttestationSchema, Error, string> {
+  const queryClient = useQueryClient();
+  const { t } = useTranslation();
+  return useMutation({
+    mutationFn: (rulebookId) => importAttestationRulebook(slug, rulebookId),
+    meta: { suppressErrorToast: true },
+    onSuccess: () => {
+      toast.success(t("toasts.attestationRulebookImported"));
+      void queryClient.invalidateQueries({
+        queryKey: attestationSchemasQueryKey(slug),
+      });
+    },
   });
 }
 
@@ -545,6 +595,100 @@ export function useDeleteHeldAttestationMutation(
       toast.success(t("toasts.attestationHeldDeleted"));
       // Prefix match (no language) invalidates the held list across every cached
       // language, not just the active one.
+      void queryClient.invalidateQueries({
+        queryKey: ["organizations", "detail", slug, "attestations", "held"],
+      });
+    },
+  });
+}
+
+// The offers awaiting a decision. Deciding one changes the wallet, so both this
+// list and the held list are invalidated after an accept.
+export function useCredentialOffersQuery(
+  slug: string,
+  enabled = true,
+): UseQueryResult<CredentialOffer[], Error> {
+  return useQuery({
+    queryKey: credentialOffersQueryKey(slug),
+    queryFn: ({ signal }) => getCredentialOffers(slug, signal),
+    enabled: enabled && slug !== "",
+  });
+}
+
+export function useAcceptCredentialOfferMutation(
+  slug: string,
+): UseMutationResult<void, Error, { offerId: string }> {
+  const queryClient = useQueryClient();
+  const { t } = useTranslation();
+  return useMutation({
+    mutationFn: async ({ offerId }) => {
+      await acceptCredentialOffer(slug, offerId);
+    },
+    onSuccess: () => {
+      toast.success(t("toasts.credentialOfferAccepted"));
+      void queryClient.invalidateQueries({
+        queryKey: credentialOffersQueryKey(slug),
+      });
+      // Prefix match (no language) invalidates the held list across every cached
+      // language, not just the active one.
+      void queryClient.invalidateQueries({
+        queryKey: ["organizations", "detail", slug, "attestations", "held"],
+      });
+    },
+  });
+}
+
+export function useDeclineCredentialOfferMutation(
+  slug: string,
+): UseMutationResult<void, Error, { offerId: string }> {
+  const queryClient = useQueryClient();
+  const { t } = useTranslation();
+  return useMutation({
+    mutationFn: ({ offerId }) => declineCredentialOffer(slug, offerId),
+    onSuccess: () => {
+      toast.success(t("toasts.credentialOfferDeclined"));
+      void queryClient.invalidateQueries({
+        queryKey: credentialOffersQueryKey(slug),
+      });
+    },
+  });
+}
+
+export function useHeldHistoryQuery(
+  slug: string,
+  heldId: string,
+): UseQueryResult<AuditEvent[], Error> {
+  return useQuery({
+    queryKey: [
+      "organizations",
+      "detail",
+      slug,
+      "attestations",
+      "held",
+      heldId,
+      "history",
+    ],
+    queryFn: ({ signal }) => getHeldAttestationHistory(slug, heldId, signal),
+    enabled: slug !== "" && heldId !== "",
+  });
+}
+
+// A re-check can move any credential's state, so the whole wallet is re-read;
+// the toast speaks for the credential it was asked for.
+export function useRecheckHeldMutation(
+  slug: string,
+  heldId: string,
+): UseMutationResult<boolean, Error, void> {
+  const queryClient = useQueryClient();
+  const { t } = useTranslation();
+  return useMutation({
+    mutationFn: () => recheckHeldAttestation(slug, heldId),
+    onSuccess: (changed) => {
+      toast.success(
+        changed
+          ? t("toasts.attestationHeldRechecked")
+          : t("toasts.attestationHeldRecheckedSame"),
+      );
       void queryClient.invalidateQueries({
         queryKey: ["organizations", "detail", slug, "attestations", "held"],
       });

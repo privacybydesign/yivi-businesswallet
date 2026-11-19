@@ -11,7 +11,17 @@
 
 ARG UPSTREAM_REPO=https://github.com/eu-digital-identity-wallet/eudi-srv-web-walletdriven-rpcentric-signer-qtsp-java.git
 # Pinned so the demo is reproducible; bump deliberately.
-ARG UPSTREAM_REF=8d07f96bf19e4ffa97ff2c469afc4d9cf38d3028
+#
+# 4f9b14d (upstream 0.5.0) is the first ref whose authorization server sends
+# `intended_use_id` / `registration_certificate` on the OID4VP InitTransaction
+# request. The EUDI verifier now REQUIRES one of the two — without it
+# /ui/presentations answers `400 {"error":"MissingRegistrationCertificate"}` and
+# the wallet ceremony never starts. The bumped VerifierConfig also @AssertTrue's
+# that one of them is configured, so INTENDED-USE-ID (or
+# REGISTRATION-CERTIFICATE-JWT) MUST be passed to the authz server from here on
+# or it fails to boot. See compose.override.yaml and the ops repo's qtsp_authz
+# deployment.
+ARG UPSTREAM_REF=4f9b14d74bb9cff84c1c822f5a9ef7bfeb3b36ff
 
 # --------------------------------------------------------------------------
 # Build stage: clone upstream, apply the demo patch, compile.

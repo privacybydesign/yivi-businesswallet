@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { ApiError } from "./http";
+import { auditEventSchema, vogOutcomeFromError } from "./organization";
 import type { Organization } from "./organization";
 
 // withAbsoluteLogos turns each org's API-relative logo path into an absolute URL
@@ -21,6 +23,7 @@ function org(overrides: Partial<Organization>): Organization {
     digitalAddress: "",
     status: "active",
     bootstrappedAt: "",
+    testMode: false,
     ...overrides,
   };
 }
@@ -63,5 +66,56 @@ describe("withAbsoluteLogos", () => {
     const input = org({ logoUri: "/api/v1/orgs/acme/theme/logo?v=1" });
     withAbsoluteLogos([input]);
     expect(input.logoUri).toBe("/api/v1/orgs/acme/theme/logo?v=1");
+  });
+});
+
+describe("vogOutcomeFromError", () => {
+  it("recovers a rejected VOG's outcome from a 422 body", () => {
+    const error = new ApiError(422, "Unprocessable Entity", "/x", {
+      result: "rejected",
+      rejectionReason: "too_old",
+    });
+    expect(vogOutcomeFromError(error)).toEqual({
+      result: "rejected",
+      rejectionReason: "too_old",
+    });
+  });
+
+  it("returns null for a status other than 422", () => {
+    const error = new ApiError(500, "Internal Server Error", "/x", {
+      result: "rejected",
+      rejectionReason: "too_old",
+    });
+    expect(vogOutcomeFromError(error)).toBeNull();
+  });
+
+  it("returns null when the 422 body does not match the outcome shape", () => {
+    const error = new ApiError(422, "Unprocessable Entity", "/x", {
+      error: "invalid_body",
+      code: "invalid_body",
+    });
+    expect(vogOutcomeFromError(error)).toBeNull();
+  });
+
+  it("returns null for a non-ApiError", () => {
+    expect(vogOutcomeFromError(new Error("network down"))).toBeNull();
+  });
+});
+
+describe("auditEventSchema", () => {
+  // A member's view of a revocation reads as an unknown move, not as
+  // "reinstated": the flag must survive parsing.
+  it("keeps detailHidden", () => {
+    const event = auditEventSchema.parse({
+      id: "ev-1",
+      occurredAt: "2026-10-09T10:00:00Z",
+      action: "attestation.held_status_changed",
+      targetType: "held_attestation",
+      targetId: "",
+      metadata: {},
+      actor: null,
+      detailHidden: true,
+    });
+    expect(event.detailHidden).toBe(true);
   });
 });

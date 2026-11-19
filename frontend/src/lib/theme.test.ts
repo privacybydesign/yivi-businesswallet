@@ -3,10 +3,11 @@ import {
   AA_CONTRAST,
   buildThemeCss,
   contrastRatio,
-  resolveLinkTheme,
+  resolveLinkColor,
   resolveThemeCss,
   resolveThemeTokens,
   shouldApplyOrgTheme,
+  usesWhiteLabelDesign,
 } from "./theme";
 import type { OrgTheme } from "../api/theme";
 
@@ -88,77 +89,57 @@ describe("resolveThemeTokens", () => {
   });
 });
 
-// resolveLinkTheme derives a mode-aware link colour from the accent seed. The
-// link must stay legible on every surface it renders on, and those differ
-// between light and dark mode, so it derives a darkened value for light mode and
-// a lightened one for dark mode — each must clear WCAG-AA against the worst-case
-// background in its mode (and therefore against all of them). These background
-// lists mirror the light/dark --yb-surface*/--yb-highlight tokens in index.css.
-const LINK_BACKGROUNDS_LIGHT = ["#ffffff", "#faf8f6", "#f5f2ef", "#eaf3f9"];
-const LINK_BACKGROUNDS_DARK = ["#1d1b1a", "#141312", "#252322", "#1c3648"];
+// resolveLinkColor derives the link colour from the accent seed. The link must
+// stay legible on every surface it renders on, so it must clear WCAG-AA against
+// the worst-case background (and therefore against all of them). This list
+// mirrors the --yb-surface*/--yb-highlight tokens in index.css.
+const LINK_BACKGROUNDS = ["#ffffff", "#fbfbfc", "#f5f5f6", "#eaf3f9"];
 
-describe("resolveLinkTheme", () => {
+describe("resolveLinkColor", () => {
   it("returns null when the accent seed is missing or malformed", () => {
-    expect(resolveLinkTheme(theme({}))).toBeNull();
-    expect(resolveLinkTheme(theme({ accentColor: "not-a-hex" }))).toBeNull();
-    expect(resolveLinkTheme(theme({ accentColor: "#fff" }))).toBeNull();
-    expect(resolveLinkTheme(null)).toBeNull();
-    expect(resolveLinkTheme(undefined)).toBeNull();
+    expect(resolveLinkColor(theme({}))).toBeNull();
+    expect(resolveLinkColor(theme({ accentColor: "not-a-hex" }))).toBeNull();
+    expect(resolveLinkColor(theme({ accentColor: "#fff" }))).toBeNull();
+    expect(resolveLinkColor(null)).toBeNull();
+    expect(resolveLinkColor(undefined)).toBeNull();
   });
 
   // A few accents spanning the lightness range: a mid-tone brand, a very light
-  // seed (must darken hard for light mode), and a very dark seed (must lighten
-  // hard for dark mode).
+  // seed (must darken hard) and a very dark one.
   const ACCENTS = ["#ba3354", "#f2c94c", "#1d4e89", "#0a0a0a", "#f5f5f5"];
 
   it.each(ACCENTS)(
-    "derives a light-mode link that clears AA on every light surface (%s)",
+    "derives a link that clears AA on every surface (%s)",
     (accent) => {
-      const link = resolveLinkTheme(theme({ accentColor: accent }));
+      const link = resolveLinkColor(theme({ accentColor: accent }));
       expect(link).not.toBeNull();
-      for (const bg of LINK_BACKGROUNDS_LIGHT) {
-        expect(contrastRatio(link!.light, bg)!).toBeGreaterThanOrEqual(
-          AA_CONTRAST,
-        );
+      for (const bg of LINK_BACKGROUNDS) {
+        expect(contrastRatio(link!, bg)!).toBeGreaterThanOrEqual(AA_CONTRAST);
       }
     },
   );
 
-  it.each(ACCENTS)(
-    "derives a dark-mode link that clears AA on every dark surface (%s)",
-    (accent) => {
-      const link = resolveLinkTheme(theme({ accentColor: accent }));
-      expect(link).not.toBeNull();
-      for (const bg of LINK_BACKGROUNDS_DARK) {
-        expect(contrastRatio(link!.dark, bg)!).toBeGreaterThanOrEqual(
-          AA_CONTRAST,
-        );
-      }
-    },
-  );
-
-  it("leaves an accent that already clears the light floor unchanged", () => {
-    // #ba3354 clears AA on the darkest light surface as-is, so the light link is
-    // the seed itself (no needless darkening).
-    const link = resolveLinkTheme(theme({ accentColor: "#ba3354" }));
-    expect(link?.light).toBe("#ba3354");
+  it("leaves an accent that already clears the floor unchanged", () => {
+    // #ba3354 clears AA on the darkest surface as-is, so the link is the seed
+    // itself (no needless darkening).
+    expect(resolveLinkColor(theme({ accentColor: "#ba3354" }))).toBe("#ba3354");
   });
 
   it("prefers an explicit link seed over the accent", () => {
-    const fromAccent = resolveLinkTheme(theme({ accentColor: "#1d4e89" }));
-    const fromLink = resolveLinkTheme(
+    const fromAccent = resolveLinkColor(theme({ accentColor: "#1d4e89" }));
+    const fromLink = resolveLinkColor(
       theme({ accentColor: "#1d4e89", linkColor: "#0a7d3a" }),
     );
     expect(fromLink).not.toEqual(fromAccent);
   });
 });
 
-// resolveThemeCss derives the mode-aware palette (surface/border/text/link/
-// status) from the extra seeds. Every derived text/status pair must clear WCAG-AA
-// in BOTH light and dark mode, since the whole point of deriving (rather than
-// storing) these is to guarantee legibility on the surfaces they land on. If the
-// derivation drifts below the floor, a tenant could ship an unreadable theme —
-// so pin it here for a spread of seeds.
+// resolveThemeCss derives the palette (surface/border/text/link/status) from
+// the extra seeds. Every derived text/status pair must clear WCAG-AA, since the
+// whole point of deriving (rather than storing) these is to guarantee
+// legibility on the surfaces they land on. If the derivation drifts below the
+// floor, a tenant could ship an unreadable theme — so pin it here for a spread
+// of seeds.
 describe("resolveThemeCss", () => {
   const SEEDS = ["#ba3354", "#1d4e89", "#00973a", "#eba73b", "#0a0a0a"];
 
@@ -177,41 +158,55 @@ describe("resolveThemeCss", () => {
     ]);
   });
 
-  it.each(SEEDS)("derives AA-legible ink in both modes (%s)", (seed) => {
-    // Ink is gated against the worst-case surface tier in each mode; when no
-    // surface seed is set those are the design defaults (darkest light surface
-    // #f5f2ef; lightest dark surface #252322).
-    const css = resolveThemeCss(theme({ textColor: seed }));
-    const ink = css["--yb-ink"];
-    expect(contrastRatio(ink.light, "#f5f2ef")!).toBeGreaterThanOrEqual(
-      AA_CONTRAST,
+  it("uses a light surface and a border seed as given", () => {
+    const css = resolveThemeCss(
+      theme({ surfaceColor: "#fbfbfc", borderColor: "#eaebee" }),
     );
-    expect(contrastRatio(ink.dark, "#252322")!).toBeGreaterThanOrEqual(
+    expect(css["--yb-surface-2"]).toBe("#fbfbfc");
+    expect(css["--yb-line"]).toBe("#eaebee");
+  });
+
+  it("only tints the page with a surface seed text can't be read on", () => {
+    const css = resolveThemeCss(theme({ surfaceColor: "#1d4e89" }));
+    expect(css["--yb-surface-2"]).not.toBe("#1d4e89");
+  });
+
+  it.each(SEEDS)(
+    "derives AA-legible secondary text from the text seed (%s)",
+    (seed) => {
+      const css = resolveThemeCss(
+        theme({ textColor: seed, surfaceColor: "#fbfbfc" }),
+      );
+      expect(
+        contrastRatio(css["--yb-ink-soft"], css["--yb-surface-3"])!,
+      ).toBeGreaterThanOrEqual(AA_CONTRAST);
+    },
+  );
+
+  it.each(SEEDS)("derives AA-legible ink (%s)", (seed) => {
+    // Ink is gated against the worst-case surface tier; when no surface seed
+    // is set that is the design default (darkest surface #f5f5f6).
+    const css = resolveThemeCss(theme({ textColor: seed }));
+    expect(contrastRatio(css["--yb-ink"], "#f5f5f6")!).toBeGreaterThanOrEqual(
       AA_CONTRAST,
     );
   });
 
   it.each(SEEDS)(
-    "derives status colours that clear AA on their chip in both modes (%s)",
+    "derives status colours that clear AA on their chip (%s)",
     (seed) => {
       const css = resolveThemeCss(theme({ successColor: seed }));
-      const solid = css["--yb-success"];
-      const bg = css["--yb-success-bg"];
-      expect(contrastRatio(solid.light, bg.light)!).toBeGreaterThanOrEqual(
-        AA_CONTRAST,
-      );
-      expect(contrastRatio(solid.dark, bg.dark)!).toBeGreaterThanOrEqual(
-        AA_CONTRAST,
-      );
+      expect(
+        contrastRatio(css["--yb-success"], css["--yb-success-bg"])!,
+      ).toBeGreaterThanOrEqual(AA_CONTRAST);
     },
   );
 
   // Regression: text-error/-success/-warning render the status SOLID bare on the
   // surface tiers (--yb-surface etc.), not only on its chip. A surface seed tints
-  // those tiers — lighter in dark mode — so a solid cleared only against its
-  // (darker) chip would fall below AA on the lighter surface. Pin the solid at AA
-  // against every tinted surface tier AND its chip, in both modes, with a surface
-  // seed set. #ffffff is the worst case (it lightens the dark surfaces most).
+  // those tiers, so a solid cleared only against its chip could fall below AA on
+  // a darker surface. Pin the solid at AA against every tinted surface tier AND
+  // its chip, with a surface seed set.
   const SURFACE_SEEDS = ["#ffffff", "#1d4e89", "#ba3354", "#0a0a0a"];
   const STATUS_ROLES = [
     ["--yb-success", "--yb-success-bg"],
@@ -220,7 +215,7 @@ describe("resolveThemeCss", () => {
   ] as const;
 
   it.each(SURFACE_SEEDS)(
-    "keeps status solids AA on the tinted surfaces they sit on, both modes (surface %s)",
+    "keeps status solids AA on the tinted surfaces they sit on (surface %s)",
     (surfaceColor) => {
       const css = resolveThemeCss(
         theme({
@@ -230,26 +225,14 @@ describe("resolveThemeCss", () => {
           errorColor: "#bd1919",
         }),
       );
-      const lightSurfaces = [
-        css["--yb-surface"].light,
-        css["--yb-surface-2"].light,
-        css["--yb-surface-3"].light,
-      ];
-      const darkSurfaces = [
-        css["--yb-surface"].dark,
-        css["--yb-surface-2"].dark,
-        css["--yb-surface-3"].dark,
+      const surfaces = [
+        css["--yb-surface"],
+        css["--yb-surface-2"],
+        css["--yb-surface-3"],
       ];
       for (const [solidKey, bgKey] of STATUS_ROLES) {
-        const solid = css[solidKey];
-        const bg = css[bgKey];
-        for (const bgLight of [bg.light, ...lightSurfaces]) {
-          expect(contrastRatio(solid.light, bgLight)!).toBeGreaterThanOrEqual(
-            AA_CONTRAST,
-          );
-        }
-        for (const bgDark of [bg.dark, ...darkSurfaces]) {
-          expect(contrastRatio(solid.dark, bgDark)!).toBeGreaterThanOrEqual(
+        for (const bg of [css[bgKey], ...surfaces]) {
+          expect(contrastRatio(css[solidKey], bg)!).toBeGreaterThanOrEqual(
             AA_CONTRAST,
           );
         }
@@ -265,24 +248,31 @@ describe("resolveThemeCss", () => {
       "--yb-warning-fg",
     ]);
     expect(
-      contrastRatio(
-        css["--yb-warning-fg"].light,
-        css["--yb-warning-bg"].light,
-      )!,
+      contrastRatio(css["--yb-warning-fg"], css["--yb-warning-bg"])!,
     ).toBeGreaterThanOrEqual(AA_CONTRAST);
   });
 });
 
-// buildThemeCss serialises the mode-aware map into a stylesheet the pre-paint
-// script (index.html) and the runtime apply both inject. The doubled
-// `:root:root` selector must win over index.css by specificity, and the dark
-// half must live under a prefers-color-scheme media query.
+// buildThemeCss serialises the map into a stylesheet the pre-paint script
+// (index.html) and the runtime apply both inject. The doubled `:root:root`
+// selector must win over index.css by specificity; a theme is always shown
+// light, so there is no dark half.
 describe("buildThemeCss", () => {
-  it("wraps the dark values in a prefers-color-scheme media query", () => {
+  it("derives a light brand's page and text from its seeds", () => {
+    const cm = theme({
+      surfaceColor: "#fbfbfc",
+      textColor: "#101e1e",
+      borderColor: "#eaebee",
+    });
+    const css = buildThemeCss(cm);
+    expect(css).toContain("--yb-surface-2:#fbfbfc");
+  });
+
+  it("emits one :root:root block and no dark values", () => {
     const css = buildThemeCss(theme({ successColor: "#00973a" }));
-    expect(css).toContain(":root:root{");
-    expect(css).toContain("@media (prefers-color-scheme: dark){:root:root{");
+    expect(css.startsWith(":root:root{")).toBe(true);
     expect(css).toContain("--yb-success:");
+    expect(css).not.toContain("data-color-scheme");
   });
 });
 
@@ -304,7 +294,7 @@ describe("shouldApplyOrgTheme", () => {
   });
 });
 
-// Navigation chrome (sidebar / top bar) is a mode-safe brand fill applied inline
+// Navigation chrome (sidebar / top bar) is a brand fill applied inline
 // via resolveThemeTokens. Its foreground must clear WCAG-AA on the chrome
 // background for EVERY seed — including mid-tones where a plain light/dark pick
 // would dip below the floor — since nav labels are normal-size text and the
@@ -355,15 +345,18 @@ describe("resolveThemeTokens navigation chrome", () => {
   );
 });
 
-// The body font is a mode-agnostic override applied inline, but the stored value
+// The org's font is a mode-agnostic override applied inline, but the stored value
 // is injected as a CSS custom property, so resolveThemeTokens must only emit a
 // sanitised font-family string (defense-in-depth alongside backend validation).
 describe("resolveThemeTokens font family", () => {
-  it("emits a curated font-family value", () => {
+  it("emits a curated font-family value for body and headings", () => {
     const tokens = resolveThemeTokens(
       theme({ fontFamily: '"Alexandria", system-ui, sans-serif' }),
     );
     expect(tokens["--yb-font-sans"]).toBe(
+      '"Alexandria", system-ui, sans-serif',
+    );
+    expect(tokens["--yb-font-display"]).toBe(
       '"Alexandria", system-ui, sans-serif',
     );
   });
@@ -382,5 +375,19 @@ describe("resolveThemeTokens font family", () => {
         "--yb-font-sans"
       ],
     ).toBeUndefined();
+  });
+});
+
+// A themed org, and so a hosted customer page, is shown in the white-label
+// design; an org that never set a theme keeps Yivi's.
+describe("usesWhiteLabelDesign", () => {
+  it("is on for a configured theme, even one leaving every colour unset", () => {
+    expect(usesWhiteLabelDesign(theme({}))).toBe(true);
+  });
+
+  it("is off for an org without a theme", () => {
+    expect(usesWhiteLabelDesign(theme({ configured: false }))).toBe(false);
+    expect(usesWhiteLabelDesign(null)).toBe(false);
+    expect(usesWhiteLabelDesign(undefined)).toBe(false);
   });
 });

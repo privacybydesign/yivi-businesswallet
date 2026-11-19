@@ -1,0 +1,284 @@
+import { Link } from "react-router";
+import { useTranslation } from "react-i18next";
+import * as React from "react";
+import type {
+  ProofingDecision,
+  ProofingRequest,
+} from "../api/identity-proofing";
+import { useWhenFormatter } from "../lib/format-when";
+import {
+  REVIEW_PART_KEYS,
+  decidedParts,
+  reviewOfStep,
+  reviewSteps,
+} from "../lib/proofing-reviews";
+import type { ReviewPart } from "../lib/proofing-reviews";
+import {
+  assuranceLevelLabel,
+  proofingMethodLabel,
+} from "../lib/identity-proofing";
+import { Card, StatusText, Stepper } from "../ui";
+
+// A link that looks like Button's primary/md and secondary/md: Button renders
+// only <button>.
+const LINK_BASE =
+  "rounded-yivi font-display inline-flex h-9 items-center justify-center px-3.5 text-[13.5px] font-semibold whitespace-nowrap transition-colors duration-150";
+export const PRIMARY_LINK = `${LINK_BASE} bg-primary text-primary-fg hover:bg-primary-hover`;
+export const SECONDARY_LINK = `${LINK_BASE} border-line-strong bg-surface text-ink hover:bg-surface-3 border`;
+const REVIEW_SECTION = "flex flex-col gap-4 p-5";
+export const REVIEW_HEADING = "font-display text-ink text-[18px] font-semibold";
+export const REVIEW_ERROR = "text-error text-[12.5px]";
+export const REVIEW_FIELD_LABEL = "text-ink text-[13.5px] font-semibold";
+export const REVIEW_HINT = "text-ink-soft text-[12.5px]";
+// Mirrors the Input base, so the reason reads as the same field.
+export const REVIEW_TEXTAREA =
+  "rounded-yivi border-line-strong bg-surface text-ink focus:border-ink focus:ring-ink/10 min-h-24 w-full border px-3 py-2 text-[13.5px] outline-none focus:ring-3";
+
+// Where the session's review stands, as the person's own flow shows its steps.
+// Nothing for a review of one part.
+export function ReviewProgress({
+  request,
+  className = "",
+}: Readonly<{
+  request: ProofingRequest;
+  className?: string;
+}>): React.JSX.Element | null {
+  const { t } = useTranslation();
+  const { parts, current } = reviewSteps(request);
+  if (parts.length < 2) return null;
+  return (
+    <Card className={`p-5 ${className}`}>
+      <Stepper
+        steps={parts.map((part) => t(REVIEW_PART_KEYS[part]))}
+        current={current}
+      />
+    </Card>
+  );
+}
+
+// A titled box of the review page.
+export function ReviewSection({
+  id,
+  title,
+  hint,
+  children,
+}: Readonly<{
+  id: string;
+  title: string;
+  hint?: string;
+  children: React.ReactNode;
+}>): React.JSX.Element {
+  return (
+    <Card className={REVIEW_SECTION} aria-labelledby={id} role="region">
+      <div className="flex flex-col gap-1">
+        <h2 id={id} className={REVIEW_HEADING}>
+          {title}
+        </h2>
+        {hint && <p className={REVIEW_HINT}>{hint}</p>}
+      </div>
+      {children}
+    </Card>
+  );
+}
+
+// Term and value pairs, as the review pages show what a person proved.
+export function ReviewFacts({
+  rows,
+}: Readonly<{
+  rows: readonly { label: string; value: string }[];
+}>): React.JSX.Element {
+  return (
+    <dl className="grid gap-x-4 gap-y-2.5 text-[13.5px] sm:grid-cols-[10rem_1fr]">
+      {rows.map(({ label, value }) => (
+        <React.Fragment key={label}>
+          <dt className="text-ink-soft">{label}</dt>
+          <dd>{value}</dd>
+        </React.Fragment>
+      ))}
+    </dl>
+  );
+}
+
+// Says a request no longer waits: its page stays readable after the decision.
+export function ClosedNote({
+  request,
+}: Readonly<{
+  request: ProofingRequest;
+}>): React.JSX.Element {
+  const { t } = useTranslation();
+  const key =
+    request.status === "approved" || request.status === "rejected"
+      ? request.status
+      : "other";
+  return (
+    <output className="border-line bg-surface-2 text-ink rounded-yivi block border px-4 py-3 text-[13.5px]">
+      {t(`identityProofing.reviews.notWaiting.${key}`)}
+      <DecisionReasons request={request} kind="review" />
+    </output>
+  );
+}
+
+// Who decided the request's session review or its address, when, and why.
+// Nothing for a reader the backend sends no decisions (a member who only sent
+// it) or for a request no reviewer decided.
+export function DecisionReasons({
+  request,
+  kind,
+}: Readonly<{
+  request: ProofingRequest;
+  kind: ProofingDecision["kind"];
+}>): React.JSX.Element | null {
+  const { t } = useTranslation();
+  const formatWhen = useWhenFormatter();
+  const decisions = (request.decisions ?? []).filter((d) => d.kind === kind);
+  if (decisions.length === 0) {
+    return null;
+  }
+  return (
+    <ul className="mt-2 flex flex-col gap-2">
+      {decisions.map((d) => (
+        <li key={`${d.kind}-${d.decidedAt}`}>
+          <span className="text-ink-soft block text-[12.5px]">
+            {d.decidedBy
+              ? t("identityProofing.reviews.decided.by", {
+                  name: d.decidedBy,
+                  when: formatWhen(d.decidedAt),
+                })
+              : t("identityProofing.reviews.decided.at", {
+                  when: formatWhen(d.decidedAt),
+                })}
+          </span>
+          {d.reason && (
+            <span className="block">
+              {t("identityProofing.reviews.decided.reason", {
+                reason: d.reason,
+              })}
+            </span>
+          )}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+export function BackToReviews({
+  to,
+}: Readonly<{ to: string }>): React.JSX.Element {
+  const { t } = useTranslation();
+  return (
+    <Link
+      to={to}
+      className="text-link self-center text-[13.5px] font-semibold underline"
+    >
+      {t("identityProofing.reviews.back")}
+    </Link>
+  );
+}
+
+const DECISION_NOTE =
+  "border-line bg-surface-2 text-ink rounded-yivi block border px-4 py-3 text-[13.5px]";
+
+const PART_OUTCOME = {
+  approved: { key: "identityProofing.reviews.outcome.approved", tone: "green" },
+  rejected: { key: "identityProofing.reviews.outcome.rejected", tone: "red" },
+  confirmed: {
+    key: "identityProofing.sessions.parts.state.accepted",
+    tone: "green",
+  },
+  lapsed: {
+    key: "identityProofing.sessions.parts.state.lapsed",
+    tone: "amber",
+  },
+} as const;
+
+// The outcome of a decided part: the identity approved or rejected, a step
+// accepted, rejected or lapsed.
+function partOutcome(
+  request: ProofingRequest,
+  part: ReviewPart,
+): (typeof PART_OUTCOME)[keyof typeof PART_OUTCOME] | undefined {
+  if (part === "identity") {
+    return request.status === "approved"
+      ? PART_OUTCOME.approved
+      : PART_OUTCOME.rejected;
+  }
+  const state = reviewOfStep(request, part);
+  if (state === undefined || state === "pending") return undefined;
+  return PART_OUTCOME[state];
+}
+
+// Where the session's other parts stand: its identity once decided, by the
+// engine or a reviewer, with how it was checked, and any step a reviewer
+// decided; each by name with its outcome, then who decided it, when and why.
+export function SessionDecisions({
+  request,
+  except,
+}: Readonly<{
+  request: ProofingRequest;
+  // The part the page itself shows; none on a closed session, which lists
+  // every part here.
+  except?: ReviewPart;
+}>): React.JSX.Element | null {
+  const { t } = useTranslation();
+  const identityDecided =
+    request.status === "approved" || request.status === "rejected";
+  const parts = [
+    ...(identityDecided ? (["identity"] as const) : []),
+    ...decidedParts(request).filter((part) => part !== "identity"),
+  ].filter((part) => part !== except);
+  if (parts.length === 0) return null;
+  return (
+    <ReviewSection
+      id={`session-decisions-${except ?? "all"}`}
+      title={t("identityProofing.reviews.alsoDecided")}
+    >
+      {parts.map((part) => {
+        const outcome = partOutcome(request, part);
+        if (outcome === undefined) return null;
+        return (
+          <output key={part} className={DECISION_NOTE}>
+            <span className="font-semibold">{t(REVIEW_PART_KEYS[part])}</span>
+            {" · "}
+            <StatusText tone={outcome.tone}>{t(outcome.key)}</StatusText>
+            {part === "identity" && <IdentityFacts request={request} />}
+            {part === "identity" && request.identityReviewedAt === undefined ? (
+              <span className="text-ink-soft mt-2 block text-[12.5px]">
+                {t("identityProofing.reviews.decidedAutomatically")}
+              </span>
+            ) : (
+              <DecisionReasons
+                request={request}
+                kind={part === "identity" ? "review" : part}
+              />
+            )}
+          </output>
+        );
+      })}
+    </ReviewSection>
+  );
+}
+
+// How the identity was checked: the method and the eIDAS level it reached.
+function IdentityFacts({
+  request,
+}: Readonly<{ request: ProofingRequest }>): React.JSX.Element {
+  const { t } = useTranslation();
+  return (
+    <div className="mt-2">
+      <ReviewFacts
+        rows={[
+          {
+            label: t("identityProofing.reviews.address.method"),
+            value: proofingMethodLabel(request.method, t),
+          },
+          {
+            label: t("identityProofing.reviews.address.level"),
+            value: request.eidasLevel
+              ? assuranceLevelLabel(request.eidasLevel, t)
+              : "—",
+          },
+        ]}
+      />
+    </div>
+  );
+}

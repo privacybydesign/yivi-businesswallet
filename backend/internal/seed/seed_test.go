@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/attestation"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/identity"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/registryprovider"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
@@ -65,6 +66,9 @@ func TestQerdsAddressUsesConfiguredDomain(t *testing.T) {
 // and would also pin the domain back to a literal, defeating the fix.
 func TestDemoOrgAddressLocalPartsHaveNoDomain(t *testing.T) {
 	orgs := append([]demoOrganization{kvkRegisterOrg}, demoOrganizations...)
+	for _, c := range communityOrganizations {
+		orgs = append(orgs, c.org)
+	}
 	for _, o := range orgs {
 		if o.addressLocal == "" {
 			t.Errorf("demo org %q has an empty addressLocal", o.slug)
@@ -83,6 +87,9 @@ func TestDemoOrgsMatchRegister(t *testing.T) {
 	data := registryprovider.DefaultDataset()
 
 	for _, o := range demoOrganizations {
+		if o.repKind == "" {
+			continue
+		}
 		reg, ok := data[o.kvkNumber]
 		if !ok {
 			t.Errorf("demo org %q (kvk %s) is not in the register dataset", o.slug, o.kvkNumber)
@@ -92,21 +99,25 @@ func TestDemoOrgsMatchRegister(t *testing.T) {
 			t.Errorf("demo org %q identity = %q/%q, register has %q/%q", o.slug, o.name, o.euid, reg.LegalName, reg.EUID)
 		}
 
-		want := identity.Name{GivenNames: o.repGiven, LastName: o.repFamily}
-		matched := false
-		for _, rep := range reg.Representatives {
-			stored := identity.Name{GivenNames: rep.GivenNames, LastName: rep.FamilyName}
-			if identity.Reconcile(want, &stored) != identity.Review &&
-				rep.DateOfBirth == o.repDOB && rep.Kind == o.repKind && rep.Authority == o.repAuth {
-				matched = true
-				break
-			}
-		}
-		if !matched {
+		if !hasPrimaryRepresentative(o, reg) {
 			t.Errorf("demo org %q primary representative %s %s (%s/%s, dob %s) has no matching register entry",
 				o.slug, o.repGiven, o.repFamily, o.repKind, o.repAuth, o.repDOB)
 		}
 	}
+}
+
+// hasPrimaryRepresentative reports whether the register lists o's primary
+// representative: the same name, birth date, kind and authority.
+func hasPrimaryRepresentative(o demoOrganization, reg registryprovider.Registration) bool {
+	want := identity.Name{GivenNames: o.repGiven, LastName: o.repFamily}
+	for _, rep := range reg.Representatives {
+		stored := identity.Name{GivenNames: rep.GivenNames, LastName: rep.FamilyName}
+		if identity.Reconcile(want, &stored) != identity.Review &&
+			rep.DateOfBirth == o.repDOB && rep.Kind == o.repKind && rep.Authority == o.repAuth {
+			return true
+		}
+	}
+	return false
 }
 
 // TestRegisterOnlyCompanyIsOpenable is the regression for the unreachable
@@ -118,6 +129,9 @@ func TestRegisterOnlyCompanyIsOpenable(t *testing.T) {
 	seededKVK := map[string]bool{registryprovider.RegisterKVKNumber: true}
 	for _, o := range demoOrganizations {
 		seededKVK[o.kvkNumber] = true
+	}
+	for _, c := range communityOrganizations {
+		seededKVK[c.org.kvkNumber] = true
 	}
 
 	if seededKVK[registryprovider.OpenableKVKNumber] {
@@ -138,6 +152,88 @@ func TestRegisterOnlyCompanyIsOpenable(t *testing.T) {
 	}
 }
 
+// TestCommunityOrgFixturesAreWellFormed guards the dev-demo community
+// organisations (the church and the football club): they must not collide with
+// any other seeded org on slug or KVK number (ON CONFLICT (slug) would silently
+// return the other org and the departments would land on it), must stay out of
+// the register dataset (they are provisioned directly, not opened through the
+// register flow), carry no representative and no members, and every department
+// name must be unique within its org (UNIQUE (organization_id, name)).
+func TestCommunityOrgFixturesAreWellFormed(t *testing.T) {
+	seenSlug := map[string]bool{kvkRegisterOrg.slug: true}
+	seenKVK := map[string]bool{kvkRegisterOrg.kvkNumber: true}
+	for _, o := range demoOrganizations {
+		seenSlug[o.slug] = true
+		seenKVK[o.kvkNumber] = true
+	}
+	register := registryprovider.DefaultDataset()
+
+	for _, c := range communityOrganizations {
+		o := c.org
+		if o.slug == "" || o.name == "" {
+			t.Errorf("community org %+v has an empty slug or name", o)
+		}
+		if seenSlug[o.slug] {
+			t.Errorf("community org slug %q collides with another seeded org", o.slug)
+		}
+		seenSlug[o.slug] = true
+		if seenKVK[o.kvkNumber] {
+			t.Errorf("community org %q KVK number %q collides with another seeded org", o.slug, o.kvkNumber)
+		}
+		seenKVK[o.kvkNumber] = true
+		if _, ok := register[o.kvkNumber]; ok {
+			t.Errorf("community org %q KVK number %q must not be a register entry", o.slug, o.kvkNumber)
+		}
+		if o.repKind != "" {
+			t.Errorf("community org %q should carry no representative, got repKind %q", o.slug, o.repKind)
+		}
+		if len(c.departments) == 0 {
+			t.Errorf("community org %q has no departments; its structure is the point of seeding it", o.slug)
+		}
+		seenDept := map[string]bool{}
+		for _, d := range c.departments {
+			if d == "" {
+				t.Errorf("community org %q has an empty department name", o.slug)
+			}
+			if seenDept[d] {
+				t.Errorf("community org %q department %q is duplicated", o.slug, d)
+			}
+			seenDept[d] = true
+		}
+	}
+
+	for _, m := range demoMemberships {
+		for _, c := range communityOrganizations {
+			if m.slug == c.org.slug {
+				t.Errorf("community org %q must have no seeded members, got %q", c.org.slug, m.email)
+			}
+		}
+	}
+}
+
+// TestExpandTeamsNumbersEveryTeam pins the team expansion: one department per
+// team in every group, numbered from 1, followed by the irregular extras in
+// order — so a change to sdvbTeamGroups shows up as a count, not a silent gap.
+func TestExpandTeamsNumbersEveryTeam(t *testing.T) {
+	groups := []sdvbTeamGroup{
+		{section: "Jeugd", code: "JO19", count: 2},
+		{section: "Senioren", code: "Mannen", count: 1},
+	}
+	got := expandTeams(groups, []string{"Jeugd Mini's"})
+	want := []string{"Jeugd JO19-1", "Jeugd JO19-2", "Senioren Mannen-1", "Jeugd Mini's"}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("expandTeams = %q, want %q", got, want)
+	}
+
+	total := len(sdvbExtraTeams)
+	for _, g := range sdvbTeamGroups {
+		total += g.count
+	}
+	if n := len(expandTeams(sdvbTeamGroups, sdvbExtraTeams)); n != total {
+		t.Fatalf("SDVB expands to %d departments, want %d", n, total)
+	}
+}
+
 // TestKVKRegisterOrgNotConsultable guards that the KVK register participant is not
 // itself a consultable company in the dataset.
 func TestKVKRegisterOrgNotConsultable(t *testing.T) {
@@ -147,4 +243,123 @@ func TestKVKRegisterOrgNotConsultable(t *testing.T) {
 	if kvkRegisterOrg.repKind != "" {
 		t.Fatalf("kvk register org should have no representative, got kind %q", kvkRegisterOrg.repKind)
 	}
+}
+
+// TestNijmegenApvSchemaIsWellFormed guards the fixture seedNijmegenAttestation
+// writes (issue #245): it is an organization-subject schema, every attribute
+// uses a type the store/editor actually support, attribute keys are unique, and
+// every display entry (schema-level and per-attribute) carries both languages
+// the rest of the seeded catalogue uses.
+func TestNijmegenApvSchemaIsWellFormed(t *testing.T) {
+	if nijmegenApvSchema.VCT == "" || nijmegenApvSchema.CredentialConfigID == "" {
+		t.Fatal("nijmegenApvSchema must have a non-empty VCT and CredentialConfigID")
+	}
+	if nijmegenApvSchema.SubjectType != attestation.SubjectOrganization {
+		t.Fatalf("nijmegenApvSchema subject type = %q, want %q", nijmegenApvSchema.SubjectType, attestation.SubjectOrganization)
+	}
+	if nijmegenApvTemplateName == "" {
+		t.Fatal("nijmegenApvTemplateName must not be empty")
+	}
+	assertLangs(t, "schema display", toLangs(nijmegenApvSchema.Display))
+
+	supported := map[string]bool{}
+	for _, s := range attestation.SupportedAttributeTypes {
+		supported[s] = true
+	}
+
+	seenKeys := map[string]bool{}
+	for _, a := range nijmegenApvSchema.Attributes {
+		if a.Key == "" {
+			t.Fatal("nijmegenApvSchema has an attribute with an empty key")
+		}
+		if seenKeys[a.Key] {
+			t.Errorf("nijmegenApvSchema attribute key %q is duplicated", a.Key)
+		}
+		seenKeys[a.Key] = true
+		if !supported[a.Type] {
+			t.Errorf("nijmegenApvSchema attribute %q has unsupported type %q", a.Key, a.Type)
+		}
+		assertLangs(t, "attribute "+a.Key+" display", toLangsLabel(a.Display))
+	}
+}
+
+func toLangs(names []attestation.LocalizedName) []string {
+	langs := make([]string, len(names))
+	for i, n := range names {
+		langs[i] = n.Lang
+	}
+	return langs
+}
+
+func toLangsLabel(labels []attestation.LocalizedLabel) []string {
+	langs := make([]string, len(labels))
+	for i, l := range labels {
+		langs[i] = l.Lang
+	}
+	return langs
+}
+
+func assertLangs(t *testing.T, what string, langs []string) {
+	t.Helper()
+	want := map[string]bool{"en": true, "nl": true}
+	got := map[string]bool{}
+	for _, l := range langs {
+		got[l] = true
+	}
+	for lang := range want {
+		if !got[lang] {
+			t.Errorf("%s is missing language %q", what, lang)
+		}
+	}
+}
+
+// TestBewindCredentialsAreWellFormed holds the beschermingsbewind demo's
+// catalogue to what the editor accepts: supported types, unique keys, both
+// languages, and template pre-fills that name declared attributes with a
+// source valid for the schema's subject type.
+func TestBewindCredentialsAreWellFormed(t *testing.T) {
+	supported := map[string]bool{}
+	for _, s := range attestation.SupportedAttributeTypes {
+		supported[s] = true
+	}
+	seenVCTs := map[string]bool{}
+	for _, c := range bewindCredentials {
+		s := c.schema
+		if s.VCT == "" || s.CredentialConfigID == "" || c.template.Name == "" {
+			t.Fatalf("bewind credential %q needs a VCT, a CredentialConfigID and a template name", s.DisplayName)
+		}
+		if seenVCTs[s.VCT] {
+			t.Errorf("bewind VCT %q is duplicated", s.VCT)
+		}
+		seenVCTs[s.VCT] = true
+		assertLangs(t, s.VCT+" display", toLangs(s.Display))
+
+		keys := assertBewindAttributes(t, s, supported)
+		for key := range c.template.DefaultAttributes {
+			if !keys[key] {
+				t.Errorf("%s template default %q is not a schema attribute", s.VCT, key)
+			}
+		}
+		if err := attestation.ValidateAttributeSources(s.SubjectType, s.Attributes, c.template.AttributeSources); err != nil {
+			t.Errorf("%s template sources: %v", s.VCT, err)
+		}
+	}
+}
+
+// assertBewindAttributes checks s's attributes have unique keys, a supported
+// type and both languages, and returns the keys.
+func assertBewindAttributes(t *testing.T, s attestation.Schema, supported map[string]bool) map[string]bool {
+	t.Helper()
+	keys := map[string]bool{}
+	for _, a := range s.Attributes {
+		if keys[a.Key] {
+			t.Errorf("%s attribute key %q is duplicated", s.VCT, a.Key)
+		}
+		keys[a.Key] = true
+		if !supported[a.Type] {
+			t.Errorf("%s attribute %q has unsupported type %q", s.VCT, a.Key, a.Type)
+		}
+		assertLangs(t, s.VCT+" attribute "+a.Key+" display", toLangsLabel(a.Display))
+	}
+	return keys
 }

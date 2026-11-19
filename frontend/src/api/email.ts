@@ -176,11 +176,19 @@ export interface TestEmailInput {
 export const MAIL_TEMPLATE_KINDS = [
   "credential_offer",
   "event_notification",
+  "identity_overdue",
+  "identity_proofing_requested",
+  "identity_reminder",
+  "identity_requested",
   "invitation",
   "postguard_file",
+  "signature_declined",
   "signature_requested",
   "signed_document",
   "smtp_test",
+  "vog_expired",
+  "vog_reminder",
+  "vog_requested",
 ] as const;
 
 export type MailTemplateKind = (typeof MAIL_TEMPLATE_KINDS)[number];
@@ -200,6 +208,7 @@ export const MAIL_BLOCK_TYPES = [
   "heading",
   "paragraph",
   "button",
+  "qr",
   "divider",
   "footer",
 ] as const;
@@ -208,7 +217,7 @@ export type MailBlockType = (typeof MAIL_BLOCK_TYPES)[number];
 
 // One layout block. Which fields apply depends on the type: text belongs to
 // heading, paragraph and footer blocks; label, url and linkFallback to button
-// blocks; logo and divider carry nothing. The backend rejects a field on a block
+// blocks; label (a caption) and url to QR blocks; logo and divider carry nothing. The backend rejects a field on a block
 // type it does not belong to.
 export const mailBlockSchema = z.object({
   type: z.enum(MAIL_BLOCK_TYPES),

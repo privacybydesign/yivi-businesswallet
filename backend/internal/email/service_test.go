@@ -1,8 +1,11 @@
 package email
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -142,6 +145,95 @@ func TestSendUsesTheDeploymentDefaultLocale(t *testing.T) {
 	}
 	if !strings.Contains(msg.HTMLBody, `<html lang="nl"`) {
 		t.Errorf("the mail is not marked as Dutch:\n%s", msg.HTMLBody)
+	}
+}
+
+func TestProofingMailSenderLocale(t *testing.T) {
+	for _, tc := range []struct {
+		locale Locale
+		want   string
+	}{{LocaleNL, `<html lang="nl"`}, {LocaleEN, `<html lang="en"`}, {"", `<html lang="nl"`}} {
+		sender := &recordingSender{}
+		svc := newTestService(sender, nil, LocaleNL)
+		if err := svc.SendIdentityProofingRequested(context.Background(), uuid.New(), ProofingMail{
+			To: "person@example.org", OrgName: "Acme BV", RequesterName: "Sam",
+			DeepLink: "vcmrtd://verify?handover=abc", ValidFor: time.Minute, Locale: tc.locale,
+		}); err != nil {
+			t.Fatalf("locale %q: %v", tc.locale, err)
+		}
+		if !strings.Contains(sender.sent[0].HTMLBody, tc.want) {
+			t.Errorf("locale %q: mail not marked %s", tc.locale, tc.want)
+		}
+	}
+}
+
+// The proofing mail shows its branding's own logo, else the org's.
+func TestProofingMailLogo(t *testing.T) {
+	orgLogo := Logo{Bytes: []byte("org-logo"), ContentType: "image/png"}
+	ownLogo := Logo{Bytes: []byte("own-logo"), ContentType: "image/png"}
+	for name, tc := range map[string]struct {
+		brand ProofingBrand
+		want  []byte
+	}{
+		"own logo":    {ProofingBrand{PrimaryColor: "#0a7c59", Logo: ownLogo}, ownLogo.Bytes},
+		"no own logo": {ProofingBrand{PrimaryColor: "#0a7c59"}, orgLogo.Bytes},
+	} {
+		sender := &recordingSender{}
+		svc := newTestService(sender, stubBrand{logo: orgLogo}, LocaleEN)
+		brand := tc.brand
+		if err := svc.SendIdentityProofingRequested(context.Background(), uuid.New(), ProofingMail{
+			To: "person@example.org", OrgName: "Acme BV", RequesterName: "Sam",
+			DeepLink: "vcmrtd://verify?handover=abc", ValidFor: time.Minute, Brand: &brand,
+		}); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if !slices.ContainsFunc(sender.sent[0].Inline, func(img mailer.InlineImage) bool {
+			return bytes.Equal(img.Bytes, tc.want)
+		}) {
+			t.Errorf("%s: mail does not carry logo %q", name, tc.want)
+		}
+	}
+}
+
+// The proofing mail preview is the mail as sent, with the draft's name,
+// colour and support line, its images inline, and no SMTP settings needed.
+func TestPreviewIdentityProofingRequested(t *testing.T) {
+	svc := newTestService(&recordingSender{}, stubBrand{logo: Logo{Bytes: []byte("org-logo"), ContentType: "image/png"}}, LocaleEN)
+	svc.settings = stubSettings{}
+	body, err := svc.PreviewIdentityProofingRequested(context.Background(), uuid.New(), ProofingMail{
+		OrgName: "Acme Trips", RequesterName: "Acme Trips", SupportContact: "help@acme.example",
+		Brand: &ProofingBrand{PrimaryColor: "#0a7c59"},
+	}, nil)
+	if err != nil {
+		t.Fatalf("PreviewIdentityProofingRequested: %v", err)
+	}
+	for _, want := range []string{"Acme Trips", "help@acme.example", "#0a7c59", "data:image/png;base64,"} {
+		if !strings.Contains(body.HTMLBody, want) {
+			t.Errorf("preview lacks %q", want)
+		}
+	}
+	if strings.Contains(body.HTMLBody, "cid:") {
+		t.Error("preview still references cid: images")
+	}
+}
+
+// A preview with an unsaved theme takes its colours and logo, not the saved
+// ones.
+func TestPreviewIdentityProofingRequestedUnsavedTheme(t *testing.T) {
+	svc := newTestService(&recordingSender{}, stubBrand{
+		seeds: Seeds{PrimaryColor: "#111111"}, logo: Logo{Bytes: []byte("saved-logo"), ContentType: "image/png"},
+	}, LocaleEN)
+	draft := Logo{Bytes: []byte("draft-logo"), ContentType: "image/png"}
+	body, err := svc.PreviewIdentityProofingRequested(context.Background(), uuid.New(), ProofingMail{OrgName: "Acme"},
+		&PreviewTheme{Seeds: Seeds{PrimaryColor: "#0a7c59"}, Logo: draft})
+	if err != nil {
+		t.Fatalf("PreviewIdentityProofingRequested: %v", err)
+	}
+	if !strings.Contains(body.HTMLBody, "#0a7c59") || strings.Contains(body.HTMLBody, "#111111") {
+		t.Error("preview does not use the unsaved theme's colour")
+	}
+	if !strings.Contains(body.HTMLBody, base64.StdEncoding.EncodeToString(draft.Bytes)) {
+		t.Error("preview does not show the unsaved theme's logo")
 	}
 }
 

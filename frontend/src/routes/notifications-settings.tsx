@@ -59,9 +59,9 @@ const WEBHOOK_CHANNELS = [
 
 export function NotificationsSettingsPanel({
   slug,
-}: {
+}: Readonly<{
   slug: string;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const settings = useNotificationSettingsQuery(slug);
   const slack = useSlackSettingsQuery(slug);
@@ -108,11 +108,11 @@ function NotificationsForm({
   slug,
   settings,
   unconfigured,
-}: {
+}: Readonly<{
   slug: string;
   settings: NotificationSettings;
   unconfigured: ReadonlySet<ChannelId>;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const [, setSearchParams] = useSearchParams();
   const save = useUpdateNotificationSettingsMutation(slug);

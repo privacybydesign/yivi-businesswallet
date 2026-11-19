@@ -12,7 +12,7 @@ export function Input({
   icon,
   className,
   ...rest
-}: InputProps): React.JSX.Element {
+}: Readonly<InputProps>): React.JSX.Element {
   const field = (
     <input
       className={[

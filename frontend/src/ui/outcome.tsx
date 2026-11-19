@@ -16,6 +16,11 @@ interface Props {
   title: string;
   message: string;
   action?: React.ReactNode;
+  // What follows the message, such as each step of the session.
+  details?: React.ReactNode;
+  // A live region's role, for an outcome that lands while the page is open:
+  // "alert" for a failure, "status" otherwise. None for a page that opens on it.
+  role?: "alert" | "status";
 }
 
 export function Outcome({
@@ -24,9 +29,11 @@ export function Outcome({
   title,
   message,
   action,
-}: Props): React.JSX.Element {
+  details,
+  role,
+}: Readonly<Props>): React.JSX.Element {
   return (
-    <div className="mt-6 flex flex-col items-center text-center">
+    <div role={role} className="mt-6 flex flex-col items-center text-center">
       <span
         className={[
           "inline-flex h-12 w-12 items-center justify-center rounded-full",
@@ -37,6 +44,7 @@ export function Outcome({
       </span>
       <h1 className="mt-4 text-[20px] font-bold">{title}</h1>
       <p className="text-ink-soft mt-1 text-[14px]">{message}</p>
+      {details}
       {action && <div className="mt-5">{action}</div>}
     </div>
   );

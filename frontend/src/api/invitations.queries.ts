@@ -1,4 +1,9 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  queryOptions,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import type { UseMutationResult, UseQueryResult } from "@tanstack/react-query";
 import { meQueryKey } from "./auth.queries";
 import {
@@ -32,14 +37,16 @@ export function useInvitePreviewQuery(
   });
 }
 
+// Shared by the hook and the route loader, so a prefetch fills the same entry.
+export const myInvitationsQueryOptions = queryOptions({
+  queryKey: myInvitationsQueryKey,
+  queryFn: ({ signal }) => getMyInvitations(signal),
+});
+
 export function useMyInvitationsQuery(
   enabled = true,
 ): UseQueryResult<MyInvitation[], Error> {
-  return useQuery({
-    queryKey: myInvitationsQueryKey,
-    queryFn: ({ signal }) => getMyInvitations(signal),
-    enabled,
-  });
+  return useQuery({ ...myInvitationsQueryOptions, enabled });
 }
 
 export function useIdentityReviewsQuery(

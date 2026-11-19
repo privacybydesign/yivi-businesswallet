@@ -7,16 +7,29 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/attestation/rulebook"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/eudiholder"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/openid4vciissuer"
 )
 
 const claimTokenBytes = 24
+
+// releaseClaimTimeout bounds reopening an offer whose redemption failed. It is a
+// single row on a context of its own, so it needs no more than this; the point of
+// the bound is that a detached context cannot be cancelled by the acceptance that
+// just failed (see Service.releaseClaim).
+const releaseClaimTimeout = 5 * time.Second
+
+// listReconcileBudget bounds the issuer calls one Issued-tab load may spend, so a
+// slow issuer cannot keep the whole ledger from loading.
+const listReconcileBudget = 5 * time.Second
 
 // issuer is the hosted-issuer seam the service orchestrates (see
 // internal/openid4vciissuer). Accept the interface; the concrete client/stub is
@@ -45,6 +58,7 @@ type issuedStore interface {
 	MarkFailed(ctx context.Context, orgID, id uuid.UUID) error
 	MarkClaimed(ctx context.Context, orgID, id uuid.UUID, credentialUUID string) (Issued, error)
 	GetIssued(ctx context.Context, orgID, id uuid.UUID) (Issued, error)
+	ListIssued(ctx context.Context, orgID uuid.UUID) ([]Issued, error)
 	Revoke(ctx context.Context, orgID, id uuid.UUID) (Issued, error)
 	Cancel(ctx context.Context, orgID, id uuid.UUID) (Issued, error)
 	GetClaim(ctx context.Context, token string) (claimRow, error)
@@ -57,18 +71,34 @@ type heldMutator interface {
 	ListHeld(ctx context.Context, orgID uuid.UUID) ([]HeldAttestation, error)
 	GetHeld(ctx context.Context, orgID, id uuid.UUID) (HeldAttestation, error)
 	SoftDeleteHeld(ctx context.Context, orgID, id uuid.UUID) error
+	RecordHeldStatusChange(ctx context.Context, orgID, id uuid.UUID, vct string, status HeldStatus) (bool, error)
+	HeldHistory(ctx context.Context, orgID, id uuid.UUID) ([]audit.Event, error)
+	HolderOrgs(ctx context.Context) ([]uuid.UUID, error)
+}
+
+// offerStore is the pending-offer queue the service coordinates for the
+// accept/decline flow. Backed by the attestation store.
+type offerStore interface {
+	ListPendingOffers(ctx context.Context, orgID uuid.UUID) ([]CredentialOffer, error)
+	ClaimOffer(ctx context.Context, orgID, id uuid.UUID) (CredentialOffer, error)
+	ReleaseOffer(ctx context.Context, orgID, id uuid.UUID) error
+	AcceptOffer(ctx context.Context, orgID, id uuid.UUID, in HeldInput) (HeldAttestation, error)
+	DeclineOffer(ctx context.Context, orgID, id uuid.UUID) (CredentialOffer, error)
 }
 
 // holderEngine is the organization's holder-wallet engine seam the service
-// coordinates: removing a credential (the delete flow) and reading a held
-// credential's disclosed attributes (the detail view). Backed by
-// internal/eudiholder; accept the interface so the service stays decoupled from
-// the concrete engine (stub or irmago).
+// coordinates: redeeming an accepted credential offer, removing a credential
+// (the delete flow) and reading a held credential's disclosed attributes (the
+// detail view). Backed by internal/eudiholder; accept the interface so the
+// service stays decoupled from the concrete engine (stub or irmago).
 type holderEngine interface {
+	Redeem(ctx context.Context, orgID uuid.UUID, offerURI string) (eudiholder.Redeemed, error)
 	Delete(ctx context.Context, orgID uuid.UUID, ref string) error
 	Claims(ctx context.Context, orgID uuid.UUID, ref, vct, lang string) (eudiholder.HeldCredential, error)
 	Displays(ctx context.Context, orgID uuid.UUID, lang string) (map[string]eudiholder.HeldDisplay, error)
 	Validities(ctx context.Context, orgID uuid.UUID) (map[string]eudiholder.HeldValidity, error)
+	RefreshStatuses(ctx context.Context, orgID uuid.UUID) (int, error)
+	RefreshStatus(ctx context.Context, orgID uuid.UUID, ref string) (int, error)
 }
 
 // emailNotifier delivers a person-facing "your credential is ready" e-mail.
@@ -82,6 +112,8 @@ type emailNotifier interface {
 // not a claim link.
 type qerdsNotifier interface {
 	SendCredentialOffer(ctx context.Context, orgID uuid.UUID, toAddress, orgName, credentialName, offerURI string) error
+	// SendOfferDeclined tells the issuer at toAddress that its offer was declined.
+	SendOfferDeclined(ctx context.Context, orgID uuid.UUID, toAddress, credentialName, offerURI string) error
 }
 
 // Service coordinates issuance across the ledger store, the hosted issuer and the
@@ -93,12 +125,13 @@ type Service struct {
 	email      emailNotifier
 	qerds      qerdsNotifier
 	held       heldMutator
+	offers     offerStore
 	holder     holderEngine
 	appBaseURL string
 	now        func() time.Time
 }
 
-func NewService(store issuedStore, iss issuer, instances issuerInstanceResolver, email emailNotifier, qerds qerdsNotifier, held heldMutator, holder holderEngine, appBaseURL string) *Service {
+func NewService(store issuedStore, iss issuer, instances issuerInstanceResolver, email emailNotifier, qerds qerdsNotifier, held heldMutator, offers offerStore, holder holderEngine, appBaseURL string) *Service {
 	return &Service{
 		store:      store,
 		issuer:     iss,
@@ -106,6 +139,7 @@ func NewService(store issuedStore, iss issuer, instances issuerInstanceResolver,
 		email:      email,
 		qerds:      qerds,
 		held:       held,
+		offers:     offers,
 		holder:     holder,
 		appBaseURL: strings.TrimRight(appBaseURL, "/"),
 		now:        time.Now,
@@ -141,7 +175,7 @@ func (s *Service) Issue(ctx context.Context, orgID uuid.UUID, issuedBy *uuid.UUI
 	if err := checkRecipientKind(detail.SubjectType, in.Recipient.Kind); err != nil {
 		return IssueResult{}, err
 	}
-	if err := validateAttributes(detail.SchemaAttributes, in.Attributes); err != nil {
+	if err := validateAttributes(detail, in.Attributes); err != nil {
 		return IssueResult{}, err
 	}
 
@@ -169,14 +203,18 @@ func (s *Service) Issue(ctx context.Context, orgID uuid.UUID, issuedBy *uuid.UUI
 	offer, err := s.issuer.CreateOffer(ctx, openid4vciissuer.OfferRequest{
 		Instance:           s.instanceFor(ctx, orgID),
 		CredentialConfigID: detail.CredentialConfigID,
-		Claims:             toClaims(in.Attributes),
+		VCT:                detail.SchemaVCT,
+		DisplayName:        detail.Name,
+		IssuerName:         orgName,
+		Claims:             maps.Clone(in.Attributes),
 		ExpirationSeconds:  expirationSeconds,
 		// tx_code is a second factor only for the external-email path (a person
-		// keys the PIN in). Members redeem while authenticated; organizations
-		// auto-redeem over the authenticated QERDS channel — a tx_code there has
-		// no one to enter it and would block automated issuance (see
+		// keys the PIN in). Members redeem while authenticated; an organization
+		// redeems from its console over the authenticated QERDS channel — a
+		// tx_code there has no one to enter it and would block the accept (see
 		// .ai/features/oid4vci-over-qerds.md §4).
-		UseTxCode: in.Recipient.Kind == RecipientExternal,
+		UseTxCode:   in.Recipient.Kind == RecipientExternal,
+		AwaitRedeem: in.Recipient.Kind == RecipientOrganization,
 	})
 	if err != nil {
 		if failErr := s.store.MarkFailed(ctx, orgID, issued.ID); failErr != nil {
@@ -232,6 +270,44 @@ func (s *Service) Status(ctx context.Context, orgID, id uuid.UUID) (Issued, erro
 	}
 	if credentialUUID, ok := s.reconcile(ctx, s.instanceFor(ctx, orgID), issued.IssuanceID); ok {
 		return s.store.MarkClaimed(ctx, orgID, id, credentialUUID)
+	}
+	return issued, nil
+}
+
+// ListIssued returns the issuance ledger, first reconciling every open offer to an
+// organization with the issuer. An organization accepts an offer in its own
+// wallet, so only the issuer can tell this side that it was claimed.
+func (s *Service) ListIssued(ctx context.Context, orgID uuid.UUID) ([]Issued, error) {
+	issued, err := s.store.ListIssued(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
+	reconcileCtx, cancel := context.WithTimeout(ctx, listReconcileBudget)
+	defer cancel()
+	instance, resolved := "", false
+	for i, row := range issued {
+		if row.Status != StatusOffered || row.IssuanceID == "" || row.RecipientKind != RecipientOrganization {
+			continue
+		}
+		if reconcileCtx.Err() != nil {
+			break
+		}
+		if !resolved {
+			instance, resolved = s.instanceFor(ctx, orgID), true
+		}
+		credentialUUID, ok := s.reconcile(reconcileCtx, instance, row.IssuanceID)
+		if !ok {
+			continue
+		}
+		claimed, err := s.store.MarkClaimed(ctx, orgID, row.ID, credentialUUID)
+		if errors.Is(err, ErrIssuedNotFound) {
+			// Claimed, cancelled or revoked by a concurrent request since the read.
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		issued[i] = claimed
 	}
 	return issued, nil
 }
@@ -329,6 +405,103 @@ func (s *Service) DeleteHeld(ctx context.Context, orgID, id uuid.UUID) error {
 	return s.held.SoftDeleteHeld(ctx, orgID, id)
 }
 
+// ListOffers returns the inbound credential offers the organization still has to
+// decide on. The offer deeplinks stay server-side (see CredentialOffer).
+func (s *Service) ListOffers(ctx context.Context, orgID uuid.UUID) ([]CredentialOffer, error) {
+	return s.offers.ListPendingOffers(ctx, orgID)
+}
+
+// AcceptOffer redeems a pending credential offer into the organization's holder
+// engine and indexes it as held (source=qerds, linked to the QERDS message that
+// carried the offer). This is the only path that puts a QERDS-delivered
+// credential in the wallet: receiving the offer merely queues it.
+//
+// Claim, redeem, settle. The claim (ClaimOffer, pending → accepting) comes first
+// because redeeming is a call to the issuer with a side effect no later guard can
+// undo: were the offer merely read here, two admins pressing Accept at the same
+// moment would both redeem, and the one that lost the settle would leave a
+// credential in the org's holder engine that the wallet can neither show nor
+// delete. One caller wins the claim; the rest get ErrOfferNotFound.
+//
+// Engine first, index second — the same fail-safe ordering as DeleteHeld. A
+// redemption that fails releases the claim, so the offer is pending again and the
+// admin can accept once the cause is gone (the issuer was down, the org's wallet
+// was not yet activated) rather than losing the offer to a terminal state.
+// Settling is the point of no return: a second accept finds nothing pending and
+// returns ErrOfferNotFound.
+func (s *Service) AcceptOffer(ctx context.Context, orgID, id uuid.UUID) (HeldAttestation, error) {
+	offer, err := s.offers.ClaimOffer(ctx, orgID, id)
+	if err != nil {
+		return HeldAttestation{}, err
+	}
+	redeemed, err := s.holder.Redeem(ctx, orgID, offer.Offer)
+	if err != nil {
+		s.releaseClaim(ctx, orgID, id)
+		return HeldAttestation{}, fmt.Errorf("attestation: redeem accepted offer %s org %s: %w", id, orgID, err)
+	}
+	messageID := offer.SourceMessageID
+	held, err := s.offers.AcceptOffer(ctx, orgID, id, HeldInput{
+		CredentialRef:   redeemed.Ref,
+		VCT:             redeemed.VCT,
+		Issuer:          redeemed.Issuer,
+		Source:          HeldSourceQERDS,
+		SourceMessageID: &messageID,
+	})
+	if err != nil {
+		return HeldAttestation{}, err
+	}
+	slog.InfoContext(ctx, "attestation: accepted QERDS credential offer",
+		slog.String("orgId", orgID.String()),
+		slog.String("offerId", id.String()),
+		slog.String("vct", redeemed.VCT),
+		slog.String("messageId", messageID.String()))
+	return held, nil
+}
+
+// releaseClaim reopens an offer whose redemption produced no credential. It is
+// called on that path only: after a redemption that did succeed, releasing would
+// invite a retry that redeems a second credential, so an offer whose indexing
+// failed stays claimed and out of the queue.
+//
+// The release runs on a context detached from the request's. The redemption most
+// likely to fail is the one whose context was cancelled or timed out, and on that
+// context the write that reopens the offer would fail too — stranding the offer
+// as accepting: gone from the Wallet tab and undecidable for good. A release that
+// fails anyway is logged rather than returned, because the redemption error is
+// what the admin needs to see.
+func (s *Service) releaseClaim(ctx context.Context, orgID, id uuid.UUID) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), releaseClaimTimeout)
+	defer cancel()
+	if err := s.offers.ReleaseOffer(ctx, orgID, id); err != nil {
+		slog.ErrorContext(ctx, "attestation: reopening a credential offer after a failed redemption",
+			slog.String("orgId", orgID.String()),
+			slog.String("offerId", id.String()),
+			slog.String("error", err.Error()))
+	}
+}
+
+// DeclineOffer refuses a pending credential offer. Nothing is redeemed, so the
+// credential never reaches the wallet; the QERDS message and its evidence stay in
+// the inbox. Returns ErrOfferNotFound when the offer is absent or already decided.
+// The decline is told back to the issuer over QERDS; the issuer cannot learn it
+// any other way, since nothing is redeemed. A failed send is logged, not
+// returned: the decline itself is recorded and cannot be repeated.
+func (s *Service) DeclineOffer(ctx context.Context, orgID, id uuid.UUID) error {
+	offer, err := s.offers.DeclineOffer(ctx, orgID, id)
+	if err != nil {
+		return err
+	}
+	if offer.SenderAddress == "" {
+		return nil
+	}
+	if err := s.qerds.SendOfferDeclined(ctx, orgID, offer.SenderAddress, offer.CredentialName, offer.Offer); err != nil {
+		slog.ErrorContext(ctx, "attestation: tell issuer of declined offer",
+			slog.String("offerId", offer.ID.String()), slog.String("to", offer.SenderAddress),
+			slog.String("error", err.Error()))
+	}
+	return nil
+}
+
 // HeldClaimsView is a held credential's index metadata plus its disclosed
 // attributes, assembled for the detail view. The index row carries the
 // routing/identity fields (vct, issuer identifier, source, receivedAt); the
@@ -344,17 +517,38 @@ func (s *Service) DeleteHeld(ctx context.Context, orgID, id uuid.UUID) error {
 // stored (absent expiry means the credential does not expire); see
 // eudiholder.HeldValidity for what Revoked does and does not observe.
 type HeldClaimsView struct {
-	ID          uuid.UUID                  `json:"id"`
-	VCT         string                     `json:"vct"`
-	Issuer      string                     `json:"issuer"`
-	IssuerName  string                     `json:"issuerName"`
-	DisplayName string                     `json:"displayName"`
-	LogoURI     string                     `json:"logoUri"`
-	Source      string                     `json:"source"`
-	ReceivedAt  time.Time                  `json:"receivedAt"`
-	ExpiresAt   *time.Time                 `json:"expiresAt,omitempty"`
-	Revoked     bool                       `json:"revoked"`
-	Attributes  []eudiholder.HeldAttribute `json:"attributes"`
+	ID          uuid.UUID  `json:"id"`
+	VCT         string     `json:"vct"`
+	Issuer      string     `json:"issuer"`
+	IssuerName  string     `json:"issuerName"`
+	DisplayName string     `json:"displayName"`
+	LogoURI     string     `json:"logoUri"`
+	Source      string     `json:"source"`
+	ReceivedAt  time.Time  `json:"receivedAt"`
+	ExpiresAt   *time.Time `json:"expiresAt,omitempty"`
+	Revoked     bool       `json:"revoked"`
+	HeldChecks
+	Attributes []eudiholder.HeldAttribute `json:"attributes"`
+	// Rulebook is the WE BUILD rulebook the credential's vct belongs to, and
+	// RulebookViolations where its claims do not match that rulebook's schema.
+	Rulebook           string   `json:"rulebook,omitempty"`
+	RulebookViolations []string `json:"rulebookViolations,omitempty"`
+}
+
+// HeldChecks are what the wallet knows about a held credential's integrity:
+// its iat and format, whether it carries a status list (so it can be revoked at
+// all) and when that was last read. The signature and the issuer's trust chain
+// were verified when it was received; a credential failing either is never
+// stored.
+type HeldChecks struct {
+	IssuedAt        *time.Time `json:"issuedAt,omitempty"`
+	Format          string     `json:"format,omitempty"`
+	HasStatusList   bool       `json:"hasStatusList"`
+	StatusCheckedAt *time.Time `json:"statusCheckedAt,omitempty"`
+}
+
+func heldChecks(v eudiholder.HeldValidity) HeldChecks {
+	return HeldChecks{IssuedAt: v.IssuedAt, Format: v.Format, HasStatusList: v.HasStatusList, StatusCheckedAt: v.StatusCheckedAt}
 }
 
 // HeldListView is one held-credential index row enriched with the credential's
@@ -377,6 +571,7 @@ type HeldListView struct {
 	IssuerName  string     `json:"issuerName"`
 	ExpiresAt   *time.Time `json:"expiresAt,omitempty"`
 	Revoked     bool       `json:"revoked"`
+	HeldChecks
 }
 
 // HeldClaims returns a held credential's disclosed attributes for the detail view,
@@ -405,19 +600,45 @@ func (s *Service) HeldClaims(ctx context.Context, orgID, id uuid.UUID, lang stri
 		return HeldClaimsView{}, fmt.Errorf("attestation: held validity %s from engine: %w", id, err)
 	}
 	validity := validities[held.CredentialRef]
+	rulebookID, violations, err := checkRulebook(held.VCT, cred.Attributes)
+	if err != nil {
+		return HeldClaimsView{}, fmt.Errorf("attestation: held claims %s rulebook check: %w", id, err)
+	}
 	return HeldClaimsView{
-		ID:          held.ID,
-		VCT:         held.VCT,
-		Issuer:      held.Issuer,
-		IssuerName:  issuerName,
-		DisplayName: cred.DisplayName,
-		LogoURI:     cred.LogoURI,
-		Source:      held.Source,
-		ReceivedAt:  held.ReceivedAt,
-		ExpiresAt:   validity.ExpiresAt,
-		Revoked:     validity.Revoked,
-		Attributes:  cred.Attributes,
+		Rulebook:           rulebookID,
+		RulebookViolations: violations,
+		ID:                 held.ID,
+		VCT:                held.VCT,
+		Issuer:             held.Issuer,
+		IssuerName:         issuerName,
+		DisplayName:        cred.DisplayName,
+		LogoURI:            cred.LogoURI,
+		Source:             held.Source,
+		ReceivedAt:         held.ReceivedAt,
+		ExpiresAt:          validity.ExpiresAt,
+		Revoked:            validity.Revoked,
+		HeldChecks:         heldChecks(validity),
+		Attributes:         cred.Attributes,
 	}, nil
+}
+
+// checkRulebook validates a held credential's claims against the WE BUILD rulebook
+// its vct belongs to. It returns no rulebook for any other vct.
+func checkRulebook(vct string, attrs []eudiholder.HeldAttribute) (string, []string, error) {
+	rb, ok := rulebook.ForVCT(vct)
+	if !ok {
+		return "", nil, nil
+	}
+	claims := make(map[string]any, len(attrs))
+	for _, a := range attrs {
+		claims[a.Key] = a.Value
+	}
+	err := rb.ValidateClaims(claims)
+	var ve *rulebook.ValidationError
+	if errors.As(err, &ve) {
+		return rb.ID, ve.Violations, nil
+	}
+	return rb.ID, nil, err
 }
 
 // ListHeld returns an organization's active held credentials enriched with each
@@ -455,6 +676,7 @@ func (s *Service) ListHeld(ctx context.Context, orgID uuid.UUID, lang string) ([
 			IssuerName:      issuerName,
 			ExpiresAt:       v.ExpiresAt,
 			Revoked:         v.Revoked,
+			HeldChecks:      heldChecks(v),
 		}
 	}
 	return views, nil
@@ -504,32 +726,36 @@ func resolveDelivery(subjectType, method string) string {
 	return DeliveryEmail
 }
 
-// validateAttributes enforces the schema allow-list: every provided key must be
-// declared, and every required attribute must be present and non-empty.
-func validateAttributes(allowed []AttributeDef, provided map[string]string) error {
-	byKey := make(map[string]AttributeDef, len(allowed))
-	for _, a := range allowed {
+// validateAttributes checks the values a template issues: a rulebook schema's
+// against the rulebook's JSON schema (rulebook.ErrInvalidClaims), an
+// organization-defined schema's against its allow-list, where every declared key
+// may be given as a string and every required one must be non-empty.
+func validateAttributes(detail TemplateDetail, provided map[string]any) error {
+	if detail.SchemaRulebook != "" {
+		rb, ok := rulebook.Get(detail.SchemaRulebook)
+		if !ok {
+			return fmt.Errorf("%w: %q", ErrUnknownRulebook, detail.SchemaRulebook)
+		}
+		return rb.ValidateClaims(provided)
+	}
+	byKey := make(map[string]AttributeDef, len(detail.SchemaAttributes))
+	for _, a := range detail.SchemaAttributes {
 		byKey[a.Key] = a
 	}
-	for key := range provided {
+	for key, value := range provided {
 		if _, ok := byKey[key]; !ok {
 			return fmt.Errorf("%w: %q", ErrUnknownAttribute, key)
 		}
+		if _, ok := value.(string); !ok {
+			return fmt.Errorf("%w: %q", ErrInvalidAttribute, key)
+		}
 	}
-	for _, a := range allowed {
-		if a.Required && provided[a.Key] == "" {
+	for _, a := range detail.SchemaAttributes {
+		if v, _ := provided[a.Key].(string); a.Required && v == "" {
 			return fmt.Errorf("%w: %q", ErrMissingAttribute, a.Key)
 		}
 	}
 	return nil
-}
-
-func toClaims(attrs map[string]string) map[string]any {
-	out := make(map[string]any, len(attrs))
-	for k, v := range attrs {
-		out[k] = v
-	}
-	return out
 }
 
 func newClaimToken() (string, error) {
@@ -538,4 +764,125 @@ func newClaimToken() (string, error) {
 		return "", fmt.Errorf("attestation: claim token: %w", err)
 	}
 	return hex.EncodeToString(b), nil
+}
+
+// HeldHistory is a held credential's trail, oldest first, after confirming the
+// organization holds it.
+func (s *Service) HeldHistory(ctx context.Context, orgID, id uuid.UUID) ([]audit.Event, error) {
+	if _, err := s.held.GetHeld(ctx, orgID, id); err != nil {
+		return nil, err
+	}
+	return s.held.HeldHistory(ctx, orgID, id)
+}
+
+// heldRecheckTimeout bounds a status re-check, which outlives the request
+// that started it: see recheckHeld.
+const heldRecheckTimeout = 2 * time.Minute
+
+// heldAuditTimeout bounds auditing what a re-check left behind, given its own
+// budget so a re-check that ran out of time is still audited.
+const heldAuditTimeout = 30 * time.Second
+
+// RecheckHeld re-reads the issuer status list of every credential the
+// organization holds and audits each one whose state moved between valid and
+// revoked. It reports how many changed.
+func (s *Service) RecheckHeld(ctx context.Context, orgID uuid.UUID) (int, error) {
+	changed, err := s.recheckHeld(ctx, orgID, func(ctx context.Context) error {
+		_, err := s.holder.RefreshStatuses(ctx, orgID)
+		return err
+	})
+	return len(changed), err
+}
+
+// RecheckHeldOne re-reads the issuer status list of one held credential, the
+// re-check a credential's own page asks for, and reports whether it changed
+// state.
+func (s *Service) RecheckHeldOne(ctx context.Context, orgID, id uuid.UUID) (bool, error) {
+	held, err := s.held.GetHeld(ctx, orgID, id)
+	if err != nil {
+		return false, err
+	}
+	changed, err := s.recheckHeld(ctx, orgID, func(ctx context.Context) error {
+		_, err := s.holder.RefreshStatus(ctx, orgID, held.CredentialRef)
+		return err
+	})
+	_, ok := changed[id]
+	return ok, err
+}
+
+// recheckHeld runs refresh and then audits every held credential whose status
+// differs from its last audited one, returning the ids it audited. It runs
+// detached from ctx's cancellation and actor: the holder keeps each status it
+// reads as it goes, so a re-check cut off (a closed tab, a timeout) must still
+// audit what was kept, and the issuer, not the caller, moved the status.
+func (s *Service) recheckHeld(ctx context.Context, orgID uuid.UUID, refresh func(context.Context) error) (map[uuid.UUID]struct{}, error) {
+	ctx = audit.WithoutActor(context.WithoutCancel(ctx))
+
+	refreshCtx, cancel := context.WithTimeout(ctx, heldRecheckTimeout)
+	refreshErr := refresh(refreshCtx)
+	cancel()
+	if refreshErr != nil {
+		refreshErr = fmt.Errorf("attestation: recheck org %s: %w", orgID, refreshErr)
+	}
+
+	auditCtx, cancel := context.WithTimeout(ctx, heldAuditTimeout)
+	defer cancel()
+	changed, err := s.auditHeldStatuses(auditCtx, orgID)
+	return changed, errors.Join(refreshErr, err)
+}
+
+// auditHeldStatuses records each held credential with a status list whose
+// status in the holder differs from its last audited one. A credential that
+// fails is skipped, not the ones after it.
+func (s *Service) auditHeldStatuses(ctx context.Context, orgID uuid.UUID) (map[uuid.UUID]struct{}, error) {
+	changed := map[uuid.UUID]struct{}{}
+	validities, err := s.holder.Validities(ctx, orgID)
+	if err != nil {
+		return changed, fmt.Errorf("attestation: validities org %s: %w", orgID, err)
+	}
+	held, err := s.held.ListHeld(ctx, orgID)
+	if err != nil {
+		return changed, err
+	}
+
+	var errs []error
+	for _, h := range held {
+		v := validities[h.CredentialRef]
+		if !v.HasStatusList {
+			continue
+		}
+		recorded, err := s.held.RecordHeldStatusChange(ctx, orgID, h.ID, h.VCT, heldStatusOf(v.Revoked))
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		if recorded {
+			changed[h.ID] = struct{}{}
+		}
+	}
+	return changed, errors.Join(errs...)
+}
+
+// RecheckAllHeld re-checks every holder organization's credentials, for the
+// scheduled sweep. An org that fails is logged and skipped. It reports how many
+// credentials changed state.
+func (s *Service) RecheckAllHeld(ctx context.Context) (int64, error) {
+	orgs, err := s.held.HolderOrgs(ctx)
+	if err != nil {
+		return 0, err
+	}
+	var changed int64
+	for _, orgID := range orgs {
+		// Each org's re-check ignores cancellation (see recheckHeld), so a
+		// shutdown is honoured here, between orgs.
+		if err := ctx.Err(); err != nil {
+			return changed, err
+		}
+		n, err := s.RecheckHeld(ctx, orgID)
+		changed += int64(n)
+		if err != nil {
+			slog.WarnContext(ctx, "attestation: held status recheck failed", slog.String("org_id", orgID.String()), slog.Any("error", err))
+		}
+	}
+	return changed, nil
 }

@@ -15,6 +15,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/euid"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/qerdsprovider"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/respond"
@@ -48,12 +49,24 @@ type addressManager interface {
 	ProvisionAddress(ctx context.Context, orgID uuid.UUID, address string, makeDefault bool, providerRef string) (Address, error)
 	ListAddresses(ctx context.Context, orgID uuid.UUID) ([]Address, error)
 	SetDefaultAddress(ctx context.Context, orgID, addressID uuid.UUID) (Address, error)
+	DeleteAddress(ctx context.Context, orgID, addressID uuid.UUID) error
 }
 
 type contactManager interface {
 	ListContacts(ctx context.Context, orgID uuid.UUID) ([]Contact, error)
 	CreateContact(ctx context.Context, orgID uuid.UUID, in Contact) (Contact, error)
 	DeleteContact(ctx context.Context, orgID, id uuid.UUID) error
+}
+
+// offerLookup resolves a message body against the credential-offer envelope
+// internal/attestation understands, so the API can name the offer and link
+// through to its decision without qerds knowing the envelope's shape. It also
+// redacts the offer's one-time deeplink out of the body it hands back — the
+// deeplink is a bearer token, so raw is never served, in the response or behind
+// the "view raw" toggle. ok is false for a body that is not a recognised offer
+// envelope, in which case redactedBody equals body unchanged.
+type offerLookup interface {
+	LookupOffer(ctx context.Context, orgID, messageID uuid.UUID, body string) (ann CredentialOfferAnnotation, redactedBody string, ok bool)
 }
 
 // Handler serves the org-scoped QERDS API plus the machine-to-machine inbound
@@ -65,6 +78,7 @@ type Handler struct {
 	messages      reader
 	addresses     addressManager
 	contacts      contactManager
+	offers        offerLookup
 	requireUser   func(http.Handler) http.Handler
 	authorize     func(http.Handler) http.Handler
 	webhookSecret string
@@ -84,6 +98,32 @@ func NewHandler(service sender, messages reader, addresses addressManager, conta
 	}
 }
 
+// SetOfferLookup registers the (optional) credential-offer annotator, wired at
+// boot once the attestation store exists — qerds.Handler is constructed first
+// (mirrors Service.SetInboundConsumer). Nil leaves every message body as
+// stored, unannotated.
+func (h *Handler) SetOfferLookup(l offerLookup) { h.offers = l }
+
+// annotateOffer enriches msg with its parsed credential-offer summary when the
+// handler is wired with a lookup and the body carries one, replacing Body with
+// the redacted stand-in in that case. A nil offers, an outbound message (the
+// envelope shape is only ever meaningful to the recipient — the org's own copy
+// of an offer it sent is an ordinary message, and redacting its body would
+// throw away the only place the console shows what was sent), or a body that
+// is not a recognised offer returns msg unchanged.
+func (h *Handler) annotateOffer(ctx context.Context, orgID uuid.UUID, msg Message) Message {
+	if h.offers == nil || msg.Direction != DirectionInbound {
+		return msg
+	}
+	ann, redactedBody, ok := h.offers.LookupOffer(ctx, orgID, msg.ID, msg.Body)
+	if !ok {
+		return msg
+	}
+	msg.Body = redactedBody
+	msg.Offer = &ann
+	return msg
+}
+
 func (h *Handler) Register(mux *http.ServeMux) {
 	orgScoped := func(next http.Handler) http.Handler {
 		return h.requireUser(h.authorize(next))
@@ -98,6 +138,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("GET /orgs/{slug}/qerds/addresses", orgScoped(respond.HandlerFunc(h.listAddresses)))
 	mux.Handle("POST /orgs/{slug}/qerds/addresses", orgScoped(organization.RequireOrgAdmin(respond.HandlerFunc(h.provisionAddress))))
 	mux.Handle("POST /orgs/{slug}/qerds/addresses/{id}/default", orgScoped(organization.RequireOrgAdmin(respond.HandlerFunc(h.setDefaultAddress))))
+	mux.Handle("DELETE /orgs/{slug}/qerds/addresses/{id}", orgScoped(organization.RequireOrgAdmin(respond.HandlerFunc(h.deleteAddress))))
 
 	mux.Handle("GET /orgs/{slug}/qerds/contacts", orgScoped(respond.HandlerFunc(h.listContacts)))
 	mux.Handle("POST /orgs/{slug}/qerds/contacts", orgScoped(respond.HandlerFunc(h.createContact)))
@@ -112,6 +153,9 @@ func (h *Handler) listMessages(w http.ResponseWriter, r *http.Request) error {
 	messages, err := h.messages.List(r.Context(), org.ID)
 	if err != nil {
 		return fmt.Errorf("listing qerds messages: %w", err)
+	}
+	for i, msg := range messages {
+		messages[i] = h.annotateOffer(r.Context(), org.ID, msg)
 	}
 	respond.JSON(w, r, http.StatusOK, messages)
 	return nil
@@ -250,7 +294,7 @@ func (h *Handler) downloadAttachment(w http.ResponseWriter, r *http.Request) err
 
 	w.Header().Set("Content-Type", att.ContentType)
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", att.Filename))
-	w.Header().Set("Content-Length", strconv.Itoa(len(att.Content)))
+	w.Header().Set(respond.HeaderContentLength, strconv.Itoa(len(att.Content)))
 	// Content is opaque and provider-supplied; never let the browser sniff it.
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(http.StatusOK)
@@ -272,6 +316,7 @@ func (h *Handler) getMessage(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return fmt.Errorf("getting qerds message: %w", err)
 	}
+	msg.Message = h.annotateOffer(r.Context(), org.ID, msg.Message)
 
 	respond.JSON(w, r, http.StatusOK, msg)
 	return nil
@@ -388,6 +433,31 @@ func (h *Handler) setDefaultAddress(w http.ResponseWriter, r *http.Request) erro
 	return nil
 }
 
+func (h *Handler) deleteAddress(w http.ResponseWriter, r *http.Request) error {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		return badRequest("invalid_id", "invalid address id")
+	}
+
+	org := organization.OrgFromContext(r.Context())
+	err = h.addresses.DeleteAddress(r.Context(), org.ID, id)
+	if errors.Is(err, ErrAddressNotFound) {
+		return &respond.APIError{Status: http.StatusNotFound, Code: "address_not_found", Message: "digital address not found"}
+	}
+	if errors.Is(err, ErrAddressIsDefault) {
+		return &respond.APIError{Status: http.StatusConflict, Code: "address_is_default", Message: "cannot delete the organization's default digital address"}
+	}
+	if errors.Is(err, ErrAddressLastRemaining) {
+		return &respond.APIError{Status: http.StatusConflict, Code: "address_last_remaining", Message: "cannot delete the organization's only digital address"}
+	}
+	if err != nil {
+		return fmt.Errorf("deleting qerds address: %w", err)
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+	return nil
+}
+
 func (h *Handler) listContacts(w http.ResponseWriter, r *http.Request) error {
 	org := organization.OrgFromContext(r.Context())
 	contacts, err := h.contacts.ListContacts(r.Context(), org.ID)
@@ -432,6 +502,14 @@ func (h *Handler) createContact(w http.ResponseWriter, r *http.Request) error {
 	if req.Address == "" {
 		return badRequest("invalid_input", "address is required")
 	}
+	contactEUID := trimOptional(req.EUID)
+	if contactEUID != nil {
+		id, err := euid.Parse(*contactEUID)
+		if err != nil {
+			return badRequest("invalid_euid", "euid is not a valid EUID")
+		}
+		*contactEUID = id.String()
+	}
 
 	org := organization.OrgFromContext(r.Context())
 	contact, err := h.contacts.CreateContact(r.Context(), org.ID, Contact{
@@ -439,7 +517,7 @@ func (h *Handler) createContact(w http.ResponseWriter, r *http.Request) error {
 		Address:   req.Address,
 		LegalName: trimOptional(req.LegalName),
 		KVKNumber: trimOptional(req.KVKNumber),
-		EUID:      trimOptional(req.EUID),
+		EUID:      contactEUID,
 	})
 	if errors.Is(err, ErrContactAddressTaken) {
 		return &respond.APIError{Status: http.StatusConflict, Code: "address_taken", Message: "a contact with that address already exists"}

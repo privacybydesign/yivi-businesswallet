@@ -5,7 +5,9 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -20,6 +22,8 @@ type fakeRepo struct {
 	membershipErr error
 	avatar        user.Avatar
 	avatarErr     error
+	authority     Authority
+	authorityErr  error
 }
 
 func (f fakeRepo) List(context.Context) ([]Organization, error) { return nil, nil }
@@ -35,7 +39,10 @@ func (f fakeRepo) GetBySlug(context.Context, string) (Organization, error) {
 func (f fakeRepo) Update(context.Context, uuid.UUID, string) (Organization, error) {
 	return Organization{}, nil
 }
-func (f fakeRepo) Delete(context.Context, uuid.UUID) error                        { return nil }
+func (f fakeRepo) Delete(context.Context, uuid.UUID) error { return nil }
+func (f fakeRepo) SetTestMode(context.Context, uuid.UUID, bool) (Organization, error) {
+	return f.org, nil
+}
 func (f fakeRepo) ListForUser(context.Context, uuid.UUID) ([]Organization, error) { return nil, nil }
 func (f fakeRepo) GetMembership(context.Context, uuid.UUID, uuid.UUID) (Membership, error) {
 	return f.membership, f.membershipErr
@@ -52,7 +59,8 @@ func (f fakeRepo) GetMemberAvatar(context.Context, uuid.UUID, uuid.UUID) (user.A
 func (f fakeRepo) ListMemberEntries(context.Context, uuid.UUID, MemberListParams) ([]MemberEntry, int, error) {
 	return nil, 0, nil
 }
-func (f fakeRepo) RevokeInvitation(context.Context, uuid.UUID, uuid.UUID) error { return nil }
+func (f fakeRepo) MemberStatusTotals(context.Context, uuid.UUID) (int, int, error) { return 0, 0, nil }
+func (f fakeRepo) RevokeInvitation(context.Context, uuid.UUID, uuid.UUID) error    { return nil }
 func (f fakeRepo) ResendInvitation(context.Context, uuid.UUID, uuid.UUID) (Invitation, error) {
 	return Invitation{}, nil
 }
@@ -71,13 +79,106 @@ func (f fakeRepo) UpdateDepartment(context.Context, uuid.UUID, uuid.UUID, string
 }
 func (f fakeRepo) DeleteDepartment(context.Context, uuid.UUID, uuid.UUID) error { return nil }
 
-func authorizeWith(repo repository, admins auth.PlatformAdmins, email user.Email) *httptest.ResponseRecorder {
+func (f fakeRepo) ResolveAuthority(context.Context, uuid.UUID, uuid.UUID) (Authority, error) {
+	return f.authority, f.authorityErr
+}
+
+// ResolveAccess answers from the same fields as the three reads it replaces.
+func (f fakeRepo) ResolveAccess(ctx context.Context, slug string, userID uuid.UUID) (Access, error) {
+	org, err := f.GetBySlug(ctx, slug)
+	if err != nil {
+		return Access{}, err
+	}
+	access := Access{Org: org}
+	m, err := f.GetMembership(ctx, userID, org.ID)
+	switch {
+	case err == nil:
+		access.Member = &m
+	case !errors.Is(err, ErrNotMember):
+		return Access{}, err
+	}
+	if access.Authority, err = f.ResolveAuthority(ctx, org.ID, userID); err != nil {
+		return Access{}, err
+	}
+	return access, nil
+}
+
+func (f fakeRepo) ListMandates(context.Context, uuid.UUID) ([]Mandate, error) { return nil, nil }
+
+func (f fakeRepo) HasJointRepresentation(context.Context, uuid.UUID, uuid.UUID) (bool, error) {
+	return false, nil
+}
+
+func (f fakeRepo) GrantMandate(context.Context, uuid.UUID, uuid.UUID, MandateGrant) (Mandate, error) {
+	return Mandate{}, nil
+}
+
+func (f fakeRepo) RevokeMandate(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, *time.Time, string) ([]Mandate, error) {
+	return nil, nil
+}
+
+func (f fakeRepo) UpdateMemberType(context.Context, uuid.UUID, uuid.UUID, string, *string) (Member, error) {
+	return Member{}, nil
+}
+
+func (f fakeRepo) SetReviewRight(context.Context, uuid.UUID, uuid.UUID, ReviewRight) (Member, error) {
+	return Member{}, nil
+}
+
+func (f fakeRepo) RequestIdentification(context.Context, uuid.UUID, []uuid.UUID, uuid.UUID, string) ([]RequestedMember, error) {
+	return nil, nil
+}
+
+func (f fakeRepo) GetIdentitySettings(context.Context, uuid.UUID) (IdentitySettings, error) {
+	return IdentitySettings{}, nil
+}
+
+func (f fakeRepo) SaveIdentitySettings(context.Context, uuid.UUID, IdentitySettingsInput) (IdentitySettings, error) {
+	return IdentitySettings{}, nil
+}
+
+func (f fakeRepo) ReverifyTokenLookup(context.Context, string) (ReverifyContext, error) {
+	return ReverifyContext{}, nil
+}
+
+func (f fakeRepo) GetScreeningSettings(context.Context, uuid.UUID) (ScreeningSettings, error) {
+	return ScreeningSettings{}, nil
+}
+
+func (f fakeRepo) SaveScreeningSettings(context.Context, uuid.UUID, ScreeningSettingsInput) (ScreeningSettings, error) {
+	return ScreeningSettings{}, nil
+}
+
+func (f fakeRepo) ListScreeningHistory(context.Context, uuid.UUID, uuid.UUID) ([]ScreeningRecord, error) {
+	return nil, nil
+}
+
+func (f fakeRepo) RequestVog(context.Context, uuid.UUID, []uuid.UUID, uuid.UUID, string) ([]RequestedVogMember, error) {
+	return nil, nil
+}
+
+func (f fakeRepo) EnsureVogToken(context.Context, uuid.UUID, uuid.UUID) (string, time.Time, error) {
+	return "", time.Time{}, nil
+}
+
+func (f fakeRepo) VogTokenLookup(context.Context, string) (VogTokenContext, error) {
+	return VogTokenContext{}, nil
+}
+
+// authorizeWith runs the Authorize middleware and returns the response together
+// with the basis of authority it stashed, which the mandate cases assert on.
+func authorizeWith(repo repository, admins auth.PlatformAdmins, email user.Email) (*httptest.ResponseRecorder, Authority) {
 	h := &Handler{store: repo, admins: admins}
-	var gotRole string
+	var (
+		gotRole      string
+		gotAuthority Authority
+	)
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotRole = roleFromContext(r.Context())
+		gotAuthority = AuthorityFromContext(r.Context())
 		_ = OrgFromContext(r.Context())
 		w.Header().Set("X-Role", gotRole)
+		w.Header().Set("X-May-Review", strconv.FormatBool(MayReview(r.Context())))
 		w.WriteHeader(http.StatusOK)
 	})
 
@@ -87,7 +188,7 @@ func authorizeWith(repo repository, admins auth.PlatformAdmins, email user.Email
 	rec := httptest.NewRecorder()
 
 	h.Authorize(next).ServeHTTP(rec, req)
-	return rec
+	return rec, gotAuthority
 }
 
 func TestAuthorize(t *testing.T) {
@@ -95,7 +196,7 @@ func TestAuthorize(t *testing.T) {
 
 	t.Run("member passes with their role", func(t *testing.T) {
 		repo := fakeRepo{org: org, membership: Membership{Role: RoleMember}}
-		rec := authorizeWith(repo, nil, "user@example.com")
+		rec, _ := authorizeWith(repo, auth.PlatformAdmins{}, "user@example.com")
 		if rec.Code != http.StatusOK {
 			t.Fatalf("status = %d, want 200", rec.Code)
 		}
@@ -104,9 +205,29 @@ func TestAuthorize(t *testing.T) {
 		}
 	})
 
+	t.Run("the reviewer right reaches the handler", func(t *testing.T) {
+		tests := []struct {
+			name       string
+			membership Membership
+			want       string
+		}{
+			{"a member with it may review", Membership{Role: RoleMember, CanReview: true}, "true"},
+			{"a member without it may not", Membership{Role: RoleMember}, "false"},
+			{"an admin may without it", Membership{Role: RoleAdmin}, "true"},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				rec, _ := authorizeWith(fakeRepo{org: org, membership: tt.membership}, auth.PlatformAdmins{}, "user@example.com")
+				if got := rec.Header().Get("X-May-Review"); got != tt.want {
+					t.Errorf("may review = %q, want %q", got, tt.want)
+				}
+			})
+		}
+	})
+
 	t.Run("non-member forbidden", func(t *testing.T) {
 		repo := fakeRepo{org: org, membershipErr: ErrNotMember}
-		rec := authorizeWith(repo, nil, "user@example.com")
+		rec, _ := authorizeWith(repo, auth.PlatformAdmins{}, "user@example.com")
 		if rec.Code != http.StatusForbidden {
 			t.Fatalf("status = %d, want 403", rec.Code)
 		}
@@ -115,7 +236,7 @@ func TestAuthorize(t *testing.T) {
 	t.Run("platform admin bypasses membership as admin", func(t *testing.T) {
 		repo := fakeRepo{org: org, membershipErr: ErrNotMember}
 		admins := auth.NewPlatformAdmins([]string{"boss@example.com"})
-		rec := authorizeWith(repo, admins, "boss@example.com")
+		rec, _ := authorizeWith(repo, admins, "boss@example.com")
 		if rec.Code != http.StatusOK {
 			t.Fatalf("status = %d, want 200", rec.Code)
 		}
@@ -126,7 +247,7 @@ func TestAuthorize(t *testing.T) {
 
 	t.Run("unknown slug is 404", func(t *testing.T) {
 		repo := fakeRepo{getBySlugErr: ErrNotFound}
-		rec := authorizeWith(repo, nil, "user@example.com")
+		rec, _ := authorizeWith(repo, auth.PlatformAdmins{}, "user@example.com")
 		if rec.Code != http.StatusNotFound {
 			t.Fatalf("status = %d, want 404", rec.Code)
 		}
@@ -134,7 +255,40 @@ func TestAuthorize(t *testing.T) {
 
 	t.Run("store error is 500", func(t *testing.T) {
 		repo := fakeRepo{getBySlugErr: errors.New("boom")}
-		rec := authorizeWith(repo, nil, "user@example.com")
+		rec, _ := authorizeWith(repo, auth.PlatformAdmins{}, "user@example.com")
+		if rec.Code != http.StatusInternalServerError {
+			t.Fatalf("status = %d, want 500", rec.Code)
+		}
+	})
+
+	t.Run("the basis of authority reaches the handler", func(t *testing.T) {
+		repo := fakeRepo{
+			org:        org,
+			membership: Membership{Role: RoleAdmin},
+			authority:  Authority{LegalRepresentative: true, FullMandate: true, Mandated: true, Granted: 1},
+		}
+		rec, got := authorizeWith(repo, auth.PlatformAdmins{}, "boss@acme.example")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200", rec.Code)
+		}
+		want := Authority{LegalRepresentative: true, FullMandate: true, Mandated: true, Granted: 1}
+		if got != want {
+			t.Errorf("authority = %+v, want %+v", got, want)
+		}
+	})
+
+	t.Run("platform admin is marked in the authority", func(t *testing.T) {
+		repo := fakeRepo{org: org, membershipErr: ErrNotMember}
+		admins := auth.NewPlatformAdmins([]string{"boss@example.com"})
+		_, got := authorizeWith(repo, admins, "boss@example.com")
+		if !got.PlatformAdmin {
+			t.Error("PlatformAdmin = false, want true")
+		}
+	})
+
+	t.Run("an authority lookup failure is 500, never an open door", func(t *testing.T) {
+		repo := fakeRepo{org: org, membership: Membership{Role: RoleAdmin}, authorityErr: errors.New("boom")}
+		rec, _ := authorizeWith(repo, auth.PlatformAdmins{}, "user@example.com")
 		if rec.Code != http.StatusInternalServerError {
 			t.Fatalf("status = %d, want 500", rec.Code)
 		}
@@ -145,22 +299,132 @@ func TestRequireOrgAdmin(t *testing.T) {
 	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 
 	tests := []struct {
-		role string
-		want int
+		name      string
+		role      string
+		authority Authority
+		want      int
 	}{
-		{RoleAdmin, http.StatusOK},
-		{RoleMember, http.StatusForbidden},
-		{"", http.StatusForbidden},
+		{"admin passes", RoleAdmin, Authority{}, http.StatusOK},
+		{"member forbidden", RoleMember, Authority{}, http.StatusForbidden},
+		{"no role forbidden", "", Authority{}, http.StatusForbidden},
+		{
+			name:      "admin with an active mandate passes",
+			role:      RoleAdmin,
+			authority: Authority{Granted: 1, Mandated: true},
+			want:      http.StatusOK,
+		},
+		{
+			// The membership row still says admin; the mandate behind it is gone, and
+			// that has to be enough on its own (Annex §12(3)(b)).
+			name:      "admin whose mandate is withdrawn is forbidden",
+			role:      RoleAdmin,
+			authority: Authority{Granted: 1},
+			want:      http.StatusForbidden,
+		},
+		{
+			name:      "a platform admin is not withdrawn by the org's register",
+			role:      RoleAdmin,
+			authority: Authority{Granted: 1, PlatformAdmin: true},
+			want:      http.StatusOK,
+		},
+		{
+			// RequireMandateAuthority already lets them grant and revoke; refusing
+			// them the register they just wrote to would be the same authority
+			// answering two ways.
+			name:      "a legal representative is not withdrawn by the org's register",
+			role:      RoleAdmin,
+			authority: Authority{Granted: 1, LegalRepresentative: true},
+			want:      http.StatusOK,
+		},
 	}
 	for _, tt := range tests {
-		req := httptest.NewRequest(http.MethodGet, "/", nil)
-		req = req.WithContext(contextWithRole(req.Context(), tt.role))
-		rec := httptest.NewRecorder()
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			req = req.WithContext(contextWithAuthority(contextWithRole(req.Context(), tt.role), tt.authority))
+			rec := httptest.NewRecorder()
 
-		RequireOrgAdmin(next).ServeHTTP(rec, req)
+			RequireOrgAdmin(next).ServeHTTP(rec, req)
 
-		if rec.Code != tt.want {
-			t.Errorf("role %q: status = %d, want %d", tt.role, rec.Code, tt.want)
-		}
+			if rec.Code != tt.want {
+				t.Errorf("status = %d, want %d", rec.Code, tt.want)
+			}
+		})
 	}
+}
+
+func TestRequireReviewer(t *testing.T) {
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+
+	tests := []struct {
+		name      string
+		role      string
+		right     ReviewRight
+		authority Authority
+		want      int
+	}{
+		{"member with the right passes", RoleMember, ReviewRightGranted, Authority{}, http.StatusOK},
+		{"member without the right is forbidden", RoleMember, ReviewRightNone, Authority{}, http.StatusForbidden},
+		{"no role and no right is forbidden", "", "", Authority{}, http.StatusForbidden},
+		{"admin passes without the right", RoleAdmin, ReviewRightNone, Authority{}, http.StatusOK},
+		{
+			// The right is a member's: an admin stays an admin, and an admin whose
+			// mandate is gone is refused whatever the column says.
+			name:      "admin whose mandate is withdrawn is forbidden even with the right",
+			role:      RoleAdmin,
+			right:     ReviewRightGranted,
+			authority: Authority{Granted: 1},
+			want:      http.StatusForbidden,
+		},
+		{"admin with an active mandate passes", RoleAdmin, ReviewRightNone, Authority{Granted: 1, Mandated: true}, http.StatusOK},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			ctx := contextWithReviewRight(contextWithAuthority(contextWithRole(req.Context(), tt.role), tt.authority), tt.right)
+			rec := httptest.NewRecorder()
+
+			RequireReviewer(next).ServeHTTP(rec, req.WithContext(ctx))
+
+			if rec.Code != tt.want {
+				t.Errorf("status = %d, want %d", rec.Code, tt.want)
+			}
+		})
+	}
+}
+
+func TestRequireMandateAuthority(t *testing.T) {
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+
+	tests := []struct {
+		name      string
+		authority Authority
+		want      int
+	}{
+		{"legal representative passes", Authority{LegalRepresentative: true}, http.StatusOK},
+		{"full-mandate holder passes", Authority{FullMandate: true, Mandated: true, Granted: 1}, http.StatusOK},
+		{"administrative mandate is not enough", Authority{Mandated: true, Granted: 1}, http.StatusForbidden},
+		{"no basis of authority is forbidden", Authority{}, http.StatusForbidden},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/", nil)
+			// Deliberately an admin: no functional role reaches this gate.
+			req = req.WithContext(contextWithAuthority(contextWithRole(req.Context(), RoleAdmin), tt.authority))
+			rec := httptest.NewRecorder()
+
+			RequireMandateAuthority(next).ServeHTTP(rec, req)
+
+			if rec.Code != tt.want {
+				t.Errorf("status = %d, want %d", rec.Code, tt.want)
+			}
+		})
+	}
+}
+
+func (f fakeRepo) ScreeningMatchContext(context.Context, uuid.UUID, uuid.UUID) (ScreeningMatchContext, error) {
+	return ScreeningMatchContext{}, nil
+}
+
+func (f fakeRepo) MemberStatusSnapshots(context.Context, uuid.UUID) ([]MemberStatusSnapshot, error) {
+	return nil, nil
 }

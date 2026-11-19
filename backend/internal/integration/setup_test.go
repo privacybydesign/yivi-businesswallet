@@ -10,9 +10,12 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -22,19 +25,30 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/attestation"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/auth"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/crypto"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/devverifier"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/eudiholder"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/issuersettings"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/openid4vciissuer"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/openid4vppresenter"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/openid4vpverifier"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/presentation"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofing"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingprovider"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/server"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/session"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/testdb"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/themesettings"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/vog"
 )
 
 const sessionTTL = time.Hour
+
+// proofingTestEncryptionKey is a throwaway AES-256 key (hex 32 bytes) sealing the
+// test orgs' proofing request data and webhook secrets.
+const proofingTestEncryptionKey = "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c4b5a69788796a5b4c3d2e1f0"
 
 // disclosureToken is the client-facing presentation id used across these tests.
 // setup seeds a presentation_sessions row mapping it to a verifier transaction id
@@ -45,23 +59,76 @@ const disclosureToken = "test-token"
 // fakeVerifier stands in for the EUDI verifier: Result discloses the configured
 // email (and optionally name), so a /claim logs in as that user. The claim shape
 // mirrors the one proven against extractEmail in internal/auth/disclosure_test.go.
+// Claims are reported per credential (ByCredential) as the real client does,
+// and flattened - so a combined identity+VOG presentation reproduces the
+// dateOfBirth collision the per-credential view exists for.
 type fakeVerifier struct {
-	email      string
-	givenNames string
-	familyName string
+	email       string
+	givenNames  string
+	familyName  string
+	dateOfBirth string
+	// identityIssuedAt stands in for the identity credential's issuer `iat` —
+	// when the wallet obtained it — which the re-identification freshness check
+	// compares against the org's policy. Zero means "unknown", as it is for a
+	// presentation that carried no identity credential.
+	identityIssuedAt time.Time
+	// vog, when set, adds a pbdf.vog credential to every presentation.
+	vog *fakeVog
+	// results counts the presentations read.
+	results atomic.Int64
 }
 
-func (f *fakeVerifier) StartPresentation(_ context.Context, _ openid4vpverifier.Scope) (openid4vpverifier.Session, error) {
+// fakeVog is a disclosed pbdf.vog credential: the identity printed on it and
+// the aspect codes it covers (disclosed as aspectNN = "yes").
+type fakeVog struct {
+	givenNames  string
+	surname     string
+	dateOfBirth string
+	issueDate   string
+	aspects     []string
+}
+
+func (f *fakeVerifier) StartPresentation(_ context.Context, _ openid4vpverifier.Scope, _ ...string) (openid4vpverifier.Session, error) {
 	return openid4vpverifier.Session{TransactionID: "verifier-tx", WalletLink: "openid4vp://?request_uri=https%3A%2F%2Fverifier.test"}, nil
 }
 
+func (f *fakeVerifier) StartProofing(ctx context.Context, _ openid4vpverifier.ProofingRequest) (openid4vpverifier.Session, error) {
+	return f.StartPresentation(ctx, openid4vpverifier.ScopeProofing)
+}
+
 func (f *fakeVerifier) Result(_ context.Context, _ string) (openid4vpverifier.Presentation, error) {
-	claims := map[string]string{openid4vpverifier.ClaimEmail: f.email}
-	if f.givenNames != "" || f.familyName != "" {
-		claims[openid4vpverifier.ClaimGivenNames] = f.givenNames
-		claims[openid4vpverifier.ClaimFamilyName] = f.familyName
+	f.results.Add(1)
+	byCredential := map[string]map[string]string{
+		"email": {openid4vpverifier.ClaimEmail: f.email},
 	}
-	return openid4vpverifier.Presentation{Claims: claims}, nil
+	if f.givenNames != "" || f.familyName != "" || f.dateOfBirth != "" {
+		passport := map[string]string{}
+		if f.givenNames != "" || f.familyName != "" {
+			passport[openid4vpverifier.ClaimGivenNames] = f.givenNames
+			passport[openid4vpverifier.ClaimFamilyName] = f.familyName
+		}
+		if f.dateOfBirth != "" {
+			passport[openid4vpverifier.ClaimDateOfBirth] = f.dateOfBirth
+		}
+		byCredential["passport"] = passport
+	}
+	if f.vog != nil {
+		vogClaims := map[string]string{
+			openid4vpverifier.ClaimVogGivenNames:  f.vog.givenNames,
+			openid4vpverifier.ClaimVogSurname:     f.vog.surname,
+			openid4vpverifier.ClaimVogDateOfBirth: f.vog.dateOfBirth,
+			openid4vpverifier.ClaimVogIssueDate:   f.vog.issueDate,
+		}
+		for _, code := range f.vog.aspects {
+			vogClaims[openid4vpverifier.VogAspectClaim(code)] = "yes"
+		}
+		byCredential["vog"] = vogClaims
+	}
+	claims := map[string]string{}
+	for _, c := range byCredential {
+		maps.Copy(claims, c)
+	}
+	return openid4vpverifier.Presentation{Claims: claims, ByCredential: byCredential, IdentityIssuedAt: f.identityIssuedAt}, nil
 }
 
 func (f *fakeVerifier) Status(_ context.Context, _ string) (string, error) {
@@ -82,6 +149,10 @@ func (stubQerdsNotifier) SendCredentialOffer(_ context.Context, _ uuid.UUID, _, 
 	return nil
 }
 
+func (stubQerdsNotifier) SendOfferDeclined(_ context.Context, _ uuid.UUID, _, _, _ string) error {
+	return nil
+}
+
 type meBody struct {
 	ID              uuid.UUID `json:"id"`
 	Email           string    `json:"email"`
@@ -94,12 +165,45 @@ type testEnv struct {
 	client *http.Client
 	pool   *pgxpool.Pool
 	fake   *fakeVerifier
+	// verifier is the relying-party identity the router's inbound OpenID4VP
+	// validator trusts; the fake inbound verifier signs its request objects with it.
+	verifier devverifier.Identity
+	// proofing stands in for the proofing engine: a test sets its Outcome,
+	// before creating a session, to have the subject finish it.
+	proofing *proofingprovider.Stub
+	// proofingService and webhooks are what cmd/api hands the webhook
+	// deliverer, for a test that sends the outbox.
+	proofingService *proofing.Service
+	webhooks        *proofing.WebhookStore
 }
+
+// presenterMode picks which posture newTestEnv wires the inbound OpenID4VP
+// presenter under: presenterAutoPresent matches the dev/CI posture every
+// existing test here relies on (org selection completes the presentation at
+// once); presenterManualApproval leaves a selected transaction at org_selected
+// for the governance layer (#113), for tests of the admin approval queue.
+type presenterMode int
+
+const (
+	presenterAutoPresent presenterMode = iota
+	presenterManualApproval
+)
 
 // setup assembles the real router exactly as cmd/api does (minus the IRMA boot
 // probe and the pruner) and returns an env with a cookie-jar HTTP client so the
 // session cookie set by /claim is replayed automatically.
 func setup(t *testing.T, platformAdmins ...string) *testEnv {
+	return newTestEnv(t, presenterAutoPresent, platformAdmins...)
+}
+
+// setupManualApproval is setup with the inbound OpenID4VP presenter left
+// waiting for an admin's decision instead of auto-presenting, for the
+// governance layer's approval-queue tests.
+func setupManualApproval(t *testing.T) *testEnv {
+	return newTestEnv(t, presenterManualApproval)
+}
+
+func newTestEnv(t *testing.T, mode presenterMode, platformAdmins ...string) *testEnv {
 	t.Helper()
 	pool, _ := testdb.Fresh(t)
 
@@ -120,19 +224,77 @@ func setup(t *testing.T, platformAdmins ...string) *testEnv {
 	requireUser := auth.RequireUser(sessionStore)
 	orgService := organization.NewService(userStore, orgStore, authService)
 	sessionIssuer := auth.NewSessionIssuer(sessionStore, cookieCfg)
+	screeningService := organization.NewScreeningService(orgStore, vog.StubValidator{Code: vog.ResponseAuthentic}, vogParser(t), authService, orgService, nil)
 	// nil mailer: invitation e-mail delivery is best-effort and not exercised here.
-	orgHandler := organization.NewHandler(orgStore, orgService, audit.NewReader(pool), sessionIssuer, nil, "", requireUser, admins)
+	// nil defaultAddress: this router does not wire QERDS, so /orgs/{slug} falls
+	// back to the organization row's snapshot address.
+	orgHandler := organization.NewHandler(orgStore, orgService, screeningService, audit.NewReader(pool), sessionIssuer, nil, "", requireUser, admins, nil)
 
 	attestationStore := attestation.NewStore(pool, audit.NewDBRecorder())
 	issuerSettingsStore := issuersettings.NewStore(pool, audit.NewDBRecorder())
 	attestationService := attestation.NewService(
 		attestationStore, openid4vciissuer.NewStubIssuer(), issuerSettingsStore,
-		stubEmailNotifier{}, stubQerdsNotifier{}, attestationStore, eudiholder.NewStubHolder(), "http://app.test",
+		stubEmailNotifier{}, stubQerdsNotifier{}, attestationStore, attestationStore, eudiholder.NewStubHolder(), "http://app.test",
 	)
 	orgService.SetOnboardingIssuer(attestation.NewOnboardingIssuer(attestationStore, attestationService))
-	attestationHandler := attestation.NewHandler(attestationStore, attestationStore, attestationStore, attestationStore, attestationService, issuerSettingsStore, attestationStore, "", requireUser, orgHandler.Authorize)
+	attestationHandler := attestation.NewHandler(attestationStore, attestationService, issuerSettingsStore, orgStore, "", requireUser, orgHandler.Authorize)
 
-	srv := httptest.NewServer(server.New(pool, "", authHandler, orgHandler, attestationHandler))
+	// Inbound OpenID4VP under the dev posture the Compose stack runs with: plain
+	// http to the in-process fake verifier, request objects signed by a relying
+	// party whose freshly minted root this router trusts (the production
+	// validator, not the structural decoder). Under presenterAutoPresent the
+	// stub holder's canned vp_token is delivered right after organization
+	// selection; under presenterManualApproval the transaction instead waits at
+	// org_selected for the approval queue.
+	verifierIdentity, err := devverifier.NewIdentity("verifier.test")
+	if err != nil {
+		t.Fatalf("verifier identity: %v", err)
+	}
+	verifierTrust, err := eudiholder.NewVerifierTrust(verifierIdentity.RootPEM(), false)
+	if err != nil {
+		t.Fatalf("verifier trust: %v", err)
+	}
+	presenterPolicy := openid4vppresenter.Policy{AllowInsecureHTTP: true}
+	presenterValidator := openid4vppresenter.NewVerifyingValidator(verifierTrust, presenterPolicy)
+	presenterStore := openid4vppresenter.NewStore(pool, audit.NewDBRecorder(), sessionTTL, sessionTTL)
+	presenterService := openid4vppresenter.NewService(
+		presenterStore, orgStore, eudiholder.NewStubHolder(),
+		openid4vppresenter.NewFetcher(presenterPolicy), presenterValidator, openid4vppresenter.NewResponder(presenterPolicy),
+		mode == presenterAutoPresent,
+	)
+	presenterMetadata, err := openid4vppresenter.NewMetadataHandler(
+		openid4vppresenter.NewMetadata("http://app.test", eudiholder.Formats(), presenterValidator))
+	if err != nil {
+		t.Fatalf("wallet metadata: %v", err)
+	}
+	presenterHandler := openid4vppresenter.NewHandler(presenterService, presenterMetadata, requireUser, orgHandler.Authorize)
+
+	// Identity proofing against the in-process provider stub; nil mailer, like the org
+	// handler's (request e-mail delivery is best-effort and not exercised here).
+	proofingCipher, err := crypto.NewCipher(proofingTestEncryptionKey)
+	if err != nil {
+		t.Fatalf("proofing cipher: %v", err)
+	}
+	proofingStub := proofingprovider.NewStub()
+	proofingRecorder := audit.NewDBRecorder()
+	proofingRequests := proofing.NewRequestStore(pool, proofingRecorder, proofingCipher)
+	proofingWebhooks := proofing.NewWebhookStore(pool, proofingRecorder, proofingCipher)
+	proofingService := proofing.NewService(proofing.NewStores(pool, proofingRecorder, proofingCipher,
+		proofingRequests,
+		proofingWebhooks,
+	), proofingStub, fake, nil)
+	proofingService.SetHostedBaseURL("http://wallet.test/p/")
+	proofingService.SetReviewBaseURL("http://wallet.test/r/")
+	proofingHandler := proofing.NewHandler(proofingService, requireUser, orgHandler.Authorize)
+	proofingHandler.SetPlatformAdmins(admins)
+	proofingHandler.SetIdempotencyStore(proofing.NewIdempotencyStore(pool, proofingCipher))
+	// The hosted page takes its theme and logo from the Idem app's branding, as
+	// cmd/api wires it.
+	proofingHandler.SetAppBranding(proofing.NewAppBrandingResolver(proofingRequests,
+		proofing.NewOrgSettingsStore(pool, proofingRecorder), proofing.NewFlowBrandingStore(pool, proofingRecorder),
+		themesettings.NewStore(pool, proofingRecorder)))
+
+	srv := httptest.NewServer(server.New(pool, "", authHandler, orgHandler, attestationHandler, presenterHandler, proofingHandler))
 	t.Cleanup(srv.Close)
 
 	jar, err := cookiejar.New(nil)
@@ -141,11 +303,16 @@ func setup(t *testing.T, platformAdmins ...string) *testEnv {
 	}
 
 	return &testEnv{
-		t:      t,
-		server: srv,
-		client: &http.Client{Jar: jar},
-		pool:   pool,
-		fake:   fake,
+		t:        t,
+		server:   srv,
+		client:   &http.Client{Jar: jar},
+		pool:     pool,
+		fake:     fake,
+		verifier: verifierIdentity,
+		proofing: proofingStub,
+
+		proofingService: proofingService,
+		webhooks:        proofingWebhooks,
 	}
 }
 
@@ -220,7 +387,7 @@ func (e *testEnv) createOrg(name, slug string) uuid.UUID {
 	err := e.pool.QueryRow(context.Background(),
 		`INSERT INTO organizations (name, slug, kvk_number, euid, digital_address)
 		 VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-		name, slug, "kvk-"+slug, "NL.KVK."+slug, slug+"@qerds.localhost",
+		name, slug, "kvk-"+slug, "NLNHR."+slug, slug+"@qerds.localhost",
 	).Scan(&id)
 	if err != nil {
 		e.t.Fatalf("create org %q: %v", slug, err)
@@ -254,4 +421,25 @@ func (e *testEnv) addMembership(userID, orgID uuid.UUID, role string) {
 	if err != nil {
 		e.t.Fatalf("add membership: %v", err)
 	}
+}
+
+// pdfiumOnce builds the one PDFium WebAssembly pool the integration binary
+// shares: compiling the module takes seconds, and every test's server assembly
+// asks for a parser. It is created lazily, after setup's TEST_DATABASE_URL
+// skip, so a run without a database never pays for it.
+var (
+	pdfiumOnce   sync.Once
+	pdfiumParser *vog.PDFiumParser
+	pdfiumErr    error
+)
+
+func vogParser(t *testing.T) *vog.PDFiumParser {
+	t.Helper()
+	pdfiumOnce.Do(func() {
+		pdfiumParser, pdfiumErr = vog.NewPDFiumParser()
+	})
+	if pdfiumErr != nil {
+		t.Fatalf("pdfium parser: %v", pdfiumErr)
+	}
+	return pdfiumParser
 }

@@ -1,0 +1,191 @@
+package relyingparty
+
+import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
+	"time"
+
+	"github.com/golang-jwt/jwt/v5"
+	"github.com/lestrrat-go/jwx/v3/jwa"
+	"github.com/lestrrat-go/jwx/v3/jwk"
+	"github.com/privacybydesign/irmago/eudi/openid4vp"
+)
+
+const (
+	// requestObjectTyp is the JAR media type in the JWS header (RFC 9101).
+	requestObjectTyp = "oauth-authz-req+jwt"
+	// selfIssuedAudience is the audience OpenID4VP requests carry when the wallet
+	// has no own identifier (OpenID4VP 1.0 §5.1); the hosted Yivi verifier sends it.
+	selfIssuedAudience = "https://self-issued.me/v2"
+	// defaultRequestLifetime is a Request Object's validity when Request.Lifetime
+	// is zero: a browser-driven request is fetched within seconds.
+	defaultRequestLifetime = 5 * time.Minute
+	nonceBytes             = 16
+	// contentEncryption is the JWE content encryption the dev verifier accepts
+	// for direct_post.jwt (the OpenID4VP default).
+	contentEncryption = "A128GCM"
+)
+
+// Request is what a verifier decides for one Authorization Request.
+type Request struct {
+	Nonce        string
+	State        string
+	ResponseURI  string
+	ResponseMode string
+	DCQLQuery    json.RawMessage
+	// EncryptionKey, when set, is published in client_metadata.jwks so a
+	// direct_post.jwt response can be encrypted to it.
+	EncryptionKey *ecdsa.PublicKey
+	// ClientName is shown by the wallet as the verifier's name when the
+	// certificate carries no Yivi requestor data.
+	ClientName string
+	// Lifetime bounds the Request Object's exp; zero means
+	// defaultRequestLifetime. A request delivered over QERDS is fetched when the
+	// receiving wallet polls, not when a browser follows a link, so it needs longer.
+	Lifetime time.Duration
+}
+
+// RandomToken returns a fresh URL-safe random string for a nonce or state.
+func RandomToken() (string, error) {
+	b := make([]byte, nonceBytes)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(b), nil
+}
+
+// NewEncryptionKey mints the ephemeral P-256 key a direct_post.jwt response is
+// encrypted to.
+func NewEncryptionKey() (*ecdsa.PrivateKey, error) {
+	return ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+}
+
+// CredentialQuery is one credential a DCQL query asks for: an SD-JWT VC of
+// type VCT, disclosing the given top-level claims.
+type CredentialQuery struct {
+	ID     string
+	VCT    string
+	Claims []string
+}
+
+// SimpleDCQL builds a single-credential DCQL query for vct asking for the given
+// top-level claims. See BuildDCQL.
+func SimpleDCQL(queryID, vct string, claims []string) (json.RawMessage, error) {
+	return BuildDCQL([]CredentialQuery{{ID: queryID, VCT: vct, Claims: claims}})
+}
+
+// BuildDCQL builds a DCQL query requiring every credential in queries. A query
+// with no claims omits the "claims" member, which per OpenID4VP 1.0 §6.4.1
+// requests no selectively disclosable claims at all: the wallet then presents
+// only the credential's signed envelope and key binding.
+func BuildDCQL(queries []CredentialQuery) (json.RawMessage, error) {
+	creds := make([]any, 0, len(queries))
+	for _, q := range queries {
+		cred := map[string]any{
+			"id":     q.ID,
+			"format": "dc+sd-jwt",
+			"meta":   map[string]any{"vct_values": []string{q.VCT}},
+		}
+		if len(q.Claims) > 0 {
+			paths := make([]map[string]any, 0, len(q.Claims))
+			for _, c := range q.Claims {
+				paths = append(paths, map[string]any{"path": []string{c}})
+			}
+			cred["claims"] = paths
+		}
+		creds = append(creds, cred)
+	}
+	return json.Marshal(map[string]any{"credentials": creds})
+}
+
+// SignRequestObject signs the Authorization Request as a JAR with id's key, the
+// chain in x5c and id's client_id — the exact shape the hosted Yivi verifier
+// emits and irmago's relying-party validation verifies.
+func SignRequestObject(id Signer, req Request) (string, error) {
+	var dcql any
+	if err := json.Unmarshal(req.DCQLQuery, &dcql); err != nil {
+		return "", fmt.Errorf("relyingparty: dcql_query: %w", err)
+	}
+	lifetime := req.Lifetime
+	if lifetime == 0 {
+		lifetime = defaultRequestLifetime
+	}
+	now := time.Now()
+	claims := jwt.MapClaims{
+		"aud":           selfIssuedAudience,
+		"iat":           now.Unix(),
+		"exp":           now.Add(lifetime).Unix(),
+		"client_id":     id.ClientID,
+		"response_type": string(openid4vp.ResponseType_VpToken),
+		"response_mode": req.ResponseMode,
+		"response_uri":  req.ResponseURI,
+		"nonce":         req.Nonce,
+		"state":         req.State,
+		"dcql_query":    dcql,
+	}
+	metadata := map[string]any{
+		"vp_formats_supported": map[string]any{
+			"dc+sd-jwt": map[string]any{"sd-jwt_alg_values": []string{"ES256"}, "kb-jwt_alg_values": []string{"ES256"}},
+		},
+	}
+	if req.ClientName != "" {
+		metadata["client_name"] = req.ClientName
+	}
+	if req.EncryptionKey != nil {
+		set, err := encryptionJWKS(req.EncryptionKey)
+		if err != nil {
+			return "", err
+		}
+		metadata["jwks"] = set
+		metadata["encrypted_response_enc_values_supported"] = []string{contentEncryption}
+	}
+	claims["client_metadata"] = metadata
+
+	token := jwt.NewWithClaims(jwt.SigningMethodES256, claims)
+	token.Header["typ"] = requestObjectTyp
+	token.Header["x5c"] = id.x5c()
+	signed, err := token.SignedString(id.Key)
+	if err != nil {
+		return "", fmt.Errorf("relyingparty: sign request object: %w", err)
+	}
+	return signed, nil
+}
+
+// encryptionJWKS publishes pub as a JWK Set entry with the algorithm and use a
+// wallet needs to pick it: ECDH-ES key agreement, enc.
+func encryptionJWKS(pub *ecdsa.PublicKey) (any, error) {
+	key, err := jwk.Import(pub)
+	if err != nil {
+		return nil, err
+	}
+	thumb, err := key.Thumbprint(cryptoSHA256)
+	if err != nil {
+		return nil, err
+	}
+	for k, v := range map[string]any{
+		jwk.KeyIDKey:     base64.RawURLEncoding.EncodeToString(thumb),
+		jwk.AlgorithmKey: jwa.ECDH_ES(),
+		jwk.KeyUsageKey:  jwk.ForEncryption,
+	} {
+		if err := key.Set(k, v); err != nil {
+			return nil, err
+		}
+	}
+	set := jwk.NewSet()
+	if err := set.AddKey(key); err != nil {
+		return nil, err
+	}
+	raw, err := json.Marshal(set)
+	if err != nil {
+		return nil, err
+	}
+	var out any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}

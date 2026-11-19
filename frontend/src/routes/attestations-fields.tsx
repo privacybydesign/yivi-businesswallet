@@ -8,13 +8,13 @@ export function Field({
   required,
   error,
   children,
-}: {
+}: Readonly<{
   id: string;
   label: string;
   required?: boolean;
   error?: string;
   children: ReactNode;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const errorId = `${id}-error`;
   // Link the control to its error message so a screen reader announces it when
   // the field is focused again later (role="alert" only fires on first render).

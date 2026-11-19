@@ -434,6 +434,10 @@ type retrieveResponse struct {
 // from the message's own finalRecipient property; fallbackRecipient (the address
 // that was polled) is used only when the property is absent, so a message is
 // never misattributed to the poller.
+//
+// The ebMS3 From PartyId is kept separately in FromParty even though it also
+// seeds Sender: originalSender overwrites Sender, and a trust decision needs the
+// party Domibus actually authenticated, not the property the sender wrote.
 func (r retrieveResponse) toInbound(messageID string, fallbackRecipient Address) InboundMessage {
 	sender := r.FromParty
 	recipient := fallbackRecipient
@@ -456,6 +460,7 @@ func (r retrieveResponse) toInbound(messageID string, fallbackRecipient Address)
 	}
 	return InboundMessage{
 		ProviderRef: messageID,
+		FromParty:   r.FromParty,
 		Sender:      Address(sender),
 		Recipient:   recipient,
 		Subject:     subject,

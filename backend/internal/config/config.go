@@ -2,24 +2,79 @@ package config
 
 import (
 	"fmt"
+	"net"
 	"net/url"
 	"os"
+	"slices"
+	"strconv"
 	"strings"
 	"time"
+
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/clientip"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/idscan"
 )
 
 const (
 	envDatabaseURL = "DATABASE_URL"
-	envLogLevel    = "LOG_LEVEL"
-	envLogFormat   = "LOG_FORMAT"
-	envLogSource   = "LOG_SOURCE"
+	// How many connections the API's pool may open. Replicas times this, plus
+	// the lock pool and listeners, must stay under the server's max_connections.
+	envDatabaseMaxConns     = "DATABASE_MAX_CONNS"
+	defaultDatabaseMaxConns = "10"
+	// Connections kept apart for locks held across a whole operation, so their
+	// holders cannot starve the requests that do the work.
+	envDatabaseLockMaxConns     = "DATABASE_LOCK_MAX_CONNS"
+	defaultDatabaseLockMaxConns = "5"
+	// Longest a single statement may run before Postgres cancels it; 0 is no limit.
+	envDatabaseStatementTimeout     = "DATABASE_STATEMENT_TIMEOUT"
+	defaultDatabaseStatementTimeout = "30s"
+	envLogLevel                     = "LOG_LEVEL"
+	envLogFormat                    = "LOG_FORMAT"
+	envLogSource                    = "LOG_SOURCE"
 
-	envEudiVerifierURL     = "EUDI_VERIFIER_URL"
-	envEudiIssuerChain     = "EUDI_ISSUER_CHAIN"
-	envSessionCookieSecure = "SESSION_COOKIE_SECURE"
-	envSessionTTL          = "SESSION_TTL"
-	envSessionPruneEvery   = "SESSION_PRUNE_INTERVAL"
-	envPresentationTTL     = "PRESENTATION_SESSION_TTL"
+	envEudiVerifierURL             = "EUDI_VERIFIER_URL"
+	envEudiIssuerChain             = "EUDI_ISSUER_CHAIN"
+	envEudiIntendedUseID           = "EUDI_INTENDED_USE_ID"
+	envEudiRegistrationCertificate = "EUDI_REGISTRATION_CERTIFICATE"
+	envEudiCredentialScheme        = "EUDI_CREDENTIAL_SCHEME"
+	envSessionCookieSecure         = "SESSION_COOKIE_SECURE"
+	envSessionTTL                  = "SESSION_TTL"
+	envSessionPruneEvery           = "SESSION_PRUNE_INTERVAL"
+	envPresentationTTL             = "PRESENTATION_SESSION_TTL"
+
+	// Inbound OpenID4VP (the business wallet as holder/presenter toward an
+	// external verifier, #188). The transaction TTL bounds the interactive
+	// login → org-picker → present flow; the three flags are dev-only escape
+	// hatches that default closed. See .ai/features/openid4vp-inbound.md.
+	envOpenID4VPTransactionTTL                   = "OPENID4VP_TRANSACTION_TTL"
+	envOpenID4VPPresenterAllowInsecureHTTP       = "OPENID4VP_PRESENTER_ALLOW_INSECURE_HTTP"
+	envOpenID4VPPresenterAllowUnverifiedRequests = "OPENID4VP_PRESENTER_ALLOW_UNVERIFIED_REQUEST_OBJECTS"
+	envOpenID4VPPresenterAutoPresent             = "OPENID4VP_PRESENTER_AUTO_PRESENT"
+	// Extra relying-party CA PEM a signed Authorization Request may chain to,
+	// added to irmago's pinned Yivi verifier anchors (the verifier analogue of
+	// ATTESTATION_HOLDER_TRUST_CHAIN; the value is the PEM, not a path).
+	envOpenID4VPVerifierTrustChain = "OPENID4VP_VERIFIER_TRUST_CHAIN"
+	// Org-to-org presentation requests over QERDS (#271): how long one stays
+	// open on either side, the CA that certifies each requesting organization
+	// (PEM content; unset mints an ephemeral one at boot), and the base URL
+	// another wallet reaches this backend's request_uri/response_uri on. See
+	// .ai/features/oid4vp-over-qerds.md.
+	envOpenID4VPOrgRequestTTL   = "OPENID4VP_ORG_REQUEST_TTL"
+	envOpenID4VPRequesterCACert = "OPENID4VP_REQUESTER_CA_CERT"
+	envOpenID4VPRequesterCAKey  = "OPENID4VP_REQUESTER_CA_KEY"
+
+	// Business Wallet Provider (WE BUILD CS-05): the certificate chain (leaf
+	// first) and key the wallet unit attestations and their status lists are
+	// signed with, what the provider states about the wallet solution, and the
+	// HSM certification an SKA needs. See .ai/features/wallet-unit-attestation.md.
+	envWalletUnitProviderCert        = "WALLET_UNIT_PROVIDER_CERT"
+	envWalletUnitProviderKey         = "WALLET_UNIT_PROVIDER_KEY"
+	envWalletUnitVersion             = "WALLET_UNIT_VERSION"
+	envWalletUnitAttester            = "WALLET_UNIT_ATTESTER"
+	envWalletUnitCertificationInfo   = "WALLET_UNIT_CERTIFICATION_INFO"
+	envWalletUnitSKACertificationURL = "WALLET_UNIT_SKA_CERTIFICATION_URL"
+	envWalletUnitSKAKeyStorage       = "WALLET_UNIT_SKA_KEY_STORAGE"
+	envWalletUnitSKAUserAuth         = "WALLET_UNIT_SKA_USER_AUTHENTICATION"
+	envOpenID4VPRequesterPublicURL   = "OPENID4VP_REQUESTER_PUBLIC_URL"
 
 	envPlatformAdminEmails = "PLATFORM_ADMIN_EMAILS"
 
@@ -28,8 +83,97 @@ const (
 	envQerdsAuthToken            = "QERDS_AUTH_TOKEN"
 	envQerdsWebhookSecret        = "QERDS_WEBHOOK_SECRET"
 	envQerdsDefaultAddressDomain = "QERDS_DEFAULT_ADDRESS_DOMAIN"
+	// QerdsInboundPollInterval drives the background inbound poller. Zero
+	// disables it, which Load accepts only when the webhook secret keeps push
+	// delivery available — otherwise inbound would arrive solely when an org
+	// console polls, the silent no-delivery state of issue #105.
+	envQerdsInboundPollInterval = "QERDS_INBOUND_POLL_INTERVAL"
+	// QerdsTrustedOfferSenders allowlists which QERDS senders may have their
+	// credential offers queued for an org admin to accept. Empty trusts every sender.
+	envQerdsTrustedOfferSenders = "QERDS_TRUSTED_OFFER_SENDERS"
+	// QerdsTrustedOfferParties allowlists which AS4 parties may deliver an
+	// acceptable credential offer. Empty trusts every party the PMode admits.
+	envQerdsTrustedOfferParties = "QERDS_TRUSTED_OFFER_PARTIES"
 
 	envWalletRegistryProvider = "WALLET_REGISTRY_PROVIDER"
+
+	// VOG screening (#242): validatie.nl real-time document check. The URL
+	// defaults to the production GAAV endpoint - there is no staging instance to
+	// point at instead.
+	envVogValidatorProvider = "VOG_VALIDATOR_PROVIDER"
+	envVogValidatorURL      = "VOG_VALIDATOR_URL"
+	// VogReferenceHashKey keys the HMAC that turns a VOG's kenmerk into a
+	// reuse-detection hash before it is stored (#242's data-minimisation design).
+	// Optional: empty means a screening record is written with no reference hash
+	// at all, never an unkeyed one.
+	envVogReferenceHashKey = "VOG_REFERENCE_HASH_KEY"
+
+	// Diploma extracts (identity proofing): DUO's PAdES signature on an
+	// uploaded extract is checked against the EU Trusted Lists (or the
+	// embedded PKIoverheid and certSIGN roots), with the lists cached in
+	// DIPLOMA_TRUST_CACHE_DIR when set.
+	envDiplomaValidatorProvider = "DIPLOMA_VALIDATOR_PROVIDER"
+	envDiplomaTrustSource       = "DIPLOMA_TRUST_SOURCE"
+	envDiplomaTrustCacheDir     = "DIPLOMA_TRUST_CACHE_DIR"
+	// envDiplomaOCSP ("false" turns it off) checks the signer chain's
+	// revocation online; off, only the revocation information embedded in the
+	// extract counts. Either way an unchecked certificate fails.
+	envDiplomaOCSP = "DIPLOMA_OCSP"
+	// A UWV Verzekeringsbericht (identity proofing): UWV's seal on an uploaded
+	// statement is checked against the diploma trust anchors, its revocation
+	// always online (the statement embeds none).
+	envEmploymentValidatorProvider = "EMPLOYMENT_VALIDATOR_PROVIDER"
+
+	// Identity proofing: the wallet's own proofing engine
+	// (internal/proofingengine) runs document + face verification for an org.
+	// Sessions, their evidence and the webhook secrets are sealed under
+	// IDENTITY_PROOFING_ENCRYPTION_KEY; without it nothing can be sent.
+	envIdentityProofingProvider      = "IDENTITY_PROOFING_PROVIDER"
+	envIdentityProofingEncryptionKey = "IDENTITY_PROOFING_ENCRYPTION_KEY"
+	// envIdentityProofingPublicURL is the origin the Idem app reaches the
+	// engine's /api/v1/app routes at (the api= of every vcmrtd deep link);
+	// defaults to APP_BASE_URL. Set it when the phone reaches the backend by
+	// another address (e.g. the LAN IP in development).
+	envIdentityProofingPublicURL = "IDENTITY_PROOFING_PUBLIC_URL"
+	// envIdentityProofingAppLinkURL is the https App Link / Universal Link a
+	// claim opens the Idem app with (https://idem.yivi.app/verify), carrying the
+	// same handover= and api= as the vcmrtd://verify link it replaces. Empty
+	// keeps vcmrtd://verify, which mail clients and in-app browsers often do not
+	// open; set it once the app version that handles the https link is out.
+	envIdentityProofingAppLinkURL = "IDENTITY_PROOFING_APP_LINK_URL"
+	// envAddressLookupURL is PDOK's Locatieserver, where the address step
+	// checks a Dutch address against the BAG and suggests addresses from it.
+	envAddressLookupURL = "ADDRESS_LOOKUP_URL"
+	// The Regula Face API: the native face step's liveness and match (the Yivi
+	// method runs no face check). REGULA_FACE_API_URL is what the backend calls,
+	// REGULA_FACE_API_PUBLIC_URL what the app runs liveness against (defaults
+	// to the former). Unset leaves face verification unavailable.
+	envRegulaFaceAPIURL         = "REGULA_FACE_API_URL"
+	envRegulaFaceAPIPublicURL   = "REGULA_FACE_API_PUBLIC_URL"
+	envRegulaFaceMatchThreshold = "REGULA_FACE_MATCH_THRESHOLD"
+	// CM.com's ID Scan: the document_photo step, taken in the browser on the
+	// on-screen and hosted pages. The key id and secret go together; unset
+	// leaves a flow with document_photo unsendable. ID_SCAN_API_URL defaults
+	// to CM.com's API.
+	envIDScanKeyID  = "ID_SCAN_KEY_ID"
+	envIDScanSecret = "ID_SCAN_SECRET"
+	envIDScanAPIURL = "ID_SCAN_API_URL"
+	// envIdentityProofingEDLCSCAPaths is a comma-separated list of the RDW's
+	// eDL CSCA certificate files (PEM or DER), mounted from the ops repo.
+	// Unset trusts no driving licence chip.
+	envIdentityProofingEDLCSCAPaths = "IDENTITY_PROOFING_EDL_CSCA_PATHS"
+	// envIdentityProofingStubOutcome makes every stub session decide (approved,
+	// rejected or needs_review), so dev can see outcomes and their webhooks.
+	envIdentityProofingStubOutcome = "IDENTITY_PROOFING_STUB_OUTCOME"
+	// envDevMode ("true") marks a local developer stack: only then may the
+	// stub identity proofing provider, its scripted outcome and the stub
+	// diploma validator run, the phone-facing proofing URLs use plain http to
+	// another host (a phone on the LAN),
+	// and the first Yivi login by an unknown address become its admin. It
+	// refuses to start unless APP_BASE_URL is set, to a localhost URL: set,
+	// because its default is localhost, so a deployment that left it out and
+	// picked up DEV_MODE would otherwise pass.
+	envDevMode = "DEV_MODE"
 
 	// Attestation issuance (OpenID4VCI). The hosted Veramo issuer is addressed per
 	// instance and authenticated with a Bearer admin token; the ping credential is
@@ -38,6 +182,9 @@ const (
 	envAttestationIssuerURL      = "ATTESTATION_ISSUER_URL"
 	envAttestationIssuerToken    = "ATTESTATION_ISSUER_ADMIN_TOKEN"
 	envAttestationIssuerInstance = "ATTESTATION_ISSUER_INSTANCE"
+	// envAttestationStubClaimDelay keeps a stub offer pending that long, so its
+	// QR stays on screen for a recording; zero claims at once.
+	envAttestationStubClaimDelay = "ATTESTATION_STUB_CLAIM_DELAY"
 	envAttestationPingCredential = "ATTESTATION_ISSUER_PING_CREDENTIAL"
 
 	// Attestation holder (the "store, select" side). The irmago EUDI holder engine
@@ -89,11 +236,13 @@ const (
 	// rotated by different decisions, and one key per purpose keeps a rotation from
 	// taking out a capability nobody meant to touch.
 	envProvisioningEncryptionKey = "PROVISIONING_ENCRYPTION_KEY"
-	// CSC_ENCRYPTION_KEY (hex 32 bytes) encrypts the per-org CSC signing-provider
-	// client secret at rest. Its own key rather than sharing another: the two are
-	// rotated by different decisions, and one key per purpose keeps a rotation from
-	// taking out a capability nobody meant to touch. Without it an org cannot store
-	// a CSC client secret (internal/csc).
+	// CSC_ENCRYPTION_KEY (hex 32 bytes) seals what signing keeps at rest: the
+	// signing keys and certificate authority of the wallet's own signing service
+	// (internal/yivicsc), and the per-org client secret of any other CSC provider
+	// (internal/csc). Its own key rather than sharing another: the two are rotated
+	// by different decisions, and one key per purpose keeps a rotation from taking
+	// out a capability nobody meant to touch. Without it the wallet's own signing
+	// service is off and an org cannot store a CSC client secret.
 	envCSCEncryptionKey = "CSC_ENCRYPTION_KEY"
 	// SIGNING_OAUTH_ISSUER_INTERNAL overrides the OAuth issuer base the backend uses
 	// for its own server-side token exchange during the signing ceremony, when that
@@ -111,8 +260,18 @@ const (
 	// an SPA on "/". Unset in dev (Vite serves the frontend).
 	envStaticDir = "STATIC_DIR"
 
+	// envTrustedProxies lists the reverse proxies (CIDRs or addresses) whose
+	// X-Forwarded-For is believed; empty trusts none.
+	envTrustedProxies = "TRUSTED_PROXIES"
+
 	defaultAppBaseURL = "http://localhost:5173"
-	defaultMailLocale = "en"
+	// WalletUnitAttesterLocal attests wallet units with this deployment's own
+	// provider; ProviderStub selects the in-process stub (local dev / CI).
+	WalletUnitAttesterLocal = "local"
+
+	// defaultWalletUnitVersion is what a BWIA states when no release version is set.
+	defaultWalletUnitVersion = "unreleased"
+	defaultMailLocale        = "en"
 
 	// PostGuard: the internal sidecar that performs encrypt-and-upload, the shared
 	// secret the backend presents to it, and the deployment master key that wraps
@@ -154,12 +313,20 @@ const (
 	// The hosted EUDI reference Verifier Endpoint (Yivi staging). Overridable so a
 	// deployment can point at its own verifier.
 	defaultEudiVerifierURL     = "https://verifierapi.openid4vc.staging.yivi.app"
+	defaultEudiIntendedUseID   = "1"
 	defaultSessionCookieSecure = "false"
 	defaultSessionTTL          = "24h"
 	defaultSessionPruneEvery   = "1h"
 	// A login/disclosure flow (scan QR, present in the wallet, claim) completes in
 	// minutes; the presentation-session mapping only needs to outlive that window.
 	defaultPresentationTTL = "15m"
+	// Shorter than the outbound default: an inbound transaction spans an
+	// interactive multi-step flow (login, org picker) but must not outlive a
+	// plausible browser session, and the verifier's own request is short-lived.
+	defaultOpenID4VPTransactionTTL = "5m"
+	// An org-to-org request waits for an admin on the receiving side, who may
+	// not look for days; a week covers a weekend and a busy week.
+	defaultOpenID4VPOrgRequestTTL = "168h"
 
 	// ProviderStub selects the in-process StubProvider (local dev / CI).
 	ProviderStub = "stub"
@@ -171,7 +338,8 @@ const (
 	IssuerStub   = "stub"
 	IssuerVeramo = "veramo"
 
-	defaultAttestationIssuer = IssuerStub
+	defaultAttestationIssuer         = IssuerStub
+	defaultAttestationStubClaimDelay = "0s"
 
 	// HolderStub selects the in-process StubHolder (local dev / CI); HolderIrmago
 	// selects the irmago EUDI holder engine backed by Postgres.
@@ -182,9 +350,46 @@ const (
 
 	defaultQerdsProvider             = ProviderStub
 	defaultQerdsDefaultAddressDomain = "qerds.localhost"
+	// Frequent enough that a pre-authorized code has not expired by the time an
+	// offer is redeemed, cheap enough to leave on: one listPendingMessages call
+	// per provisioned address.
+	defaultQerdsInboundPollInterval = "30s"
 
 	// The wallet-bootstrap registry (KVK) provider. Reuses ProviderStub ("stub").
 	defaultWalletRegistryProvider = ProviderStub
+
+	// ProviderValidatieNL checks a VOG for real with validatie.nl, and is the
+	// default; ProviderStub accepts every VOG and runs only when set explicitly
+	// (the dev stack sets it, as for diplomas).
+	ProviderValidatieNL         = "validatie_nl"
+	defaultVogValidatorProvider = ProviderValidatieNL
+	defaultVogValidatorURL      = "https://validatie.nl/api/valideer/"
+
+	// ProviderDUO checks a diploma extract's DUO signature for real, and is the
+	// default, as in go-diploma-issuer; ProviderStub accepts every extract's
+	// signature and runs only when set explicitly (the dev stack sets it:
+	// nobody holds a DUO-signed extract of a test person). DiplomaTrustEUTL and
+	// DiplomaTrustPinned are where its trust anchors come from.
+	ProviderDUO                     = "duo"
+	defaultDiplomaValidatorProvider = ProviderDUO
+	DiplomaTrustEUTL                = "eutl"
+	DiplomaTrustPinned              = "pinned"
+	defaultDiplomaTrustSource       = DiplomaTrustEUTL
+
+	// ProviderUWV checks a Verzekeringsbericht's UWV seal for real, and is the
+	// default; ProviderStub accepts every statement's seal and runs only when
+	// set explicitly (the dev stack sets it, as for diplomas). ProviderOff
+	// checks none: no flow can then require the Verzekeringsbericht.
+	ProviderUWV                        = "uwv"
+	ProviderOff                        = "off"
+	defaultEmploymentValidatorProvider = ProviderUWV
+
+	// ProviderEngine runs identity proofing in the wallet's own engine (the
+	// default); ProviderStub is an in-memory stand-in whose sessions no phone
+	// can reach.
+	ProviderEngine                  = "engine"
+	defaultIdentityProofingProvider = ProviderEngine
+	defaultAddressLookupURL         = "https://api.pdok.nl/bzk/locatieserver/search/v3_1"
 
 	defaultQerdsDomibusFromParty   = "domibus-blue"
 	defaultQerdsDomibusToParty     = "domibus-red"
@@ -194,24 +399,107 @@ const (
 	defaultQerdsDomibusAction      = "TC1Leg1"
 )
 
-type Config struct {
-	DatabaseDSN string
-	LogLevel    string
-	LogFormat   string
-	LogSource   bool
+// eudiCredentialSchemes are the Yivi schemes EUDI_CREDENTIAL_SCHEME may name;
+// empty means the openid4vpverifier default (pbdf-staging).
+var eudiCredentialSchemes = []string{"pbdf-staging", "pbdf"}
 
-	EudiVerifierURL     string
-	EudiIssuerChain     string
-	SessionCookieSecure bool
-	SessionTTL          time.Duration
-	SessionPruneEvery   time.Duration
-	PresentationTTL     time.Duration
+type Config struct {
+	DatabaseDSN              string
+	DatabaseMaxConns         int32
+	DatabaseLockMaxConns     int32
+	DatabaseStatementTimeout time.Duration
+	LogLevel                 string
+	LogFormat                string
+	LogSource                bool
+
+	EudiVerifierURL             string
+	EudiIssuerChain             string
+	EudiIntendedUseID           string
+	EudiRegistrationCertificate string
+	EudiCredentialScheme        string // pbdf-staging when empty, pbdf in production
+	SessionCookieSecure         bool
+	SessionTTL                  time.Duration
+	SessionPruneEvery           time.Duration
+	PresentationTTL             time.Duration
+	// OpenID4VPTransactionTTL bounds an inbound presentation transaction from
+	// the verifier's invocation to the org's response.
+	OpenID4VPTransactionTTL time.Duration
+	// OpenID4VPPresenterAllowInsecureHTTP permits http:// and private-network
+	// request_uri / response_uri targets on the inbound presenter (local dev
+	// only; the holder analogue is AttestationHolderAllowInsecureHTTP).
+	OpenID4VPPresenterAllowInsecureHTTP bool
+	// OpenID4VPPresenterAllowUnverifiedRequests accepts Request Objects whose
+	// signature and client_id binding are only structurally checked, not
+	// cryptographically verified (the x509_san_dns chain validation is #112's).
+	// Off, an inbound request is refused before anything is persisted; a
+	// deployment must opt in explicitly rather than inherit unverified trust.
+	OpenID4VPPresenterAllowUnverifiedRequests bool
+	// OpenID4VPVerifierTrustChain is extra relying-party CA PEM an inbound
+	// Authorization Request's x5c chain may end in, merged onto irmago's pinned
+	// Yivi verifier anchors (staging ones too when
+	// AttestationHolderStagingAnchors is set — one Yivi PKI switch per
+	// environment). Empty trusts the pinned anchors alone.
+	OpenID4VPVerifierTrustChain string
+	// OpenID4VPPresenterAutoPresent completes a presentation immediately after
+	// organization selection. It stands in for the consent/approval layer (#113)
+	// in dev / CI only; off, a selected transaction waits for that layer.
+	OpenID4VPPresenterAutoPresent bool
+	// OpenID4VPOrgRequestTTL bounds an org-to-org presentation request: on the
+	// sending side the request, its certificate and the response window; on the
+	// receiving side how long a QERDS-delivered request waits for approval.
+	OpenID4VPOrgRequestTTL time.Duration
+	// OpenID4VPRequesterCACert / Key are the PEM CA that certifies this
+	// deployment's organizations as relying parties. Both empty mints an
+	// ephemeral CA at boot, which only this deployment trusts.
+	OpenID4VPRequesterCACert string
+	OpenID4VPRequesterCAKey  string
+	// WalletUnitProviderCert / Key are the PEM chain (leaf first) and key the
+	// Business Wallet Provider signs with. Both empty mints an ephemeral
+	// self-signed certificate at boot, which nobody else trusts.
+	WalletUnitProviderCert string
+	WalletUnitProviderKey  string
+	// WalletUnitAttester selects the wallet unit attestation source:
+	// WalletUnitAttesterLocal or ProviderStub.
+	WalletUnitAttester string
+	// WalletUnitVersion is the wallet_version a BWIA states.
+	WalletUnitVersion string
+	// WalletUnitCertificationInfo is the wallet solution's certification
+	// information; empty leaves the claim out.
+	WalletUnitCertificationInfo string
+	// WalletUnitSKA* describe the HSM behind the WSCA. All three set, or none:
+	// none issues no SKA.
+	WalletUnitSKACertificationURL string
+	WalletUnitSKAKeyStorage       []string
+	WalletUnitSKAUserAuth         []string
+	// OpenID4VPRequesterPublicURL is the base URL (no /api/v1) a receiving
+	// wallet fetches request_uri from and posts the response to. Defaults to
+	// AppBaseURL.
+	OpenID4VPRequesterPublicURL string
 
 	QerdsProvider             string
 	QerdsProviderURL          string
 	QerdsAuthToken            string
 	QerdsWebhookSecret        string
 	QerdsDefaultAddressDomain string
+	// QerdsInboundPollInterval is how often the background poller drains inbound
+	// messages for every provisioned address. Zero disables it.
+	QerdsInboundPollInterval time.Duration
+	// QerdsTrustedOfferSenders allowlists senders whose inbound credential offers
+	// are queued for an org admin to accept ("addr@domain", "*@domain" or "*").
+	// Empty trusts every sender, which is safe only while every sender is an org
+	// on this deployment
+	// — a deployment peering with an external AS4 party must set it.
+	//
+	// It is matched against the originalSender message property, which the
+	// SENDING side populates. It refines the decision; it cannot bound it.
+	QerdsTrustedOfferSenders []string
+	// QerdsTrustedOfferParties allowlists the AS4 parties (ebMS3 From PartyId,
+	// e.g. "verid-qerds") that may deliver an acceptable credential offer, or "*" for
+	// any. Unlike QerdsTrustedOfferSenders this is the identity the receiving
+	// gateway verified against its PMode and the party's signing certificate, so
+	// it is the allowlist a remote sender cannot claim its way past. Empty trusts
+	// every party the PMode admits.
+	QerdsTrustedOfferParties []string
 
 	QerdsDomibusFromParty   string
 	QerdsDomibusToParty     string
@@ -222,18 +510,68 @@ type Config struct {
 
 	WalletRegistryProvider string
 
+	VogValidatorProvider string
+	VogValidatorURL      string
+	VogReferenceHashKey  string
+
+	DiplomaValidatorProvider string
+	DiplomaTrustSource       string
+	DiplomaTrustCacheDir     string
+	// DiplomaOCSP enables the online revocation check of DUO's signing
+	// certificate (envDiplomaOCSP).
+	DiplomaOCSP bool
+
+	// EmploymentValidatorProvider is how a Verzekeringsbericht's seal is
+	// checked (envEmploymentValidatorProvider).
+	EmploymentValidatorProvider string
+
+	IdentityProofingProvider string
+	// IdentityProofingPublicURL is the origin in every vcmrtd deep link.
+	IdentityProofingPublicURL string
+	// IdentityProofingAppLinkURL is the https link a claim opens the Idem app
+	// with (envIdentityProofingAppLinkURL); empty is vcmrtd://verify.
+	IdentityProofingAppLinkURL string
+	// AddressLookupURL is the Dutch address register's search API
+	// (envAddressLookupURL).
+	AddressLookupURL string
+	// IdentityProofingStubOutcome is what every stub session decides; empty
+	// leaves them undecided until they expire.
+	IdentityProofingStubOutcome string
+	// IdentityProofingEncryptionKey seals the engine's sessions and the
+	// webhook secrets at rest. Empty means nothing can be sent.
+	IdentityProofingEncryptionKey string
+	// RegulaFaceAPIURL/-PublicURL are the Regula Face API as the backend and
+	// as the app reach it; RegulaFaceMatchThreshold the similarity a match
+	// needs (0 is the engine's default). An empty URL disables Regula.
+	RegulaFaceAPIURL         string
+	RegulaFaceAPIPublicURL   string
+	RegulaFaceMatchThreshold float64
+	// IDScanKeyID and IDScanSecret are the ID Scan API key, IDScanAPIURL its
+	// API. An empty key id disables ID Scan.
+	IDScanKeyID  string
+	IDScanSecret string
+	IDScanAPIURL string
+	// IdentityProofingEDLCSCAPaths are the driving-licence CSCA files the
+	// engine trusts; empty trusts no licence.
+	IdentityProofingEDLCSCAPaths []string
+
 	AttestationIssuer         string
 	AttestationIssuerURL      string
 	AttestationIssuerToken    string
 	AttestationIssuerInstance string
 	AttestationPingCredential string
+	// AttestationStubClaimDelay is how long the stub issuer reports an offer
+	// pending; zero reports it issued at once.
+	AttestationStubClaimDelay time.Duration
 
 	AttestationHolder           string
 	AttestationHolderStorageDir string
 	AttestationHolderMasterKey  string
-	// AttestationHolderTrustChain is the trusted-issuer CA PEM the holder verifies
-	// received credentials against (holder analogue of EudiIssuerChain). Empty uses
-	// irmago's built-in trust model.
+	// AttestationHolderTrustChain is extra trusted-issuer CA PEM the holder
+	// verifies received credentials against (holder analogue of EudiIssuerChain).
+	// It is *added* to irmago's built-in trust model, not a replacement for it, so
+	// setting it keeps every issuer that already verified working; concatenate to
+	// trust several partners. Empty uses the built-in trust model alone.
 	AttestationHolderTrustChain string
 	// AttestationHolderStagingAnchors adds irmago's staging trust anchors (for the
 	// Yivi staging Veramo issuer in dev/staging).
@@ -283,6 +621,11 @@ type Config struct {
 	// static serving (dev serves the frontend via Vite).
 	StaticDir string
 
+	// TrustedProxies are the reverse proxies whose X-Forwarded-For names the
+	// client address that per-source rate limits key on. Empty trusts none:
+	// every request's source is its connection's peer.
+	TrustedProxies clientip.Trusted
+
 	PostGuardSidecarURL    string
 	PostGuardSharedSecret  string
 	PostGuardEncryptionKey string
@@ -298,6 +641,8 @@ type Config struct {
 	PostGuardWebsiteURL string
 
 	PlatformAdminEmails []string
+	// DevMode is a local developer stack (envDevMode).
+	DevMode bool
 }
 
 func Load() (Config, error) {
@@ -306,101 +651,25 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("%s is required", envDatabaseURL)
 	}
 
-	cookieSecure := strings.EqualFold(envOrDefault(envSessionCookieSecure, defaultSessionCookieSecure), "true")
-
-	verifierURL := envOrDefault(envEudiVerifierURL, defaultEudiVerifierURL)
-	if cookieSecure && os.Getenv(envEudiVerifierURL) == "" {
-		return Config{}, fmt.Errorf("config: %s must be set when %s is true", envEudiVerifierURL, envSessionCookieSecure)
-	}
-
-	sessionTTL, err := parseDuration(envSessionTTL, defaultSessionTTL)
-	if err != nil {
-		return Config{}, err
-	}
-
-	sessionPruneEvery, err := parseDuration(envSessionPruneEvery, defaultSessionPruneEvery)
-	if err != nil {
-		return Config{}, err
-	}
-
-	presentationTTL, err := parseDuration(envPresentationTTL, defaultPresentationTTL)
-	if err != nil {
-		return Config{}, err
-	}
-
-	qerdsProvider := envOrDefault(envQerdsProvider, defaultQerdsProvider)
-	qerdsProviderURL := os.Getenv(envQerdsProviderURL)
-	if qerdsProvider != ProviderStub && qerdsProviderURL == "" {
-		return Config{}, fmt.Errorf("config: %s must be set when %s is not %q", envQerdsProviderURL, envQerdsProvider, ProviderStub)
-	}
-
-	attestationIssuer := envOrDefault(envAttestationIssuer, defaultAttestationIssuer)
-	attestationIssuerURL := os.Getenv(envAttestationIssuerURL)
-	attestationIssuerInstance := os.Getenv(envAttestationIssuerInstance)
-	if attestationIssuer != IssuerStub {
-		if attestationIssuerURL == "" {
-			return Config{}, fmt.Errorf("config: %s must be set when %s is not %q", envAttestationIssuerURL, envAttestationIssuer, IssuerStub)
-		}
-		if attestationIssuerInstance == "" {
-			return Config{}, fmt.Errorf("config: %s must be set when %s is not %q", envAttestationIssuerInstance, envAttestationIssuer, IssuerStub)
-		}
-	}
-
-	postguardURLs, err := loadPostGuardURLs()
-	if err != nil {
-		return Config{}, err
-	}
-
-	attestationHolder := envOrDefault(envAttestationHolder, defaultAttestationHolder)
-	attestationHolderStorageDir := os.Getenv(envAttestationHolderStorageDir)
-	attestationHolderMasterKey := os.Getenv(envAttestationHolderMasterKey)
-	if attestationHolder != HolderStub {
-		if attestationHolderStorageDir == "" {
-			return Config{}, fmt.Errorf("config: %s must be set when %s is not %q", envAttestationHolderStorageDir, envAttestationHolder, HolderStub)
-		}
-		if attestationHolderMasterKey == "" {
-			return Config{}, fmt.Errorf("config: %s must be set when %s is not %q", envAttestationHolderMasterKey, envAttestationHolder, HolderStub)
-		}
-	}
-
-	// Outbound mail and QERDS messages build their links by concatenating onto
-	// APP_BASE_URL, and internal/email refuses to render a link that is not an
-	// absolute http(s) URL. Without this check a scheme-less value boots clean and
-	// then fails every credential offer and invitation at send time.
-	appBaseURL := envOrDefault(envAppBaseURL, defaultAppBaseURL)
-	if err := requireAbsoluteHTTPURL(envAppBaseURL, appBaseURL); err != nil {
-		return Config{}, err
-	}
-
-	// SIGNING_REDIRECT_URI is optional (empty keeps the built-in localhost default),
-	// but a set value is concatenated into the QTSP authorize URL and the token
-	// exchange's redirect_uri, so a scheme-less, spaced or relative value must fail
-	// at boot rather than deep inside the signing ceremony at the QTSP.
-	signingRedirectURI := os.Getenv(envSigningRedirectURI)
-	if signingRedirectURI != "" {
-		if err := requireAbsoluteHTTPURL(envSigningRedirectURI, signingRedirectURI); err != nil {
-			return Config{}, err
-		}
-	}
-
-	return Config{
+	cfg := Config{
 		DatabaseDSN: dsn,
 		LogLevel:    envOrDefault(envLogLevel, defaultLogLevel),
 		LogFormat:   envOrDefault(envLogFormat, defaultLogFormat),
 		LogSource:   strings.EqualFold(envOrDefault(envLogSource, defaultLogSource), "true"),
 
-		EudiVerifierURL:     verifierURL,
-		EudiIssuerChain:     os.Getenv(envEudiIssuerChain),
-		SessionCookieSecure: cookieSecure,
-		SessionTTL:          sessionTTL,
-		SessionPruneEvery:   sessionPruneEvery,
-		PresentationTTL:     presentationTTL,
+		EudiIssuerChain: os.Getenv(envEudiIssuerChain),
+		OpenID4VPPresenterAllowInsecureHTTP: strings.EqualFold(
+			os.Getenv(envOpenID4VPPresenterAllowInsecureHTTP), "true"),
+		OpenID4VPPresenterAllowUnverifiedRequests: strings.EqualFold(
+			os.Getenv(envOpenID4VPPresenterAllowUnverifiedRequests), "true"),
+		OpenID4VPPresenterAutoPresent: strings.EqualFold(
+			os.Getenv(envOpenID4VPPresenterAutoPresent), "true"),
+		OpenID4VPVerifierTrustChain: os.Getenv(envOpenID4VPVerifierTrustChain),
 
-		QerdsProvider:             qerdsProvider,
-		QerdsProviderURL:          qerdsProviderURL,
 		QerdsAuthToken:            os.Getenv(envQerdsAuthToken),
-		QerdsWebhookSecret:        os.Getenv(envQerdsWebhookSecret),
 		QerdsDefaultAddressDomain: envOrDefault(envQerdsDefaultAddressDomain, defaultQerdsDefaultAddressDomain),
+		QerdsTrustedOfferSenders:  parseList(os.Getenv(envQerdsTrustedOfferSenders)),
+		QerdsTrustedOfferParties:  parseList(os.Getenv(envQerdsTrustedOfferParties)),
 
 		QerdsDomibusFromParty:   envOrDefault(envQerdsDomibusFromParty, defaultQerdsDomibusFromParty),
 		QerdsDomibusToParty:     envOrDefault(envQerdsDomibusToParty, defaultQerdsDomibusToParty),
@@ -411,15 +680,17 @@ func Load() (Config, error) {
 
 		WalletRegistryProvider: envOrDefault(envWalletRegistryProvider, defaultWalletRegistryProvider),
 
-		AttestationIssuer:         attestationIssuer,
-		AttestationIssuerURL:      attestationIssuerURL,
+		VogReferenceHashKey: os.Getenv(envVogReferenceHashKey),
+
+		DiplomaOCSP:          !strings.EqualFold(os.Getenv(envDiplomaOCSP), "false"),
+		DiplomaTrustCacheDir: os.Getenv(envDiplomaTrustCacheDir),
+
+		IdentityProofingEncryptionKey: os.Getenv(envIdentityProofingEncryptionKey),
+		IdentityProofingEDLCSCAPaths:  parseList(os.Getenv(envIdentityProofingEDLCSCAPaths)),
+
 		AttestationIssuerToken:    os.Getenv(envAttestationIssuerToken),
-		AttestationIssuerInstance: attestationIssuerInstance,
 		AttestationPingCredential: os.Getenv(envAttestationPingCredential),
 
-		AttestationHolder:           attestationHolder,
-		AttestationHolderStorageDir: attestationHolderStorageDir,
-		AttestationHolderMasterKey:  attestationHolderMasterKey,
 		AttestationHolderTrustChain: os.Getenv(envAttestationHolderTrustChain),
 		AttestationHolderStagingAnchors: strings.EqualFold(
 			os.Getenv(envAttestationHolderStagingAnchors), "true"),
@@ -431,26 +702,386 @@ func Load() (Config, error) {
 		AttestationHolderWSCAInsecure: strings.EqualFold(
 			os.Getenv(envAttestationHolderWSCAInsecure), "true"),
 
-		AppBaseURL:                 appBaseURL,
 		EmailEncryptionKey:         os.Getenv(envEmailEncryptionKey),
 		SlackEncryptionKey:         os.Getenv(envSlackEncryptionKey),
 		TeamsEncryptionKey:         os.Getenv(envTeamsEncryptionKey),
 		ProvisioningEncryptionKey:  os.Getenv(envProvisioningEncryptionKey),
 		CSCEncryptionKey:           os.Getenv(envCSCEncryptionKey),
 		SigningOAuthIssuerInternal: os.Getenv(envSigningOAuthIssuerInternal),
-		SigningRedirectURI:         signingRedirectURI,
 		MailDefaultLocale:          envOrDefault(envMailDefaultLocale, defaultMailLocale),
 		StaticDir:                  os.Getenv(envStaticDir),
 
 		PostGuardSidecarURL:    os.Getenv(envPostGuardSidecarURL),
 		PostGuardSharedSecret:  os.Getenv(envPostGuardSharedSecret),
 		PostGuardEncryptionKey: os.Getenv(envPostGuardEncryptionKey),
-		PostGuardPkgURL:        postguardURLs.pkg,
-		PostGuardCryptifyURL:   postguardURLs.cryptify,
-		PostGuardWebsiteURL:    postguardURLs.website,
 
 		PlatformAdminEmails: parseList(os.Getenv(envPlatformAdminEmails)),
-	}, nil
+	}
+
+	// Each step reads and checks one group of settings, in this order, so the
+	// first misconfiguration found is the one reported.
+	for _, load := range []func(*Config) error{
+		loadDatabase,
+		loadEudiVerifier,
+		loadDurations,
+		loadRequesterCA,
+		loadWalletUnit,
+		loadQerds,
+		loadDocumentValidators,
+		loadIdentityProofing,
+		loadAttestationIssuer,
+		loadPostGuard,
+		loadAttestationHolder,
+		loadURLs,
+		loadSigningRedirectURI,
+		loadDevMode,
+		loadTrustedProxies,
+	} {
+		if err := load(&cfg); err != nil {
+			return Config{}, err
+		}
+	}
+	return cfg, nil
+}
+
+func loadEudiVerifier(c *Config) error {
+	c.SessionCookieSecure = strings.EqualFold(envOrDefault(envSessionCookieSecure, defaultSessionCookieSecure), "true")
+
+	c.EudiVerifierURL = envOrDefault(envEudiVerifierURL, defaultEudiVerifierURL)
+	if c.SessionCookieSecure && os.Getenv(envEudiVerifierURL) == "" {
+		return fmt.Errorf("config: %s must be set when %s is true", envEudiVerifierURL, envSessionCookieSecure)
+	}
+
+	c.EudiIntendedUseID = os.Getenv(envEudiIntendedUseID)
+	c.EudiRegistrationCertificate = os.Getenv(envEudiRegistrationCertificate)
+	if c.EudiIntendedUseID != "" && c.EudiRegistrationCertificate != "" {
+		return fmt.Errorf("config: %s and %s are mutually exclusive", envEudiIntendedUseID, envEudiRegistrationCertificate)
+	}
+	if c.EudiIntendedUseID == "" && c.EudiRegistrationCertificate == "" && c.EudiVerifierURL == defaultEudiVerifierURL {
+		c.EudiIntendedUseID = defaultEudiIntendedUseID
+	}
+
+	// A typo would otherwise only surface when a user logs in: the boot probe's
+	// presentation request does not check the vcts it names.
+	c.EudiCredentialScheme = os.Getenv(envEudiCredentialScheme)
+	if c.EudiCredentialScheme != "" && !slices.Contains(eudiCredentialSchemes, c.EudiCredentialScheme) {
+		return fmt.Errorf("config: %s must be one of %s, got %q", envEudiCredentialScheme, strings.Join(eudiCredentialSchemes, ", "), c.EudiCredentialScheme)
+	}
+	return nil
+}
+
+func loadDurations(c *Config) error {
+	for _, d := range []struct {
+		dst           *time.Duration
+		key, fallback string
+	}{
+		{&c.SessionTTL, envSessionTTL, defaultSessionTTL},
+		{&c.SessionPruneEvery, envSessionPruneEvery, defaultSessionPruneEvery},
+		{&c.PresentationTTL, envPresentationTTL, defaultPresentationTTL},
+		{&c.OpenID4VPTransactionTTL, envOpenID4VPTransactionTTL, defaultOpenID4VPTransactionTTL},
+		{&c.OpenID4VPOrgRequestTTL, envOpenID4VPOrgRequestTTL, defaultOpenID4VPOrgRequestTTL},
+		{&c.AttestationStubClaimDelay, envAttestationStubClaimDelay, defaultAttestationStubClaimDelay},
+	} {
+		v, err := parseDuration(d.key, d.fallback)
+		if err != nil {
+			return err
+		}
+		*d.dst = v
+	}
+	return nil
+}
+
+func loadRequesterCA(c *Config) error {
+	c.OpenID4VPRequesterCACert, c.OpenID4VPRequesterCAKey = os.Getenv(envOpenID4VPRequesterCACert), os.Getenv(envOpenID4VPRequesterCAKey)
+	if (c.OpenID4VPRequesterCACert == "") != (c.OpenID4VPRequesterCAKey == "") {
+		return fmt.Errorf("config: %s and %s must be set together", envOpenID4VPRequesterCACert, envOpenID4VPRequesterCAKey)
+	}
+	return nil
+}
+
+func loadWalletUnit(c *Config) error {
+	c.WalletUnitProviderCert, c.WalletUnitProviderKey = os.Getenv(envWalletUnitProviderCert), os.Getenv(envWalletUnitProviderKey)
+	if (c.WalletUnitProviderCert == "") != (c.WalletUnitProviderKey == "") {
+		return fmt.Errorf("config: %s and %s must be set together", envWalletUnitProviderCert, envWalletUnitProviderKey)
+	}
+	c.WalletUnitAttester = envOrDefault(envWalletUnitAttester, WalletUnitAttesterLocal)
+	if c.WalletUnitAttester != WalletUnitAttesterLocal && c.WalletUnitAttester != ProviderStub {
+		return fmt.Errorf("config: %s must be %q or %q", envWalletUnitAttester, WalletUnitAttesterLocal, ProviderStub)
+	}
+	c.WalletUnitVersion = envOrDefault(envWalletUnitVersion, defaultWalletUnitVersion)
+	c.WalletUnitCertificationInfo = os.Getenv(envWalletUnitCertificationInfo)
+	c.WalletUnitSKACertificationURL = os.Getenv(envWalletUnitSKACertificationURL)
+	c.WalletUnitSKAKeyStorage = parseList(os.Getenv(envWalletUnitSKAKeyStorage))
+	c.WalletUnitSKAUserAuth = parseList(os.Getenv(envWalletUnitSKAUserAuth))
+	set := 0
+	for _, v := range []bool{c.WalletUnitSKACertificationURL != "", len(c.WalletUnitSKAKeyStorage) > 0, len(c.WalletUnitSKAUserAuth) > 0} {
+		if v {
+			set++
+		}
+	}
+	if set != 0 && set != 3 {
+		return fmt.Errorf("config: %s, %s and %s must be set together", envWalletUnitSKACertificationURL, envWalletUnitSKAKeyStorage, envWalletUnitSKAUserAuth)
+	}
+	return nil
+}
+
+func loadQerds(c *Config) error {
+	// "0" (or "0s") disables the background inbound poller. With the webhook
+	// also unconfigured no mechanism delivers inbound messages automatically,
+	// so that combination fails the boot rather than degrading to manual-only
+	// console polls.
+	pollInterval, err := parseDuration(envQerdsInboundPollInterval, defaultQerdsInboundPollInterval)
+	if err != nil {
+		return err
+	}
+	c.QerdsInboundPollInterval = pollInterval
+	c.QerdsWebhookSecret = os.Getenv(envQerdsWebhookSecret)
+	if c.QerdsInboundPollInterval <= 0 && c.QerdsWebhookSecret == "" {
+		return fmt.Errorf("config: %s must be set when %s disables the background poller, or no inbound QERDS message is delivered automatically", envQerdsWebhookSecret, envQerdsInboundPollInterval)
+	}
+
+	c.QerdsProvider = envOrDefault(envQerdsProvider, defaultQerdsProvider)
+	c.QerdsProviderURL = os.Getenv(envQerdsProviderURL)
+	if c.QerdsProvider != ProviderStub && c.QerdsProviderURL == "" {
+		return fmt.Errorf("config: %s must be set when %s is not %q", envQerdsProviderURL, envQerdsProvider, ProviderStub)
+	}
+	return nil
+}
+
+func loadDocumentValidators(c *Config) error {
+	c.VogValidatorProvider = envOrDefault(envVogValidatorProvider, defaultVogValidatorProvider)
+	if c.VogValidatorProvider != ProviderStub && c.VogValidatorProvider != ProviderValidatieNL {
+		return fmt.Errorf("config: %s must be %q or %q", envVogValidatorProvider, ProviderStub, ProviderValidatieNL)
+	}
+	c.VogValidatorURL = envOrDefault(envVogValidatorURL, defaultVogValidatorURL)
+
+	c.DiplomaValidatorProvider = envOrDefault(envDiplomaValidatorProvider, defaultDiplomaValidatorProvider)
+	if c.DiplomaValidatorProvider != ProviderStub && c.DiplomaValidatorProvider != ProviderDUO {
+		return fmt.Errorf("config: %s must be %q or %q", envDiplomaValidatorProvider, ProviderStub, ProviderDUO)
+	}
+	c.DiplomaTrustSource = envOrDefault(envDiplomaTrustSource, defaultDiplomaTrustSource)
+	if c.DiplomaTrustSource != DiplomaTrustEUTL && c.DiplomaTrustSource != DiplomaTrustPinned {
+		return fmt.Errorf("config: %s must be %q or %q", envDiplomaTrustSource, DiplomaTrustEUTL, DiplomaTrustPinned)
+	}
+
+	c.EmploymentValidatorProvider = envOrDefault(envEmploymentValidatorProvider, defaultEmploymentValidatorProvider)
+	if !slices.Contains([]string{ProviderStub, ProviderUWV, ProviderOff}, c.EmploymentValidatorProvider) {
+		return fmt.Errorf("config: %s must be %q, %q or %q", envEmploymentValidatorProvider, ProviderStub, ProviderUWV, ProviderOff)
+	}
+
+	// The pinned roots hold only PKIoverheid and certSIGN, and UWV's seal
+	// chains to QuoVadis: that pairing would reject every statement.
+	if c.DiplomaTrustSource == DiplomaTrustPinned && c.EmploymentValidatorProvider == ProviderUWV {
+		return fmt.Errorf("config: %s=%q holds no root UWV's seal chains to, so %s=%q needs %s=%q (or %s=%q)",
+			envDiplomaTrustSource, DiplomaTrustPinned, envEmploymentValidatorProvider, ProviderUWV, envDiplomaTrustSource, DiplomaTrustEUTL,
+			envEmploymentValidatorProvider, ProviderOff)
+	}
+	return nil
+}
+
+func loadIdentityProofing(c *Config) error {
+	c.IdentityProofingProvider = envOrDefault(envIdentityProofingProvider, defaultIdentityProofingProvider)
+	if c.IdentityProofingProvider != ProviderEngine && c.IdentityProofingProvider != ProviderStub {
+		return fmt.Errorf("config: %s must be %q or %q", envIdentityProofingProvider, ProviderEngine, ProviderStub)
+	}
+	c.RegulaFaceAPIURL = os.Getenv(envRegulaFaceAPIURL)
+	c.RegulaFaceAPIPublicURL = envOrDefault(envRegulaFaceAPIPublicURL, c.RegulaFaceAPIURL)
+	for key, raw := range map[string]string{envRegulaFaceAPIURL: c.RegulaFaceAPIURL, envRegulaFaceAPIPublicURL: c.RegulaFaceAPIPublicURL} {
+		if raw == "" {
+			continue
+		}
+		if err := requireAbsoluteHTTPURL(key, raw); err != nil {
+			return err
+		}
+	}
+	threshold, err := parseFaceMatchThreshold()
+	if err != nil {
+		return err
+	}
+	c.RegulaFaceMatchThreshold = threshold
+	if err := loadIDScan(c); err != nil {
+		return err
+	}
+	c.IdentityProofingStubOutcome = os.Getenv(envIdentityProofingStubOutcome)
+	switch c.IdentityProofingStubOutcome {
+	case "", "approved", "rejected", "needs_review":
+	default:
+		return fmt.Errorf("config: %s must be approved, rejected or needs_review", envIdentityProofingStubOutcome)
+	}
+	if c.IdentityProofingStubOutcome != "" && c.IdentityProofingProvider != ProviderStub {
+		return fmt.Errorf("config: %s needs %s=%q", envIdentityProofingStubOutcome, envIdentityProofingProvider, ProviderStub)
+	}
+	return nil
+}
+
+// loadIDScan reads the ID Scan API key and API URL: the key id and secret
+// together or neither.
+func loadIDScan(c *Config) error {
+	c.IDScanKeyID = os.Getenv(envIDScanKeyID)
+	c.IDScanSecret = os.Getenv(envIDScanSecret)
+	if (c.IDScanKeyID == "") != (c.IDScanSecret == "") {
+		return fmt.Errorf("config: %s and %s must be set together", envIDScanKeyID, envIDScanSecret)
+	}
+	c.IDScanAPIURL = envOrDefault(envIDScanAPIURL, idscan.DefaultBaseURL)
+	return requireAbsoluteHTTPURL(envIDScanAPIURL, c.IDScanAPIURL)
+}
+
+// parseFaceMatchThreshold reads the Regula face match threshold, 0 when unset.
+func parseFaceMatchThreshold() (float64, error) {
+	raw := os.Getenv(envRegulaFaceMatchThreshold)
+	if raw == "" {
+		return 0, nil
+	}
+	v, err := strconv.ParseFloat(raw, 64)
+	if err != nil || v <= 0 || v > 1 {
+		return 0, fmt.Errorf("config: %s must be a number in (0, 1]", envRegulaFaceMatchThreshold)
+	}
+	return v, nil
+}
+
+func loadAttestationIssuer(c *Config) error {
+	c.AttestationIssuer = envOrDefault(envAttestationIssuer, defaultAttestationIssuer)
+	c.AttestationIssuerURL = os.Getenv(envAttestationIssuerURL)
+	c.AttestationIssuerInstance = os.Getenv(envAttestationIssuerInstance)
+	if c.AttestationIssuer == IssuerStub {
+		return nil
+	}
+	if c.AttestationIssuerURL == "" {
+		return fmt.Errorf("config: %s must be set when %s is not %q", envAttestationIssuerURL, envAttestationIssuer, IssuerStub)
+	}
+	if c.AttestationIssuerInstance == "" {
+		return fmt.Errorf("config: %s must be set when %s is not %q", envAttestationIssuerInstance, envAttestationIssuer, IssuerStub)
+	}
+	return nil
+}
+
+func loadPostGuard(c *Config) error {
+	urls, err := loadPostGuardURLs()
+	if err != nil {
+		return err
+	}
+	c.PostGuardPkgURL, c.PostGuardCryptifyURL, c.PostGuardWebsiteURL = urls.pkg, urls.cryptify, urls.website
+	return nil
+}
+
+func loadAttestationHolder(c *Config) error {
+	c.AttestationHolder = envOrDefault(envAttestationHolder, defaultAttestationHolder)
+	c.AttestationHolderStorageDir = os.Getenv(envAttestationHolderStorageDir)
+	c.AttestationHolderMasterKey = os.Getenv(envAttestationHolderMasterKey)
+	if c.AttestationHolder == HolderStub {
+		return nil
+	}
+	if c.AttestationHolderStorageDir == "" {
+		return fmt.Errorf("config: %s must be set when %s is not %q", envAttestationHolderStorageDir, envAttestationHolder, HolderStub)
+	}
+	if c.AttestationHolderMasterKey == "" {
+		return fmt.Errorf("config: %s must be set when %s is not %q", envAttestationHolderMasterKey, envAttestationHolder, HolderStub)
+	}
+	return nil
+}
+
+func loadURLs(c *Config) error {
+	// Outbound mail and QERDS messages build their links by concatenating onto
+	// APP_BASE_URL, and internal/email refuses to render a link that is not an
+	// absolute http(s) URL. Without this check a scheme-less value boots clean and
+	// then fails every credential offer and invitation at send time.
+	c.AppBaseURL = envOrDefault(envAppBaseURL, defaultAppBaseURL)
+	if err := requireAbsoluteHTTPURL(envAppBaseURL, c.AppBaseURL); err != nil {
+		return err
+	}
+	c.OpenID4VPRequesterPublicURL = envOrDefault(envOpenID4VPRequesterPublicURL, c.AppBaseURL)
+	if err := requireAbsoluteHTTPURL(envOpenID4VPRequesterPublicURL, c.OpenID4VPRequesterPublicURL); err != nil {
+		return err
+	}
+	c.IdentityProofingPublicURL = envOrDefault(envIdentityProofingPublicURL, c.AppBaseURL)
+	if err := requireAbsoluteHTTPURL(envIdentityProofingPublicURL, c.IdentityProofingPublicURL); err != nil {
+		return err
+	}
+	c.IdentityProofingAppLinkURL = os.Getenv(envIdentityProofingAppLinkURL)
+	if err := requireAppLinkURL(envIdentityProofingAppLinkURL, c.IdentityProofingAppLinkURL); err != nil {
+		return err
+	}
+	c.AddressLookupURL = envOrDefault(envAddressLookupURL, defaultAddressLookupURL)
+	return requireAbsoluteHTTPURL(envAddressLookupURL, c.AddressLookupURL)
+}
+
+func loadDevMode(c *Config) error {
+	c.DevMode = strings.EqualFold(os.Getenv(envDevMode), "true")
+	if c.DevMode && (os.Getenv(envAppBaseURL) == "" || !localhostURL(c.AppBaseURL)) {
+		return fmt.Errorf("config: %s is only for a local stack: %s must be set to a localhost URL, not %q",
+			envDevMode, envAppBaseURL, os.Getenv(envAppBaseURL))
+	}
+	if c.DevMode {
+		return nil
+	}
+	return requireProductionSettings(c)
+}
+
+// requireProductionSettings refuses, outside a local stack, plain http to
+// another machine for what the phone, a browser or a VOG check sends, a switch
+// that allows it, and a stub in place of a real check.
+func requireProductionSettings(c *Config) error {
+	// The Idem app sends chip data, selfies and liveness frames to the first
+	// two, the backend a member's VOG PDF to the third and the ID Scan key to
+	// the fourth; the rest are the wallet's own pages and callbacks and the
+	// address register: over the network only with https. Plain http to this
+	// machine never leaves it.
+	for key, raw := range map[string]string{
+		envIdentityProofingPublicURL:   c.IdentityProofingPublicURL,
+		envRegulaFaceAPIPublicURL:      c.RegulaFaceAPIPublicURL,
+		envVogValidatorURL:             c.VogValidatorURL,
+		envIDScanAPIURL:                c.IDScanAPIURL,
+		envAppBaseURL:                  c.AppBaseURL,
+		envOpenID4VPRequesterPublicURL: c.OpenID4VPRequesterPublicURL,
+		envAddressLookupURL:            c.AddressLookupURL,
+		envSigningRedirectURI:          c.SigningRedirectURI,
+	} {
+		if raw != "" && !strings.HasPrefix(strings.ToLower(raw), "https://") && !localhostURL(raw) {
+			return fmt.Errorf("config: %s %q must be https outside %s=true (a local stack)", key, raw, envDevMode)
+		}
+	}
+	for key, insecure := range map[string]bool{
+		envOpenID4VPPresenterAllowInsecureHTTP: c.OpenID4VPPresenterAllowInsecureHTTP,
+		envAttestationHolderAllowInsecureHTTP:  c.AttestationHolderAllowInsecureHTTP,
+	} {
+		if insecure {
+			return fmt.Errorf("config: %s allows plain http and private addresses and needs %s=true (a local stack)", key, envDevMode)
+		}
+	}
+	for key, stubbed := range map[string]bool{
+		envIdentityProofingProvider:    c.IdentityProofingProvider == ProviderStub,
+		envIdentityProofingStubOutcome: c.IdentityProofingStubOutcome != "",
+		envDiplomaValidatorProvider:    c.DiplomaValidatorProvider == ProviderStub,
+		envEmploymentValidatorProvider: c.EmploymentValidatorProvider == ProviderStub,
+		envVogValidatorProvider:        c.VogValidatorProvider == ProviderStub,
+		envWalletUnitAttester:          c.WalletUnitAttester == ProviderStub,
+	} {
+		if stubbed {
+			return fmt.Errorf("config: %s stubs out a real check and needs %s=true (a local stack)", key, envDevMode)
+		}
+	}
+	return nil
+}
+
+func loadSigningRedirectURI(c *Config) error {
+	// SIGNING_REDIRECT_URI is optional (empty keeps the built-in localhost default),
+	// but a set value is concatenated into the QTSP authorize URL and the token
+	// exchange's redirect_uri, so a scheme-less, spaced or relative value must fail
+	// at boot rather than deep inside the signing ceremony at the QTSP.
+	c.SigningRedirectURI = os.Getenv(envSigningRedirectURI)
+	if c.SigningRedirectURI == "" {
+		return nil
+	}
+	return requireAbsoluteHTTPURL(envSigningRedirectURI, c.SigningRedirectURI)
+}
+
+func loadTrustedProxies(c *Config) error {
+	trusted, err := clientip.ParseTrusted(parseList(os.Getenv(envTrustedProxies)))
+	if err != nil {
+		return fmt.Errorf("config: %s: %w", envTrustedProxies, err)
+	}
+	c.TrustedProxies = trusted
+	return nil
 }
 
 // postGuardURLs holds the three endpoints that aim a deployment at one PostGuard
@@ -528,6 +1159,23 @@ func requireAbsoluteHTTPURL(key, raw string) error {
 	return nil
 }
 
+// requireAppLinkURL accepts an empty value, or an https URL with a host and no
+// query or fragment: an App Link / Universal Link is https only, even on a
+// local stack, and the engine appends the claim's own query to it.
+func requireAppLinkURL(key, raw string) error {
+	if raw == "" {
+		return nil
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("config: %s %q: %w", key, raw, err)
+	}
+	if u.Scheme != "https" || u.Host == "" || u.RawQuery != "" || u.Fragment != "" || u.ForceQuery {
+		return fmt.Errorf("config: %s %q must be an https URL with no query or fragment", key, raw)
+	}
+	return nil
+}
+
 func parseList(raw string) []string {
 	if raw == "" {
 		return nil
@@ -540,6 +1188,32 @@ func parseList(raw string) []string {
 		}
 	}
 	return out
+}
+
+func loadDatabase(c *Config) error {
+	var err error
+	if c.DatabaseMaxConns, err = parsePoolSize(envDatabaseMaxConns, defaultDatabaseMaxConns); err != nil {
+		return err
+	}
+	if c.DatabaseLockMaxConns, err = parsePoolSize(envDatabaseLockMaxConns, defaultDatabaseLockMaxConns); err != nil {
+		return err
+	}
+	if c.DatabaseStatementTimeout, err = parseDuration(envDatabaseStatementTimeout, defaultDatabaseStatementTimeout); err != nil {
+		return err
+	}
+	if c.DatabaseStatementTimeout < 0 {
+		return fmt.Errorf("config: %s must not be negative", envDatabaseStatementTimeout)
+	}
+	return nil
+}
+
+func parsePoolSize(key, fallback string) (int32, error) {
+	raw := envOrDefault(key, fallback)
+	n, err := strconv.ParseInt(raw, 10, 32)
+	if err != nil || n < 1 {
+		return 0, fmt.Errorf("config: %s %q must be a whole number of at least 1", key, raw)
+	}
+	return int32(n), nil
 }
 
 func envOrDefault(key, fallback string) string {
@@ -557,4 +1231,19 @@ func parseDuration(key, fallback string) (time.Duration, error) {
 		return 0, fmt.Errorf("config: %s %q: %w", key, raw, err)
 	}
 	return d, nil
+}
+
+// localhostURL reports whether raw is an absolute URL on this machine:
+// localhost or a loopback address.
+func localhostURL(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	host := u.Hostname()
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }

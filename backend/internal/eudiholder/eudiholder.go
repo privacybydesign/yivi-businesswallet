@@ -91,6 +91,33 @@ type Holder interface {
 	// yields an empty (non-nil) map.
 	Validities(ctx context.Context, orgID uuid.UUID) (map[string]HeldValidity, error)
 
+	// RefreshStatuses re-reads the Token Status List of every credential the
+	// organization holds that carries a status reference and stores what it
+	// observed, with the time of the check; Validities reads it back. It reports
+	// how many credentials changed status. An unreachable or unverifiable list is
+	// skipped, keeping the last known status.
+	RefreshStatuses(ctx context.Context, orgID uuid.UUID) (int, error)
+
+	// RefreshStatus is RefreshStatuses for the one credential ref names (the
+	// credential-instance id Validities keys on); an unknown ref is a no-op.
+	RefreshStatus(ctx context.Context, orgID uuid.UUID, ref string) (int, error)
+
+	// Present builds a vp_token satisfying dcqlQuery from orgID's held credentials,
+	// key-bound for audience (the verifier's client_id) and nonce. This is the
+	// "present" side of Art 5(1)(a), the seam the inbound OpenID4VP slice
+	// (internal/openid4vppresenter) calls once an organization has been selected
+	// for an incoming Authorization Request. The irmago engine evaluates the DCQL
+	// query over the org's held credentials, selects the requested disclosures and
+	// signs the key-binding JWT through the configured holder-key binder (software
+	// or WSCA); it returns ErrNoMatchingCredential when a required part of the
+	// query cannot be satisfied. The stub returns a canned token.
+	Present(ctx context.Context, orgID uuid.UUID, dcqlQuery []byte, nonce, audience string) (Presentation, error)
+
+	// DropOrganization removes everything the holder keeps for an organization,
+	// for one whose wallet was never opened: its credentials and, for the irmago
+	// engine, its schema, files and cached engine. An unknown org is a no-op.
+	DropOrganization(ctx context.Context, orgID uuid.UUID) error
+
 	// Close releases all per-organization engines.
 	Close() error
 }

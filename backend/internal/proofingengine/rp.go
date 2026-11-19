@@ -1,0 +1,1308 @@
+package proofingengine
+
+import (
+	"context"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"image"
+	"net/http"
+	"regexp"
+	"slices"
+	"strings"
+	"time"
+	"unicode/utf8"
+
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/flow"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/i18n"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/images"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/privacy"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/session"
+	pp "github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingprovider"
+)
+
+// The relying-party side, called in-process by internal/proofing: flows and
+// sessions. Errors are pp.ErrNotFound and *pp.RejectedError (status and
+// message).
+
+// rejected is a refused request.
+func rejected(status int, msg string) error {
+	return &pp.RejectedError{Status: status, Message: msg}
+}
+
+// ---- flows ------------------------------------------------------------------
+
+func toDefinition(tenantID, flowID string, in pp.FlowSpec) flow.FlowDefinition {
+	fd := flow.FlowDefinition{
+		ID: flowID, TenantID: tenantID, Name: in.Name, Steps: toSteps(in.Steps),
+		SelfieLocation: flow.StepLocation(in.SelfieLocation), FaceProvider: flow.FaceProvider(in.FaceProvider),
+		AcceptedDocumentTypes: in.AcceptedDocumentTypes, AcceptedIssuingCountries: in.AcceptedIssuingCountries,
+		RequiredAssuranceLevel: flow.AssuranceLevel(in.RequiredAssuranceLevel),
+		BSNPolicy:              privacyBSN(in.BSNPolicy), KeepFacePhotos: in.KeepFacePhotos, BlurBSN: in.BlurBSN,
+		RetentionOverride: time.Duration(in.RetentionOverrideSeconds) * time.Second,
+		SessionTTL:        time.Duration(in.SessionTTLSeconds) * time.Second,
+		LegalBasis:        privacyBasis(in.LegalBasis), ProcessingPurpose: in.ProcessingPurpose,
+		AgeOver: in.AgeOver, AlwaysReview: in.AlwaysReview,
+	}
+	for _, app := range in.Apps {
+		fd.Apps = append(fd.Apps, flow.App(app))
+	}
+	for _, c := range in.RequiredChecks {
+		fd.RequiredChecks = append(fd.RequiredChecks, flow.Check(c))
+	}
+	if len(in.CheckThresholds) > 0 {
+		fd.CheckThresholds = map[flow.Check]float64{}
+		for c, v := range in.CheckThresholds {
+			fd.CheckThresholds[flow.Check(c)] = v
+		}
+	}
+	for _, t := range in.AssuranceTiers {
+		fd.AssuranceTiers = append(fd.AssuranceTiers, flow.AssuranceTier{Level: t.Level, MinPercent: t.MinPercent})
+	}
+	fd.RequestedAttributes = in.RequestedAttributes
+	fd.AttributeReasons = in.AttributeReasons
+	return fd
+}
+
+func toSteps(in []string) []flow.Step {
+	out := make([]flow.Step, 0, len(in))
+	for _, s := range in {
+		out = append(out, flow.Step(s))
+	}
+	return out
+}
+
+func toFlow(fd flow.FlowDefinition) pp.Flow {
+	spec := pp.FlowSpec{
+		Name: fd.Name, RequestedAttributes: requestedAttributesOf(fd), AttributeReasons: fd.AttributeReasons,
+		SelfieLocation: string(fd.EffectiveSelfieLocation()), FaceProvider: string(fd.FaceProvider),
+		AcceptedDocumentTypes: fd.AcceptedDocumentTypes, AcceptedIssuingCountries: fd.AcceptedIssuingCountries,
+		RequiredAssuranceLevel: string(fd.RequiredAssuranceLevel), BSNPolicy: string(fd.BSNPolicy),
+		KeepFacePhotos: fd.KeepFacePhotos, BlurBSN: fd.BlurBSN, RetentionOverrideSeconds: int(fd.RetentionOverride / time.Second),
+		SessionTTLSeconds: int(fd.SessionTTL / time.Second), LegalBasis: string(fd.LegalBasis), ProcessingPurpose: fd.ProcessingPurpose,
+		AgeOver: fd.AgeOver, AlwaysReview: fd.AlwaysReview,
+	}
+	for _, app := range fd.Apps {
+		spec.Apps = append(spec.Apps, string(app))
+	}
+	for _, st := range fd.Steps {
+		spec.Steps = append(spec.Steps, string(st))
+	}
+	for _, c := range fd.RequiredChecks {
+		spec.RequiredChecks = append(spec.RequiredChecks, string(c))
+	}
+	if len(fd.CheckThresholds) > 0 {
+		spec.CheckThresholds = map[string]float64{}
+		for c, v := range fd.CheckThresholds {
+			spec.CheckThresholds[string(c)] = v
+		}
+	}
+	// Only the flow's own tiers: a flow without keeps DefaultAssuranceTiers.
+	for _, t := range fd.AssuranceTiers {
+		spec.AssuranceTiers = append(spec.AssuranceTiers, pp.AssuranceTier{Level: t.Level, MinPercent: t.MinPercent})
+	}
+	return pp.Flow{FlowSpec: spec, ID: fd.ID, Version: fd.Version, Active: fd.Active, CreatedAt: fd.CreatedAt, BrowserOnly: fd.BrowserOnly()}
+}
+
+func toFlows(fds []flow.FlowDefinition) []pp.Flow {
+	out := make([]pp.Flow, 0, len(fds))
+	for _, fd := range fds {
+		out = append(out, toFlow(fd))
+	}
+	return out
+}
+
+// flowError maps a flow store error: unknown is pp.ErrNotFound, a
+// validation failure the admin's own message.
+func flowError(op string, err error) error {
+	switch {
+	case errors.Is(err, flow.ErrNotFound):
+		return fmt.Errorf("proofingengine: %s: %w", op, pp.ErrNotFound)
+	case isValidation(err):
+		return rejected(http.StatusBadRequest, err.Error())
+	default:
+		return fmt.Errorf("proofingengine: %s: %w", op, err)
+	}
+}
+
+// isValidation is a flow.Validate refusal, as opposed to a storage failure.
+func isValidation(err error) bool {
+	var invalid *flow.ValidationError
+	return errors.As(err, &invalid)
+}
+
+// maxRetentionOverrideSeconds is flow.MaxRetentionOverride in the spec's
+// seconds.
+const maxRetentionOverrideSeconds = int(flow.MaxRetentionOverride / time.Second)
+
+// maxSessionTTLSeconds is flow.MaxSessionTTL in the spec's seconds.
+const maxSessionTTLSeconds = int(flow.MaxSessionTTL / time.Second)
+
+// checkFlowSpec refuses what toDefinition cannot carry over faithfully, and a
+// face provider this server lacks. A retention or session lifetime past its
+// bound is refused on the seconds: converted first, a huge value would wrap to
+// a Duration that flow.Validate accepts.
+func (s *Server) checkFlowSpec(in pp.FlowSpec) error {
+	if in.RetentionOverrideSeconds < 0 || in.RetentionOverrideSeconds > maxRetentionOverrideSeconds {
+		return rejected(http.StatusBadRequest, fmt.Sprintf("flow: retentionOverride must be between 0 and %d days", flow.MaxRetentionOverrideDays))
+	}
+	if in.SessionTTLSeconds < 0 || in.SessionTTLSeconds > maxSessionTTLSeconds {
+		return rejected(http.StatusBadRequest, fmt.Sprintf("flow: sessionTtl must be between 0 and %d minutes", flow.MaxSessionTTL/time.Minute))
+	}
+	return s.checkFaceProvider(in)
+}
+
+func (s *Server) checkFaceProvider(in pp.FlowSpec) error {
+	switch flow.FaceProvider(in.FaceProvider) {
+	case flow.FaceProviderRegula:
+		if s.cfg.Regula == nil {
+			return rejected(http.StatusBadRequest, "flow: faceProvider regula is not configured on this server")
+		}
+	case flow.FaceProviderEngine:
+		return rejected(http.StatusBadRequest, "flow: faceProvider engine is not available: faces are verified with Regula")
+	}
+	return nil
+}
+
+// ListFlows returns the active version of each of the org's flows, newest first.
+func (s *Server) ListFlows(ctx context.Context, t pp.Tenant) ([]pp.Flow, error) {
+	fds, err := s.flows.List(ctx, t.ID)
+	if err != nil {
+		return nil, flowError("list flows", err)
+	}
+	return toFlows(fds), nil
+}
+
+// CreateFlow creates a flow at version 1, active.
+func (s *Server) CreateFlow(ctx context.Context, t pp.Tenant, in pp.FlowSpec) (pp.Flow, error) {
+	if err := s.checkFlowSpec(in); err != nil {
+		return pp.Flow{}, err
+	}
+	fd, err := s.flows.Save(ctx, toDefinition(t.ID, "", in))
+	if err != nil {
+		return pp.Flow{}, flowError("create flow", err)
+	}
+	return toFlow(fd), nil
+}
+
+// CreateFlowVersion saves the next version of flow id, active at once.
+func (s *Server) CreateFlowVersion(ctx context.Context, t pp.Tenant, id string, in pp.FlowSpec) (pp.Flow, error) {
+	if err := s.checkFlowSpec(in); err != nil {
+		return pp.Flow{}, err
+	}
+	fd, err := s.flows.Save(ctx, toDefinition(t.ID, id, in))
+	if err != nil {
+		return pp.Flow{}, flowError("create flow version", err)
+	}
+	return toFlow(fd), nil
+}
+
+// ListFlowVersions returns every version of flow id, oldest first.
+func (s *Server) ListFlowVersions(ctx context.Context, t pp.Tenant, id string) ([]pp.Flow, error) {
+	fds, err := s.flows.ListVersions(ctx, t.ID, id)
+	if err != nil {
+		return nil, flowError("list flow versions", err)
+	}
+	if len(fds) == 0 {
+		return nil, fmt.Errorf("proofingengine: list flow versions: %w", pp.ErrNotFound)
+	}
+	return toFlows(fds), nil
+}
+
+// ActivateFlowVersion makes version the active one of flow id.
+func (s *Server) ActivateFlowVersion(ctx context.Context, t pp.Tenant, id string, version int) (pp.Flow, error) {
+	if err := s.flows.Activate(ctx, t.ID, id, version); err != nil {
+		return pp.Flow{}, flowError("activate flow version", err)
+	}
+	fd, err := s.flows.Get(ctx, t.ID, id, version)
+	if err != nil {
+		return pp.Flow{}, flowError("activate flow version", err)
+	}
+	return toFlow(fd), nil
+}
+
+// ---- sessions ---------------------------------------------------------------
+
+// Bounds on what a session is created with.
+const (
+	maxClientReferenceLength = 200
+	maxFlowIDLength          = 100
+	maxLanguageLength        = 35
+)
+
+// CreateSession starts a session on flow in.FlowID.
+func (s *Server) CreateSession(ctx context.Context, t pp.Tenant, in pp.SessionInput) (pp.Session, error) {
+	switch {
+	case len(in.ClientReference) > maxClientReferenceLength:
+		return pp.Session{}, rejected(http.StatusBadRequest, "clientReference is too long (max 200 characters)")
+	case len(in.FlowID) > maxFlowIDLength:
+		return pp.Session{}, rejected(http.StatusBadRequest, "flow is too long (max 100 characters)")
+	case len(in.Language) > maxLanguageLength, in.Language != "" && !i18n.Valid(in.Language):
+		return pp.Session{}, rejected(http.StatusBadRequest, "language must be a BCP 47 language tag")
+	}
+	method, ttl := session.MethodNFCPassport, s.cfg.SessionCreateTTL
+	switch in.Method {
+	case "", pp.MethodIdem:
+	case pp.MethodYivi:
+		method, ttl = session.MethodBiometricBoundLogin, s.cfg.BoundLoginTTL
+	case pp.MethodBrowser:
+		method = session.MethodBrowser
+	case pp.MethodPending:
+		method = session.MethodPending
+	default:
+		return pp.Session{}, rejected(http.StatusBadRequest, fmt.Sprintf("method %q is not %s, %s or %s", in.Method, pp.MethodIdem, pp.MethodYivi, pp.MethodBrowser))
+	}
+	// A session runs its flow's steps to finish: without one it never could.
+	if in.FlowID == "" {
+		return pp.Session{}, rejected(http.StatusBadRequest, "flow is required")
+	}
+	fd, err := s.flows.Get(ctx, t.ID, in.FlowID, 0)
+	if errors.Is(err, flow.ErrNotFound) {
+		return pp.Session{}, rejected(http.StatusBadRequest, fmt.Sprintf("flow %q does not exist", in.FlowID))
+	}
+	if err != nil {
+		return pp.Session{}, fmt.Errorf("proofingengine: resolve flow: %w", err)
+	}
+	resolvedFlow := &fd
+	// The browser runs a flow without app steps, and only such a flow.
+	if browserOnly := fd.BrowserOnly(); browserOnly != (method == session.MethodBrowser) {
+		if browserOnly {
+			return pp.Session{}, rejected(http.StatusBadRequest, "the browser runs this flow alone: create it with method browser")
+		}
+		return pp.Session{}, rejected(http.StatusBadRequest, "this flow has steps an app runs: the browser cannot run it alone")
+	}
+	requestedAttributes, flowVersion, retention := requestedAttributesOf(fd), fd.Version, fd.RetentionOverride
+	// A face match without nfc_read has no chip photo: the customer sends a
+	// reference photo with each session, and only such a flow takes one. ID
+	// Scan matches against the photographed document's portrait instead.
+	needsReference := needsReferencePhoto(resolvedFlow)
+	hasReference := in.ReferencePhoto != nil && in.ReferencePhoto.Base64 != ""
+	if err := methodAllowed(resolvedFlow, method); err != nil {
+		return pp.Session{}, err
+	}
+	switch {
+	case needsReference && !hasReference:
+		return pp.Session{}, rejected(http.StatusBadRequest, "referencePhoto is required: the flow matches the face without nfc_read, so there is no chip photo to compare the live face against")
+	case !needsReference && hasReference:
+		return pp.Session{}, rejected(http.StatusBadRequest, "referencePhoto is only taken by a flow that matches the face without nfc_read")
+	case hasReference && !slices.Contains(displayableImageTypes, in.ReferencePhoto.MimeType):
+		return pp.Session{}, rejected(http.StatusBadRequest, "referencePhoto must be a PNG, JPEG or WebP image")
+	}
+	if hasReference {
+		if err := checkReferencePhoto(in.ReferencePhoto); err != nil {
+			return pp.Session{}, err
+		}
+	}
+	if in.Retention > 0 {
+		retention = in.Retention
+	}
+	if in.TTL > 0 {
+		ttl = max(in.TTL, s.cfg.SessionMinTTL)
+	}
+	if s.cfg.SessionMaxLifetime > 0 {
+		ttl = min(ttl, s.cfg.SessionMaxLifetime)
+	}
+	sess, err := s.sessions.Create(session.Session{
+		TenantID: t.ID, Method: method, ClientReference: in.ClientReference,
+		Flow: in.FlowID, FlowVersion: flowVersion, Language: in.Language, RequestedAttributes: requestedAttributes,
+		ExpiresAt: time.Now().UTC().Add(ttl), RetentionOverride: retention,
+		ReferencePhoto: referenceBase64(in.ReferencePhoto), ReferencePhotoMime: referenceMime(in.ReferencePhoto),
+	})
+	if err != nil {
+		return pp.Session{}, fmt.Errorf("proofingengine: create session: %w", err)
+	}
+	s.auditProofing(sess, eventSessionCreated, nil)
+	out := pp.Session{ID: sess.ID, Token: sess.Token, ExpiresAt: sess.ExpiresAt, TTL: ttl, FlowVersion: sess.FlowVersion}
+	if sess.Method == session.MethodNFCPassport && sessionOpenForDevices(sess) == nil {
+		updated, claims, err := s.mintClaimTokens(sess, "create", session.DeviceRoleNative)
+		if err != nil {
+			return pp.Session{}, fmt.Errorf("proofingengine: mint claim: %w", err)
+		}
+		out.ExpiresAt = updated.ExpiresAt
+		if c := claims.Native; c != nil {
+			out.Claim = &pp.Claim{DeepLink: c.DeepLink, ExpiresAt: c.ExpiresAt}
+		}
+	}
+	return out, nil
+}
+
+// referenceBase64 and referenceMime are a relying party's reference photo
+// as a session holds it; "" for none.
+// checkReferencePhoto refuses a reference photo that does not decode within
+// the image limits now, rather than at the subject's face step, where it could
+// never be matched. A decoder busy or out of time is the engine's failure,
+// not the photo's.
+func checkReferencePhoto(img *pp.Image) error {
+	raw, _, err := decodeImageBase64(img.Base64, img.MimeType)
+	if err == nil {
+		err = images.Decode(raw, func(image.Image, string) error { return nil })
+	}
+	switch {
+	case errors.Is(err, images.ErrBusy), errors.Is(err, images.ErrDecodeTimeout):
+		return fmt.Errorf("proofingengine: check reference photo: %w", err)
+	case err != nil:
+		return rejected(http.StatusBadRequest, "referencePhoto is not a readable image")
+	}
+	return nil
+}
+
+func referenceBase64(img *pp.Image) string {
+	if img == nil {
+		return ""
+	}
+	return img.Base64
+}
+
+func referenceMime(img *pp.Image) string {
+	if img == nil {
+		return ""
+	}
+	return img.MimeType
+}
+
+// session resolves an org's session by id and token.
+func (s *Server) session(t pp.Tenant, id, token string) (session.Session, error) {
+	sess, err := s.sessions.AuthenticateSession(t.ID, id, token)
+	if errors.Is(err, session.ErrNotFound) {
+		return session.Session{}, fmt.Errorf("proofingengine: session: %w", pp.ErrNotFound)
+	}
+	if err != nil {
+		return session.Session{}, fmt.Errorf("proofingengine: session: %w", err)
+	}
+	return sess, nil
+}
+
+// statusView is a session's status without personal data.
+type statusView struct {
+	Status      pp.Status  `json:"status"`
+	ErrorCode   string     `json:"errorCode"`
+	CompletedAt *time.Time `json:"completedAt"`
+	Assurance   *struct {
+		Level      string `json:"level"`
+		EIDASLevel string `json:"eidasLevel"`
+	} `json:"assurance"`
+	Disclosure bool `json:"disclosure"`
+	Devices    []struct {
+		Role    string `json:"role"`
+		Current bool   `json:"current"`
+		Away    bool   `json:"away"`
+	} `json:"devices"`
+}
+
+// roundTrip re-reads v through JSON into out: a stored result holds typed
+// structs when fresh and maps once loaded, and this reads both the same way.
+func roundTrip(v, out any) error {
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return fmt.Errorf("proofingengine: encode view: %w", err)
+	}
+	if err := json.Unmarshal(raw, out); err != nil {
+		return fmt.Errorf("proofingengine: decode view: %w", err)
+	}
+	return nil
+}
+
+// SessionStatus reads a session's status and assurance summary, without
+// the document or images: the read to reconcile on.
+func (s *Server) SessionStatus(ctx context.Context, t pp.Tenant, id, token string) (pp.Result, error) {
+	sess, err := s.session(t, id, token)
+	if err != nil {
+		return pp.Result{}, err
+	}
+	_, disclosure := sess.Result["disclosure"]
+	var out statusView
+	if err := roundTrip(sessionStatusView{
+		ID: sess.ID, Status: sess.Status, ErrorCode: sess.ErrorCode, CompletedAt: sess.CompletedAt,
+		FlowVersion: sess.FlowVersion, Assurance: sess.Result["assurance"], Disclosure: disclosure,
+		Devices: s.statusDevices(sess.Access, time.Now()),
+	}, &out); err != nil {
+		return pp.Result{}, err
+	}
+	res := pp.Result{Status: out.Status, ErrorCode: out.ErrorCode, CompletedAt: out.CompletedAt, ExpiresAt: sess.ExpiresAt}
+	fd, err := s.idemFlow(ctx, sess)
+	if err != nil {
+		return pp.Result{}, fmt.Errorf("proofingengine: session status: %w", err)
+	}
+	var roles []string
+	for _, d := range out.Devices {
+		roles = append(roles, d.Role)
+		if d.Current && d.Role == string(session.DeviceRoleNative) {
+			res.App = pp.AppConnected
+			if d.Away {
+				res.App = pp.AppAway
+			}
+		}
+	}
+	if res.App == "" {
+		res.App = pp.AppWaiting
+	}
+	if appFinished(sess, fd) {
+		res.App = pp.AppFinished
+	}
+	res.AppDone = fd != nil && documentPhotoMissing(sess, fd)
+	res.Method = methodOf(roles)
+	if out.Disclosure {
+		res.Method = pp.MethodYivi
+	}
+	if sess.Method == session.MethodBrowser {
+		res.Method = pp.MethodBrowser
+	}
+	if out.Assurance != nil {
+		res.AssuranceLevel, res.EIDASLevel = out.Assurance.Level, out.Assurance.EIDASLevel
+	}
+	return res, nil
+}
+
+// idemFlow is the flow of a running Idem session, nil for any other session.
+func (s *Server) idemFlow(ctx context.Context, sess session.Session) (*flow.FlowDefinition, error) {
+	if sess.Method != session.MethodNFCPassport || sess.Status.Terminal() {
+		return nil, nil
+	}
+	return s.resolveSessionFlow(ctx, sess)
+}
+
+// appFinished reports whether a phone claimed sess and its app did every
+// step it runs: the phone no longer holds the session, whatever the browser
+// still does. With no browser step left the app still has to submit, so it
+// holds the session until it did.
+func appFinished(sess session.Session, fd *flow.FlowDefinition) bool {
+	return fd != nil && sess.Access.Native != nil && !nativeHandoffPending(sess, fd) &&
+		(sess.Status == session.StatusNeedsReview || !requiredStepsComplete(sess, fd))
+}
+
+// methodOf is how the subject took part on a device: the slots of the
+// devices that claimed the session, native first. A Yivi disclosure in the
+// result is the Yivi method instead, which the caller sets.
+func methodOf(roles []string) pp.Method {
+	switch {
+	case slices.Contains(roles, string(session.DeviceRoleNative)):
+		return pp.MethodIdem
+	case slices.Contains(roles, string(session.DeviceRoleWeb)):
+		return pp.MethodBrowser
+	default:
+		return ""
+	}
+}
+
+// resultView is the part of a session's result the wallet reads.
+type resultView struct {
+	Status      pp.Status  `json:"status"`
+	ErrorCode   string     `json:"errorCode"`
+	CompletedAt *time.Time `json:"completedAt"`
+	Result      *struct {
+		Assurance *assuranceView `json:"assurance"`
+		Document  *struct {
+			Type         string `json:"type"`
+			Kind         string `json:"kind"`
+			IssuingState string `json:"issuingState"`
+			Nationality  string `json:"nationality"`
+			DisplayName  string `json:"displayName"`
+			FirstName    string `json:"firstName"`
+			LastName     string `json:"lastName"`
+			// The chip's DG11 name, never cut off; absent without DG11.
+			FullFirstName string `json:"fullFirstName"`
+			FullLastName  string `json:"fullLastName"`
+			DateOfBirth   string `json:"dateOfBirth"`
+			DateOfExpiry  string `json:"dateOfExpiry"`
+			// PersonalNumber is the BSN as the flow's BSN policy released it.
+			PersonalNumber string `json:"personalNumber"`
+		} `json:"document"`
+		ChipChecks *struct {
+			Passive *struct {
+				SODSignatureValid    *bool `json:"sodSignatureValid"`
+				DataGroupHashesValid *bool `json:"dataGroupHashesValid"`
+				CSCATrustChainValid  *bool `json:"cscaTrustChainValid"`
+			} `json:"passiveAuthentication"`
+			Active *struct {
+				Attempted *bool `json:"attempted"`
+				Passed    *bool `json:"passed"`
+			} `json:"activeAuthentication"`
+		} `json:"chipChecks"`
+		Biometrics *struct {
+			FaceMatchScore *float64 `json:"faceMatchScore"`
+			LivenessResult string   `json:"livenessResult"`
+		} `json:"biometrics"`
+		FaceCheck  *faceCheckInfo `json:"faceCheck"`
+		Disclosure *struct {
+			Source string `json:"source"`
+		} `json:"disclosure"`
+		AgeOver           *pp.AgeOver        `json:"ageOver"`
+		Photo             *imageView         `json:"photo"`
+		Selfie            *imageView         `json:"selfie"`
+		ReferencePhoto    *imageView         `json:"referencePhoto"`
+		FaceReference     string             `json:"faceReference"`
+		DocumentImage     *imageView         `json:"documentImage"`
+		DocumentImageBack *imageView         `json:"documentImageBack"`
+		DocumentCheck     *documentCheckInfo `json:"documentCheck"`
+	} `json:"result"`
+	Devices []struct {
+		Role string `json:"role"`
+	} `json:"devices"`
+	// chipRead is whether the session read the document's chip, whether or not
+	// its result releases chip_checks.
+	chipRead bool
+	// browser is a session the browser ran alone (session.MethodBrowser).
+	browser bool
+}
+
+// assuranceView is the part of a result's assurance the wallet reads.
+type assuranceView struct {
+	Level      string `json:"level"`
+	EIDASLevel string `json:"eidasLevel"`
+	Categories []struct {
+		Check flow.Check `json:"check"`
+		State checkState `json:"state"`
+	} `json:"categories"`
+}
+
+// check is the outcome the assurance scored for c, as a pp.Check* value.
+func (a *assuranceView) check(c flow.Check) string {
+	if a == nil {
+		return pp.CheckNotPerformed
+	}
+	for _, cat := range a.Categories {
+		if cat.Check != c {
+			continue
+		}
+		switch cat.State {
+		case checkStatePass:
+			return pp.CheckValid
+		case checkStateFail, checkStateError:
+			return pp.CheckInvalid
+		case checkStateNotApplicable, checkStateNotRun:
+		}
+	}
+	return pp.CheckNotPerformed
+}
+
+// chipRead reports whether sess's evidence came off the document's chip.
+func chipRead(sess session.Session) bool {
+	return sess.Steps.NFC != nil || (sess.Steps.Document != nil && sess.Steps.Document.Source == session.DocumentSourceChip)
+}
+
+func (s *Server) readResult(t pp.Tenant, id, token string) (resultView, error) {
+	sess, err := s.session(t, id, token)
+	if err != nil {
+		return resultView{}, err
+	}
+	var out resultView
+	err = roundTrip(sessionResultView{
+		ID: sess.ID, Status: sess.Status, ErrorCode: sess.ErrorCode,
+		Result: sess.Result, CompletedAt: sess.CompletedAt, Devices: deviceParticipation(sess.Access),
+	}, &out)
+	out.chipRead = chipRead(sess)
+	out.browser = sess.Method == session.MethodBrowser
+	return out, err
+}
+
+func (v resultView) base() pp.Result {
+	res := pp.Result{Status: v.Status, ErrorCode: v.ErrorCode, CompletedAt: v.CompletedAt}
+	roles := make([]string, 0, len(v.Devices))
+	for _, d := range v.Devices {
+		roles = append(roles, d.Role)
+	}
+	res.Method = methodOf(roles)
+	if v.Result != nil && v.Result.Disclosure != nil {
+		res.Method = pp.MethodYivi
+	}
+	if v.browser {
+		res.Method = pp.MethodBrowser
+	}
+	if v.Result != nil && v.Result.Assurance != nil {
+		res.AssuranceLevel, res.EIDASLevel = v.Result.Assurance.Level, v.Result.Assurance.EIDASLevel
+	}
+	return res
+}
+
+// SessionResult reads a session's outcome and the holder's name.
+func (s *Server) SessionResult(_ context.Context, t pp.Tenant, id, token string) (pp.Result, error) {
+	v, err := s.readResult(t, id, token)
+	if err != nil {
+		return pp.Result{}, err
+	}
+	res := v.base()
+	if v.Result != nil && v.Result.Document != nil {
+		doc := v.Result.Document
+		res.Name = strings.TrimSpace(doc.DisplayName)
+		if res.Name == "" {
+			res.Name = strings.TrimSpace(strings.TrimSpace(doc.FirstName) + " " + strings.TrimSpace(doc.LastName))
+		}
+	}
+	return res, nil
+}
+
+// SessionIdentity reads who was proofed and on what evidence: never the
+// document number or place of birth.
+func (s *Server) SessionIdentity(_ context.Context, t pp.Tenant, id, token string) (pp.Identity, error) {
+	v, err := s.readResult(t, id, token)
+	if err != nil {
+		return pp.Identity{}, err
+	}
+	out := pp.Identity{Result: v.base()}
+	res := v.Result
+	if res == nil {
+		return out, nil
+	}
+	ev := &pp.Evidence{
+		Type:        evidenceTypeOf(res.Disclosure != nil, res.FaceReference, v.chipRead),
+		PassiveAuth: pp.CheckNotPerformed, ActiveAuth: pp.CheckNotPerformed,
+	}
+	if doc := res.Document; doc != nil {
+		out.GivenName, out.FamilyName = strings.TrimSpace(doc.FirstName), strings.TrimSpace(doc.LastName)
+		out.FullGivenName, out.FullFamilyName = strings.TrimSpace(doc.FullFirstName), strings.TrimSpace(doc.FullLastName)
+		out.BirthDate, out.Nationality, out.PersonalNumber = doc.DateOfBirth, doc.Nationality, doc.PersonalNumber
+		ev.DocumentType, ev.DocumentKind, ev.IssuingState, ev.ExpiryDate = doc.Type, doc.Kind, doc.IssuingState, doc.DateOfExpiry
+	}
+	if chip := res.ChipChecks; chip != nil {
+		if p := chip.Passive; p != nil {
+			ev.PassiveAuth = checkOf(allTrue(p.SODSignatureValid, p.DataGroupHashesValid, p.CSCATrustChainValid))
+		}
+		if a := chip.Active; a != nil && a.Attempted != nil && *a.Attempted {
+			ev.ActiveAuth = checkOf(a.Passed)
+		}
+	} else if ev.Type == pp.EvidenceEMRTD {
+		// chip_checks not released: the assurance still scored them.
+		ev.PassiveAuth = res.Assurance.check(flow.CheckNFCPassiveAuth)
+		ev.ActiveAuth = res.Assurance.check(flow.CheckNFCChipAuth)
+	}
+	if b := res.Biometrics; b != nil {
+		ev.FaceMatch, ev.Liveness = b.FaceMatchScore, b.LivenessResult
+	} else if f := res.FaceCheck; f != nil {
+		ev.FaceMatch, ev.Liveness = f.FaceMatchScore, f.LivenessResult
+	}
+	addDocumentCheckEvidence(ev, res.DocumentCheck)
+	out.Evidence = ev
+	out.AgeOver = res.AgeOver
+	out.Photo, out.Selfie, out.ReferencePhoto = res.Photo.image(), res.Selfie.image(), res.ReferencePhoto.image()
+	out.DocumentImage, out.DocumentImageBack = res.DocumentImage.image(), res.DocumentImageBack.image()
+	return out, nil
+}
+
+// evidenceTypeOf is a result's pp.Evidence* type: a Yivi disclosure, a
+// reference photo the customer sent, the chip, or else the document photo.
+func evidenceTypeOf(disclosed bool, faceReference string, chipRead bool) string {
+	switch {
+	case faceReference == faceReferenceRelyingParty:
+		return pp.EvidenceReferencePhoto
+	case disclosed:
+		return pp.EvidenceYivi
+	case chipRead:
+		return pp.EvidenceEMRTD
+	}
+	return pp.EvidenceDocumentPhoto
+}
+
+// addDocumentCheckEvidence adds the document scan's check c, if any, to ev.
+func addDocumentCheckEvidence(ev *pp.Evidence, c *documentCheckInfo) {
+	if c == nil {
+		return
+	}
+	ev.DocumentVerdict, ev.DocumentScore = c.Verdict, c.Score
+	ev.DocumentFields, ev.DocumentZones = checkOf(c.FieldsValid), checkOf(c.ZonesMatch)
+	if ev.DocumentKind == "" {
+		ev.DocumentKind = c.DocumentKind
+	}
+}
+
+// imageView is an image in a result.
+type imageView struct {
+	ImageBase64 string `json:"imageBase64"`
+	MimeType    string `json:"mimeType"`
+}
+
+// displayableImageTypes are the formats a browser shows; anything else (an
+// unconverted JPEG2000 portrait, or a type a browser would run) is left out.
+var displayableImageTypes = []string{"image/png", "image/jpeg", "image/webp"}
+
+func (i *imageView) image() *pp.Image {
+	if i == nil || i.ImageBase64 == "" || !slices.Contains(displayableImageTypes, i.MimeType) {
+		return nil
+	}
+	if _, err := base64.StdEncoding.DecodeString(i.ImageBase64); err != nil {
+		return nil
+	}
+	return &pp.Image{MimeType: i.MimeType, Base64: i.ImageBase64}
+}
+
+// allTrue is nil when no check ran, else whether each that ran passed.
+func allTrue(checks ...*bool) *bool {
+	var ran, ok bool
+	for _, c := range checks {
+		if c == nil {
+			continue
+		}
+		if !ran {
+			ran, ok = true, true
+		}
+		ok = ok && *c
+	}
+	if !ran {
+		return nil
+	}
+	return &ok
+}
+
+func checkOf(passed *bool) string {
+	switch {
+	case passed == nil:
+		return pp.CheckNotPerformed
+	case *passed:
+		return pp.CheckValid
+	default:
+		return pp.CheckInvalid
+	}
+}
+
+// ---- review, handover, cancel, delete ---------------------------------------
+
+// errCodeReviewRejected is a rejection a reviewer decided without naming a code.
+const errCodeReviewRejected = "MANUAL_REVIEW_REJECTED"
+
+// Bounds on a review decision's reason and reviewer.
+const (
+	maxReviewReasonLength   = 500
+	maxReviewReviewerLength = 200
+)
+
+var reviewErrorCodePattern = regexp.MustCompile(`^[A-Z0-9_]{1,64}$`)
+
+var errNotUnderReview = errors.New("the session is not under review")
+
+// DecideReview settles a session in needs_review as the reviewer decided, and
+// drops the face photos it held for the review unless its flow keeps them
+// (dropFacePhotos).
+func (s *Server) DecideReview(ctx context.Context, t pp.Tenant, id, token string, d pp.ReviewDecision) error {
+	reason, reviewer := strings.TrimSpace(d.Reason), strings.TrimSpace(d.Reviewer)
+	switch {
+	case d.Approve && d.ErrorCode != "":
+		return rejected(http.StatusBadRequest, "errorCode is only for a rejection")
+	case d.ErrorCode != "" && !reviewErrorCodePattern.MatchString(d.ErrorCode):
+		return rejected(http.StatusBadRequest, "errorCode must be 1-64 of A-Z, 0-9 and _")
+	case reason == "" || utf8.RuneCountInString(reason) > maxReviewReasonLength:
+		return rejected(http.StatusBadRequest, "reason is required (max 500 characters)")
+	case reviewer == "" || utf8.RuneCountInString(reviewer) > maxReviewReviewerLength:
+		return rejected(http.StatusBadRequest, "reviewer is required (max 200 characters)")
+	}
+	to, errorCode := session.StatusApproved, ""
+	if !d.Approve {
+		to, errorCode = session.StatusRejected, d.ErrorCode
+		if errorCode == "" {
+			errorCode = errCodeReviewRejected
+		}
+	}
+	sess, err := s.session(t, id, token)
+	if err != nil {
+		return err
+	}
+	fd, err := s.resolveSessionFlow(ctx, sess)
+	if err != nil {
+		return fmt.Errorf("proofingengine: decide review: %w", err)
+	}
+	bsnPolicy, redaction := effectivePrivacyPolicy(fd)
+	updated, err := s.sessions.Update(sess.TenantID, sess.ID, func(sess *session.Session) error {
+		if sess.Status != session.StatusNeedsReview {
+			return errNotUnderReview
+		}
+		now := time.Now().UTC()
+		if err := sess.SetStatus(to, now); err != nil {
+			return err
+		}
+		// Who decided and why stay with the session, sealed like the rest:
+		// never in the server log, where a free-text reason does not belong.
+		sess.ErrorCode = errorCode
+		sess.Review = &session.ReviewDecision{Reviewer: reviewer, Reason: reason, DecidedAt: now}
+		dropFacePhotos(sess, bsnPolicy, redaction)
+		return nil
+	})
+	switch {
+	case errors.Is(err, session.ErrNotFound):
+		return fmt.Errorf("proofingengine: decide review: %w", pp.ErrNotFound)
+	case errors.Is(err, errNotUnderReview):
+		return rejected(http.StatusConflict, err.Error())
+	case err != nil:
+		return fmt.Errorf("proofingengine: decide review: %w", err)
+	}
+	details := map[string]any{detailStage: "manual_review"}
+	if updated.ErrorCode != "" {
+		details[detailErrorCode] = updated.ErrorCode
+	}
+	s.auditProofing(updated, eventTypeForStatus(updated.Status), details)
+	return nil
+}
+
+// errWrongSessionToken is a session that exists under the org but not with the
+// token given.
+var errWrongSessionToken = errors.New("the session token does not match")
+
+// errDeviceActive refuses a handover of a slot whose device is still there.
+var errDeviceActive = errors.New("the device holding this slot is still active; only it can hand the session over")
+
+var errAppFinished = errors.New("the Idem app did every step it runs; there is nothing left to hand over")
+
+// SessionHandover gives a fresh Idem app link for the native slot: its claim
+// while empty, a handover once its app left (inactive or stale). An app
+// still active is refused with pp.CodeDeviceActive.
+func (s *Server) SessionHandover(ctx context.Context, t pp.Tenant, id, token string) (pp.Claim, error) {
+	sess, err := s.session(t, id, token)
+	if err != nil {
+		return pp.Claim{}, err
+	}
+	if sess.Method != session.MethodNFCPassport {
+		return pp.Claim{}, rejected(http.StatusConflict, "only Idem-app sessions have device slots")
+	}
+	fd, err := s.idemFlow(ctx, sess)
+	if err != nil {
+		return pp.Claim{}, fmt.Errorf("proofingengine: session handover: %w", err)
+	}
+	role := session.DeviceRoleNative
+	var grant string
+	slotClaimed := false
+	updated, err := s.sessions.Update(sess.TenantID, sess.ID, func(sess *session.Session) error {
+		if err := sessionOpenForDevices(*sess); err != nil {
+			return err
+		}
+		if appFinished(*sess, fd) {
+			return errAppFinished
+		}
+		ttl := s.cfg.ClaimTokenTTL
+		if d := sess.Access.Slot(role); d != nil {
+			if !s.deviceAway(d, time.Now()) {
+				return errDeviceActive
+			}
+			ttl, slotClaimed = s.cfg.HandoverTokenTTL, true
+		}
+		var err error
+		grant, err = sess.Access.MintHandover(role, s.grantExpiry(*sess, ttl))
+		return err
+	})
+	switch {
+	case errors.Is(err, errDeviceActive):
+		return pp.Claim{}, &pp.RejectedError{Status: http.StatusConflict, Message: err.Error(), Code: pp.CodeDeviceActive}
+	case errors.Is(err, errAppFinished):
+		return pp.Claim{}, &pp.RejectedError{Status: http.StatusConflict, Message: err.Error(), Code: pp.CodeAppFinished}
+	case errors.Is(err, errSessionExpired):
+		return pp.Claim{}, &pp.RejectedError{Status: http.StatusGone, Message: err.Error(), Code: errCodeSessionExpired}
+	case errors.Is(err, errSessionComplete):
+		return pp.Claim{}, &pp.RejectedError{Status: http.StatusConflict, Message: err.Error(), Code: errCodeSessionComplete}
+	case err != nil:
+		return pp.Claim{}, fmt.Errorf("proofingengine: session handover: %w", err)
+	}
+	expiresAt := updated.Access.Grant(role).ExpiresAt
+	event := eventClaimTokenIssued
+	if slotClaimed {
+		event = eventHandoverIssued
+	}
+	s.auditProofing(updated, event, map[string]any{detailRole: string(role), detailVia: "relying_party_handover"})
+	resp := s.grantResponse(role, grant, expiresAt)
+	return pp.Claim{DeepLink: resp.DeepLink, ExpiresAt: expiresAt, Handover: slotClaimed}, nil
+}
+
+// needsReferencePhoto reports whether fd matches the face against a photo
+// the customer sends: a face match without nfc_read has no chip photo. ID
+// Scan matches against the photographed document's portrait instead.
+func needsReferencePhoto(fd *flow.FlowDefinition) bool {
+	return flowNeedsFaceMatch(fd) && !slices.Contains(fd.Steps, flow.StepNFCRead) && fd.FaceProvider != flow.FaceProviderIDScan
+}
+
+// yiviFits refuses the Yivi method on fd where it does not fit. The Yivi
+// method is the disclosure, with no face check and no chip read: it reaches
+// eIDAS low and matches no reference photo. The wallet offers it only where
+// that fits (yiviAppAvailable); the engine refuses the rest too.
+func yiviFits(fd *flow.FlowDefinition) error {
+	switch {
+	case !flow.MeetsLevel(flow.AssuranceLevelLow, fd.RequiredAssuranceLevel):
+		return rejected(http.StatusBadRequest, "the Yivi method reaches eIDAS low only, below the flow's required level")
+	case needsReferencePhoto(fd):
+		return rejected(http.StatusBadRequest, "the Yivi method runs no face check, so it matches no reference photo")
+	}
+	return nil
+}
+
+// methodAllowed refuses an app method fd does not allow (flow.AllowsApp), and
+// the Yivi method on a flow it cannot serve (yiviFits).
+func methodAllowed(fd *flow.FlowDefinition, method session.Method) error {
+	switch method {
+	case session.MethodNFCPassport:
+		if !fd.AllowsApp(flow.AppIdem) {
+			return rejected(http.StatusBadRequest, "this flow does not run in the Idem app")
+		}
+	case session.MethodBiometricBoundLogin:
+		if !fd.AllowsApp(flow.AppYivi) {
+			return rejected(http.StatusBadRequest, "this flow does not run in the Yivi app")
+		}
+		return yiviFits(fd)
+	}
+	return nil
+}
+
+var errMethodChosen = errors.New("the session's app is chosen already")
+
+// ChooseMethod sets the app of a session created without one (pp.MethodPending)
+// once the subject picked it. An Idem session answers its app link; a Yivi
+// one is started from the wallet's page.
+func (s *Server) ChooseMethod(ctx context.Context, t pp.Tenant, id, token string, method pp.Method) (pp.Session, error) {
+	sess, err := s.session(t, id, token)
+	if err != nil {
+		return pp.Session{}, err
+	}
+	var chosen session.Method
+	switch method {
+	case pp.MethodIdem:
+		chosen = session.MethodNFCPassport
+	case pp.MethodYivi:
+		chosen = session.MethodBiometricBoundLogin
+	default:
+		return pp.Session{}, rejected(http.StatusBadRequest, fmt.Sprintf("method %q is not %s or %s", method, pp.MethodIdem, pp.MethodYivi))
+	}
+	fd, err := s.flows.Get(ctx, t.ID, sess.Flow, sess.FlowVersion)
+	if err != nil {
+		return pp.Session{}, fmt.Errorf("proofingengine: resolve flow: %w", err)
+	}
+	if err := methodAllowed(&fd, chosen); err != nil {
+		return pp.Session{}, err
+	}
+	updated, err := s.sessions.Update(sess.TenantID, sess.ID, func(sess *session.Session) error {
+		if err := sessionOpenForDevices(*sess); err != nil {
+			return err
+		}
+		if sess.Method != session.MethodPending {
+			return errMethodChosen
+		}
+		sess.Method = chosen
+		return nil
+	})
+	switch {
+	case errors.Is(err, errSessionExpired):
+		return pp.Session{}, &pp.RejectedError{Status: http.StatusGone, Message: err.Error(), Code: errCodeSessionExpired}
+	case errors.Is(err, errSessionComplete):
+		return pp.Session{}, &pp.RejectedError{Status: http.StatusConflict, Message: err.Error(), Code: errCodeSessionComplete}
+	case errors.Is(err, errMethodChosen):
+		return pp.Session{}, rejected(http.StatusConflict, err.Error())
+	case err != nil:
+		return pp.Session{}, fmt.Errorf("proofingengine: choose method: %w", err)
+	}
+	out := pp.Session{ID: updated.ID, ExpiresAt: updated.ExpiresAt, FlowVersion: updated.FlowVersion}
+	if chosen == session.MethodNFCPassport {
+		claim, err := s.SessionHandover(ctx, t, id, token)
+		if err != nil {
+			return pp.Session{}, err
+		}
+		out.Claim = &claim
+	}
+	return out, nil
+}
+
+// CancelSession ends a session with no outcome yet; one that has an outcome
+// is refused (409), one already cancelled is left as it is.
+func (s *Server) CancelSession(_ context.Context, t pp.Tenant, id, token string) error {
+	sess, err := s.session(t, id, token)
+	if err != nil {
+		return err
+	}
+	var transitionErr error
+	alreadyCancelled := false
+	updated, err := s.sessions.Update(sess.TenantID, sess.ID, func(sess *session.Session) error {
+		if sess.Status == session.StatusCancelled {
+			alreadyCancelled = true
+			return nil
+		}
+		transitionErr = sess.SetStatus(session.StatusCancelled, time.Now().UTC())
+		return transitionErr
+	})
+	switch {
+	case errors.Is(err, session.ErrNotFound):
+		return fmt.Errorf("proofingengine: cancel session: %w", pp.ErrNotFound)
+	case err != nil && errors.Is(err, transitionErr):
+		return rejected(http.StatusConflict, err.Error())
+	case err != nil:
+		return fmt.Errorf("proofingengine: cancel session: %w", err)
+	}
+	if !alreadyCancelled {
+		s.queueRegulaSweep(context.Background(), updated)
+		s.auditProofing(updated, eventSessionCancelled, nil)
+	}
+	return nil
+}
+
+// DeleteSession erases a session and its evidence; one already gone is fine.
+// The Regula transactions under its tag are swept now, not after the grace.
+func (s *Server) DeleteSession(ctx context.Context, t pp.Tenant, id, token string) error {
+	sess, err := s.session(t, id, token)
+	if errors.Is(err, pp.ErrNotFound) {
+		// Gone is fine; there with another token is not erased, and the caller
+		// must not record it as erased.
+		if _, err := s.sessions.ChangedAt(t.ID, id); err == nil {
+			return fmt.Errorf("proofingengine: delete session %s: %w", id, errWrongSessionToken)
+		}
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if err := s.sessions.Delete(sess.TenantID, sess.ID); err != nil && !errors.Is(err, session.ErrNotFound) {
+		return fmt.Errorf("proofingengine: delete session: %w", err)
+	}
+	s.sweepRegulaNow(ctx, sess)
+	s.auditProofing(sess, eventSessionPurged, map[string]any{"priorStatus": string(sess.Status)})
+	return nil
+}
+
+// SetSessionsRetention sets how long the engine keeps the tenant's sessions ids
+// once they ended, in place of what each was created with
+// (SessionInput.Retention); it must be positive. A session already gone is left
+// out.
+func (s *Server) SetSessionsRetention(_ context.Context, t pp.Tenant, ids []string, retention time.Duration) error {
+	if retention < time.Second {
+		return rejected(http.StatusBadRequest, "retention must be at least a second")
+	}
+	if err := s.sessions.SetRetention(t.ID, ids, retention); err != nil {
+		return fmt.Errorf("proofingengine: set session retention: %w", err)
+	}
+	return nil
+}
+
+// SubmitReference hands the engine the subject's verified OpenID4VP
+// disclosure, which decides a Yivi-method session.
+func (s *Server) SubmitReference(ctx context.Context, t pp.Tenant, id, token string, ref pp.Reference) (pp.YiviDisclosure, error) {
+	sess, err := s.session(t, id, token)
+	if err != nil {
+		return pp.YiviDisclosure{}, err
+	}
+	return s.acceptReference(ctx, sess, ref)
+}
+
+// SubmitDocumentPhoto stores the document_photo step's photos, taken in the
+// browser by a document scan service, for a session of either method. A
+// repeat keeps the photos already recorded.
+func (s *Server) SubmitDocumentPhoto(ctx context.Context, t pp.Tenant, id, token string, p pp.DocumentPhoto) error {
+	sess, err := s.session(t, id, token)
+	if err != nil {
+		return err
+	}
+	fd, err := s.resolveSessionFlow(ctx, sess)
+	if err != nil {
+		return fmt.Errorf("proofingengine: submit document photo: %w", err)
+	}
+	if fd == nil || !slices.Contains(fd.Steps, flow.StepDocumentPhoto) {
+		return rejected(http.StatusConflict, "this session's flow takes no document photo")
+	}
+	front, back, err := documentPhotoSides(p)
+	if err != nil {
+		return rejected(http.StatusBadRequest, err.Error())
+	}
+	scansFace := fd.FaceProvider == flow.FaceProviderIDScan
+	if scansFace != (p.Face != nil) {
+		return rejected(http.StatusBadRequest, "the face checks come with the document photo exactly when the flow's face provider is idscan")
+	}
+
+	updated, err := s.sessions.Update(sess.TenantID, sess.ID, func(sess *session.Session) error {
+		if err := sessionOpenForDevices(*sess); err != nil {
+			return err
+		}
+		if sess.Steps.DocumentPhoto != nil {
+			return errStepAlreadyRecorded
+		}
+		now := time.Now().UTC()
+		if err := recordIDScanFace(sess, fd, p.Face, now); err != nil {
+			return err
+		}
+		check := documentCheckEvidence(p.Check)
+		// An age check keeps the answer, never the date of birth, as for the chip.
+		ageOver := ageOverOf(&documentInfo{DateOfBirth: check.Document.DateOfBirth}, fd, now)
+		if asksAge(fd) {
+			check.Document.DateOfBirth = ""
+		}
+		sess.Steps.DocumentPhoto = &session.DocumentPhotoStepEvidence{
+			Front: front, Back: back, Timing: stepTiming(nil, now), Check: check, AgeOver: ageOver,
+		}
+		sess.Access.RecordStep(session.DeviceRoleWeb, string(flow.StepDocumentPhoto))
+		return advanceToInProgress(sess, now)
+	})
+	switch {
+	case errors.Is(err, errStepAlreadyRecorded):
+		updated, err = s.sessions.Get(sess.TenantID, sess.ID)
+		if err != nil {
+			return fmt.Errorf("proofingengine: submit document photo: %w", err)
+		}
+	case errors.Is(err, errSessionExpired):
+		return rejected(http.StatusGone, "session expired")
+	case errors.Is(err, errSessionComplete):
+		return rejected(http.StatusConflict, "session already finished")
+	case err != nil:
+		return fmt.Errorf("proofingengine: submit document photo: %w", err)
+	default:
+		s.auditDocumentPhoto(updated, fd, p)
+	}
+	return s.finishAfterBrowserStep(ctx, updated, fd)
+}
+
+// FailDocumentScan rejects a session whose document scan used up the scan
+// service's own attempts: a new transaction would give the person new ones.
+func (s *Server) FailDocumentScan(ctx context.Context, t pp.Tenant, id, token string, f pp.DocumentScanFailure) error {
+	sess, err := s.session(t, id, token)
+	if err != nil {
+		return err
+	}
+	fd, err := s.resolveSessionFlow(ctx, sess)
+	if err != nil {
+		return fmt.Errorf("proofingengine: fail document scan: %w", err)
+	}
+	if fd == nil || !slices.Contains(fd.Steps, flow.StepDocumentPhoto) {
+		return rejected(http.StatusConflict, "this session's flow takes no document photo")
+	}
+	code := documentScanFailureCode(f)
+	bsnPolicy, redaction := effectivePrivacyPolicy(fd)
+	updated, err := s.sessions.Update(sess.TenantID, sess.ID, func(sess *session.Session) error {
+		if err := sessionOpenForDevices(*sess); err != nil {
+			return err
+		}
+		if sess.Steps.DocumentPhoto != nil {
+			return errStepAlreadyRecorded
+		}
+		if err := settleBoundLogin(sess, session.StatusRejected, time.Now().UTC()); err != nil {
+			return err
+		}
+		sess.ErrorCode = code
+		redactStepsForStorage(sess, bsnPolicy, redaction)
+		return nil
+	})
+	switch {
+	case errors.Is(err, errStepAlreadyRecorded):
+		return rejected(http.StatusConflict, "the document photo is in already")
+	case errors.Is(err, errSessionExpired):
+		return rejected(http.StatusGone, "session expired")
+	case errors.Is(err, errSessionComplete):
+		return rejected(http.StatusConflict, "session already finished")
+	case err != nil:
+		return fmt.Errorf("proofingengine: fail document scan: %w", err)
+	}
+	details := actorDetails(updated, session.DeviceRoleWeb)
+	details[detailErrorCode] = code
+	details[detailScanTask], details[detailScanAttempts] = f.Task, f.Attempts
+	if f.Code != "" {
+		details[detailScanCode] = f.Code
+	}
+	s.auditProofing(updated, eventTypeForStatus(updated.Status), details)
+	return nil
+}
+
+// documentScanExpiredCode is the scan service's code for a document past its
+// expiry date.
+const documentScanExpiredCode = "expiration_criteria_not_met"
+
+// documentScanFailureCode is the rejection code of f: the face step's for a
+// face task, an expired document's when the scan says so, else
+// errCodeDocScanFailed.
+func documentScanFailureCode(f pp.DocumentScanFailure) string {
+	switch {
+	case f.Task == pp.DocumentScanTaskFaceLiveness:
+		return errCodeLivenessFailed
+	case f.Task == pp.DocumentScanTaskFaceMatch:
+		return errCodeFaceNoMatch
+	case f.Code == documentScanExpiredCode:
+		return errCodeDocExpired
+	}
+	return errCodeDocScanFailed
+}
+
+// documentPhotoSides are p's front and, when it has one, back.
+func documentPhotoSides(p pp.DocumentPhoto) (session.DocumentPhotoSide, *session.DocumentPhotoSide, error) {
+	front, err := documentPhotoSide("front", p.Front, p.BSNRedacted)
+	if err != nil || p.Back == nil {
+		return front, nil, err
+	}
+	back, err := documentPhotoSide("back", *p.Back, p.BSNRedacted)
+	if err != nil {
+		return front, nil, err
+	}
+	return front, &back, nil
+}
+
+// recordIDScanFace stores the face checks f ID Scan made with the document
+// photo, if any, as sess's face step.
+func recordIDScanFace(sess *session.Session, fd *flow.FlowDefinition, f *pp.FaceCheck, now time.Time) error {
+	if f == nil {
+		return nil
+	}
+	face, err := idScanFaceEvidence(fd, *f, now)
+	if err != nil {
+		return rejected(http.StatusBadRequest, err.Error())
+	}
+	sess.Steps.Selfie = face
+	sess.FaceAttempts = face.Attempts
+	sess.Access.RecordStep(session.DeviceRoleWeb, faceStepName(fd))
+	return nil
+}
+
+// auditDocumentPhoto audits the document_photo step p, and the face step ID
+// Scan made with it.
+func (s *Server) auditDocumentPhoto(updated session.Session, fd *flow.FlowDefinition, p pp.DocumentPhoto) {
+	details := actorDetails(updated, session.DeviceRoleWeb)
+	// The scan service's judgement, in the server's log line.
+	if p.Check.Verdict != "" {
+		details[detailDocumentVerdict] = string(p.Check.Verdict)
+	}
+	if p.Check.Score != nil {
+		details[detailDocumentScore] = *p.Check.Score
+	}
+	s.auditStepSubmitted(updated, fd, string(flow.StepDocumentPhoto), details)
+	if p.Face == nil {
+		return
+	}
+	face := actorDetails(updated, session.DeviceRoleWeb)
+	face["livenessPassed"] = p.Face.LivenessPassed
+	face["provider"] = faceProviderIDScan
+	s.auditStepSubmitted(updated, fd, faceStepName(fd), face)
+}
+
+// documentCheckEvidence is c as the session keeps it.
+func documentCheckEvidence(c pp.DocumentCheck) *session.DocumentCheck {
+	d := c.Document
+	return &session.DocumentCheck{
+		Verdict: string(c.Verdict), Score: c.Score, FieldsValid: c.FieldsValid, ZonesMatch: c.ZonesMatch,
+		Document: session.ScannedDocument{
+			Kind: d.Kind, IssuingState: flow.IssuingStateCode(d.IssuingState), Nationality: d.Nationality, Number: d.Number,
+			Surname: d.Surname, GivenNames: d.GivenNames, DateOfBirth: d.DateOfBirth, DateOfExpiry: d.DateOfExpiry,
+			Sex: d.Sex, PersonalNumber: d.PersonalNumber,
+		},
+	}
+}
+
+// finishAfterBrowserStep decides a session once the browser's step came in
+// last: one whose flow has no app steps, which no app is there to submit, and
+// an Idem session whose app finished its part before the document scan. A
+// Yivi session is decided by its disclosure (SubmitReference). A browser
+// step still to come (the face after the document photo) leaves it
+// undecided, which is no failure of the step just recorded.
+func (s *Server) finishAfterBrowserStep(ctx context.Context, sess session.Session, fd *flow.FlowDefinition) error {
+	if sess.Status.Terminal() || sess.Status == session.StatusNeedsReview {
+		return nil
+	}
+	switch {
+	case sess.Method == session.MethodBrowser:
+	case sess.Method == session.MethodNFCPassport && requiredStepsComplete(sess, fd):
+	default:
+		return nil
+	}
+	if _, err := s.finishSession(ctx, sess, fd, appCaller{system: true}); err != nil && !errors.Is(err, errSessionComplete) && !errors.Is(err, errStepsIncomplete) {
+		return fmt.Errorf("proofingengine: finish after the browser's step: %w", err)
+	}
+	return nil
+}
+
+// documentPhotoSide is one side of a submitted document photo, decoded.
+func documentPhotoSide(name string, in pp.Image, bsnRedacted bool) (session.DocumentPhotoSide, error) {
+	if in.Base64 == "" {
+		return session.DocumentPhotoSide{}, fmt.Errorf("%s image is required", name)
+	}
+	raw, mime, err := decodeImageBase64(in.Base64, firstNonEmpty(in.MimeType, defaultImageMime))
+	if err != nil {
+		return session.DocumentPhotoSide{}, fmt.Errorf("invalid %s image: %w", name, err)
+	}
+	return session.DocumentPhotoSide{Image: base64.StdEncoding.EncodeToString(raw), MimeType: mime, BSNRedacted: bsnRedacted}, nil
+}
+
+func privacyBSN(p string) privacy.BSNPolicy { return privacy.BSNPolicy(p) }
+
+func privacyBasis(b string) privacy.LegalBasis { return privacy.LegalBasis(b) }
