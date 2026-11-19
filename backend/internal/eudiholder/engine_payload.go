@@ -70,33 +70,42 @@ func resolveSdJwt(raw string) (map[string]any, error) {
 func expandDisclosures(v any, byDigest map[string][]any) any {
 	switch o := v.(type) {
 	case map[string]any:
-		out := make(map[string]any, len(o))
-		for k, val := range o {
-			if k != "_sd" && k != "_sd_alg" {
-				out[k] = expandDisclosures(val, byDigest)
-			}
-		}
-		digests, _ := o["_sd"].([]any)
-		for _, dg := range digests {
-			if d, ok := byDigest[fmt.Sprint(dg)]; ok && len(d) == 3 {
-				out[fmt.Sprint(d[1])] = expandDisclosures(d[2], byDigest)
-			}
-		}
-		return out
+		return expandObject(o, byDigest)
 	case []any:
-		out := make([]any, 0, len(o))
-		for _, el := range o {
-			if m, ok := el.(map[string]any); ok && len(m) == 1 && m["..."] != nil {
-				if d, ok := byDigest[fmt.Sprint(m["..."])]; ok && len(d) == 2 {
-					out = append(out, expandDisclosures(d[1], byDigest))
-				}
-				continue
-			}
-			out = append(out, expandDisclosures(el, byDigest))
-		}
-		return out
+		return expandArray(o, byDigest)
 	}
 	return v
+}
+
+func expandObject(o map[string]any, byDigest map[string][]any) map[string]any {
+	out := make(map[string]any, len(o))
+	for k, val := range o {
+		if k != "_sd" && k != "_sd_alg" {
+			out[k] = expandDisclosures(val, byDigest)
+		}
+	}
+	digests, _ := o["_sd"].([]any)
+	for _, dg := range digests {
+		if d, ok := byDigest[fmt.Sprint(dg)]; ok && len(d) == 3 {
+			out[fmt.Sprint(d[1])] = expandDisclosures(d[2], byDigest)
+		}
+	}
+	return out
+}
+
+func expandArray(o []any, byDigest map[string][]any) []any {
+	out := make([]any, 0, len(o))
+	for _, el := range o {
+		m, ok := el.(map[string]any)
+		if !ok || len(m) != 1 || m["..."] == nil {
+			out = append(out, expandDisclosures(el, byDigest))
+			continue
+		}
+		if d, ok := byDigest[fmt.Sprint(m["..."])]; ok && len(d) == 2 {
+			out = append(out, expandDisclosures(d[1], byDigest))
+		}
+	}
+	return out
 }
 
 func decodeSegment(s string, into any) error {
