@@ -8,8 +8,7 @@ import (
 )
 
 func TestPeriodicRunsAtStartAndOnEveryTick(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	var runs atomic.Int32
 	Periodic{Name: "test", Interval: 10 * time.Millisecond}.Start(ctx, func(context.Context) error {

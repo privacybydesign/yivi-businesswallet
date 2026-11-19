@@ -236,3 +236,24 @@ func TestSPA_MissingHashedAssetIsNotFound(t *testing.T) {
 		t.Fatalf("missing asset: status %d, want 404 and not the index document", rec.Code)
 	}
 }
+
+// The compressed read goes through the static root: a name that climbs out of
+// it is refused, also if a request path ever reached it uncleaned.
+func TestSPA_GzippedAssetStaysInsideTheStaticRoot(t *testing.T) {
+	dir := writeStaticSite(t)
+	secret := filepath.Join(filepath.Dir(dir), "secret.js")
+	if err := os.WriteFile(secret, []byte("secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Remove(secret) })
+
+	h := newSPAHandler(dir, nil)
+	for _, name := range []string{"/assets/../../secret.js", "/../secret.js"} {
+		if body, err := h.gzippedAsset(name); err == nil {
+			t.Fatalf("gzippedAsset(%q) read %d bytes from outside the static root", name, len(body))
+		}
+	}
+	if _, err := h.gzippedAsset("/assets/app.js"); err != nil {
+		t.Fatalf("gzippedAsset of a real asset: %v", err)
+	}
+}

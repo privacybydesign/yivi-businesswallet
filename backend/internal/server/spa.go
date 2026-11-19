@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"fmt"
+	"io"
 	"log/slog"
 	"mime"
 	"net/http"
@@ -106,8 +107,7 @@ func (h spaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // serveGzipped answers a hashed asset compressed and reports whether it did.
 // It leaves range requests, clients without gzip and formats that do not
-// shrink to the file server. path was stat-ed by the caller and sits under
-// /assets/ of a ServeMux-cleaned URL, so it is inside staticPath.
+// shrink to the file server. path is only read for its extension.
 func (h spaHandler) serveGzipped(w http.ResponseWriter, r *http.Request, path string) bool {
 	contentType := mime.TypeByExtension(filepath.Ext(path))
 	if r.Method != http.MethodGet || r.Header.Get("Range") != "" || !compressible(contentType) {
@@ -118,7 +118,7 @@ func (h spaHandler) serveGzipped(w http.ResponseWriter, r *http.Request, path st
 		return false
 	}
 
-	body, err := h.gzippedAsset(r.URL.Path, path)
+	body, err := h.gzippedAsset(r.URL.Path)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "spa asset compression failed", slog.String("error", err.Error()))
 		return false
@@ -132,11 +132,24 @@ func (h spaHandler) serveGzipped(w http.ResponseWriter, r *http.Request, path st
 	return true
 }
 
-func (h spaHandler) gzippedAsset(urlPath, path string) ([]byte, error) {
+// gzippedAsset is the file at urlPath under staticPath, compressed, from the
+// cache once it was read. The file is opened through the static root, which
+// refuses a name that leaves it, whatever the request path holds.
+func (h spaHandler) gzippedAsset(urlPath string) ([]byte, error) {
 	if cached, ok := h.gzipped.Load(urlPath); ok {
 		return cached.([]byte), nil
 	}
-	raw, err := os.ReadFile(path) //nolint:gosec // G304: path is a stat-ed file under staticPath, see serveGzipped
+	if strings.Contains(urlPath, "..") {
+		return nil, fmt.Errorf("asset path %q leaves the static root", urlPath)
+	}
+	file, err := os.OpenInRoot(h.staticPath, strings.TrimPrefix(urlPath, "/"))
+	if err != nil {
+		return nil, fmt.Errorf("opening asset: %w", err)
+	}
+	raw, err := io.ReadAll(file)
+	if closeErr := file.Close(); err == nil {
+		err = closeErr
+	}
 	if err != nil {
 		return nil, fmt.Errorf("reading asset: %w", err)
 	}
