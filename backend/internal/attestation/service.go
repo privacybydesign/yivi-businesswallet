@@ -754,17 +754,26 @@ func validateAttributes(detail TemplateDetail, provided map[string]any) error {
 		}
 		return rb.ValidateClaims(provided)
 	}
+	if detail.SubjectType == SubjectOrganization {
+		if err := validateIdentifier(provided[IdentifierClaim]); err != nil {
+			return err
+		}
+	}
+	return validateOwnAttributes(detail, provided)
+}
+
+func validateIdentifier(value any) error {
+	if value == nil {
+		return fmt.Errorf("%w: %q", ErrMissingAttribute, IdentifierClaim)
+	}
+	_, err := normalizeIdentifier(value)
+	return err
+}
+
+func validateOwnAttributes(detail TemplateDetail, provided map[string]any) error {
 	byKey := make(map[string]AttributeDef, len(detail.SchemaAttributes))
 	for _, a := range detail.SchemaAttributes {
 		byKey[a.Key] = a
-	}
-	if detail.SubjectType == SubjectOrganization {
-		if _, err := normalizeIdentifier(provided[IdentifierClaim]); err != nil {
-			if provided[IdentifierClaim] == nil {
-				return fmt.Errorf("%w: %q", ErrMissingAttribute, IdentifierClaim)
-			}
-			return err
-		}
 	}
 	for key, value := range provided {
 		if key == IdentifierClaim && detail.SubjectType == SubjectOrganization {
