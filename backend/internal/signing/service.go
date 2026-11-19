@@ -557,6 +557,34 @@ func (s *Service) deliverAsync(orgID, requestID uuid.UUID) {
 	}()
 }
 
+// RedeliveryInterval is how often RedeliverStalled should run.
+const RedeliveryInterval = 5 * time.Minute
+
+// stalledAfter is how long a delivery may stay pending before it counts as
+// lost: well past DeliverTimeout, so a delivery still running is never doubled.
+const stalledAfter = 2 * DeliverTimeout
+
+// RedeliverStalled delivers the signed documents whose first delivery was lost
+// when its process stopped (a deploy between the last signature and the send),
+// which would otherwise stay pending for good. Each ends delivered or failed,
+// so a request is picked up again only if this pass is cut short too.
+func (s *Service) RedeliverStalled(ctx context.Context) error {
+	stalled, err := s.store.ListStalledDeliveries(ctx, stalledAfter)
+	if err != nil {
+		return err
+	}
+	for _, d := range stalled {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		slog.InfoContext(ctx, "signing: redelivering a stalled document", slog.String("requestId", d.RequestID.String()))
+		deliverCtx, cancel := context.WithTimeout(ctx, DeliverTimeout)
+		s.deliver(deliverCtx, d.OrgID, d.RequestID)
+		cancel()
+	}
+	return nil
+}
+
 // deliver dispatches a completed request's signed document to its recipient over
 // the chosen channel and records the outcome. It is best-effort: a failure leaves
 // the request completed with delivery_status=failed, surfaced in the history.
@@ -592,13 +620,16 @@ func (s *Service) deliver(ctx context.Context, orgID, requestID uuid.UUID) {
 		s.setDeliveryFailed(ctx, orgID, requestID, "the signed document could not be delivered")
 		return
 	}
-	if err := s.store.SetDelivery(ctx, orgID, requestID, DeliveryDelivered, ""); err != nil {
+	// Recorded even when the send used up ctx: left pending, it is sent again.
+	if err := s.store.SetDelivery(context.WithoutCancel(ctx), orgID, requestID, DeliveryDelivered, ""); err != nil {
 		slog.ErrorContext(ctx, "signing: record delivery", slog.String("error", err.Error()))
 	}
 }
 
 func (s *Service) setDeliveryFailed(ctx context.Context, orgID, requestID uuid.UUID, reason string) {
-	if err := s.store.SetDelivery(ctx, orgID, requestID, DeliveryFailed, reason); err != nil {
+	// Recorded even when a timed-out send used up ctx: left pending, the
+	// redelivery job would send it again on every pass.
+	if err := s.store.SetDelivery(context.WithoutCancel(ctx), orgID, requestID, DeliveryFailed, reason); err != nil {
 		slog.ErrorContext(ctx, "signing: record delivery failure", slog.String("error", err.Error()))
 	}
 }

@@ -18,6 +18,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/auth"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/diploma"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/email"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/events"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/idscan"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingprovider"
@@ -59,8 +60,9 @@ type Handler struct {
 	// appBranding dresses the hosted page as the Idem app dresses the
 	// session; nil leaves the page the org's own colour only.
 	appBranding *AppBrandingResolver
-	// reviews tells a reviewer's open pages when the org's reviews change.
-	reviews *ReviewFeed
+	// events tells a hosted page when its request moves; nil leaves it to its
+	// own slow polling.
+	events *events.Hub
 	// selfReview is who may decide their own identity check.
 	selfReview auth.SelfReview
 }
@@ -77,9 +79,8 @@ func (h *Handler) SetAppBranding(r *AppBrandingResolver) { h.appBranding = r }
 // subject of.
 func (h *Handler) SetSelfReview(s auth.SelfReview) { h.selfReview = s }
 
-// SetReviewFeed streams the org's review changes from f; without it a stream
-// stays open and quiet.
-func (h *Handler) SetReviewFeed(f *ReviewFeed) { h.reviews = f }
+// SetEvents streams a hosted page's request changes from hub.
+func (h *Handler) SetEvents(hub *events.Hub) { h.events = hub }
 
 func NewHandler(service *Service, requireUser, authorize func(http.Handler) http.Handler) *Handler {
 	return &Handler{
@@ -88,7 +89,6 @@ func NewHandler(service *Service, requireUser, authorize func(http.Handler) http
 		hostedCalls:  ratelimit.New(hostedCallLimit),
 		authFailures: newAuthFailures(), hostedSources: ratelimit.New(hostedSourceLimit),
 		webhookTests: ratelimit.New(webhookTestLimit), staleLinks: ratelimit.New(staleLinkLimit),
-		reviews: NewReviewFeed(),
 	}
 }
 
@@ -128,7 +128,6 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("GET /orgs/{slug}/identity-proofing/overview", member(respond.HandlerFunc(h.overview)))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/requests", member(respond.HandlerFunc(h.createRequest)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/stats", member(respond.HandlerFunc(h.stats)))
-	mux.Handle("GET /orgs/{slug}/identity-proofing/reviews/events", reviewer(respond.HandlerFunc(h.reviewEvents)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/requests/{requestID}", member(respond.HandlerFunc(h.getRequest)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/requests/{requestID}/events", member(respond.HandlerFunc(h.requestEvents)))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/yivi/start", member(respond.HandlerFunc(h.startYivi)))
@@ -145,7 +144,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("GET /orgs/{slug}/identity-proofing/requests/{requestID}/address/lookup", member(respond.HandlerFunc(h.lookUpAddress)))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/review-items/{kind}", reviewer(respond.HandlerFunc(h.decideReviewItem)))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/review-items/{kind}/seal-check", reviewer(respond.HandlerFunc(h.checkSealsAgain)))
-	mux.Handle("GET /orgs/{slug}/identity-proofing/review-items/counts", reviewer(respond.HandlerFunc(h.reviewItemCounts)))
+	mux.Handle("GET /orgs/{slug}/identity-proofing/review-items/counts", member(respond.HandlerFunc(h.reviewItemCounts)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/review-items/closed", reviewer(respond.HandlerFunc(h.closedReviews)))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/review", reviewer(respond.HandlerFunc(h.decideReview)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/requests/{requestID}/result", reviewer(respond.HandlerFunc(h.requestResult)))
@@ -410,6 +409,8 @@ type requestResponse struct {
 	// ExpectedSubject is a request for one known person: only subjectName,
 	// born on the date it was sent with, is approved.
 	ExpectedSubject bool `json:"expectedSubject"`
+	// Test is a request made while the org was in test mode.
+	Test bool `json:"test,omitempty"`
 	// ReviewReason is why the kept Verzekeringsbericht went to review
 	// (no_current_employment, current_benefit, current_other_income); absent
 	// otherwise. EmploymentReview is where that review stands, and
@@ -466,7 +467,7 @@ func newRequestResponse(req Request, now time.Time) requestResponse {
 		FlowID: req.FlowID, FlowName: req.FlowName, FlowVersion: req.FlowVersion, Method: string(req.Method), Status: req.EffectiveStatus(now),
 		AssuranceLevel: req.AssuranceLevel, EIDASLevel: req.EIDASLevel, ErrorCode: req.ErrorCode,
 		LinkExpiresAt: req.LinkExpiresAt, CreatedAt: req.CreatedAt, CompletedAt: req.CompletedAt,
-		PurgeAt: req.PurgeAt, PurgedAt: req.PurgedAt, ExpectedSubject: req.ExpectsSubject, DocumentScan: documentScanState(req),
+		PurgeAt: req.PurgeAt, PurgedAt: req.PurgedAt, ExpectedSubject: req.ExpectsSubject, Test: req.Test, DocumentScan: documentScanState(req),
 		AppDone:      req.appDone,
 		ReviewReason: req.ReviewReason, EmploymentReview: req.EmploymentReview, EmploymentReviewedAt: req.EmploymentReviewedAt,
 		DiplomasReview: req.DiplomasReview, DiplomasReviewedAt: req.DiplomasReviewedAt,
@@ -628,6 +629,7 @@ func requestFilterFrom(query url.Values) (RequestFilter, error) {
 	if err := reviewFilterFrom(query, &filter); err != nil {
 		return RequestFilter{}, err
 	}
+	filter.WaitingReviews = query.Get("waiting") == "true"
 	return filter, nil
 }
 
@@ -656,8 +658,9 @@ func reviewFilterFrom(query url.Values, filter *RequestFilter) error {
 // listsEveryRequest reports whether the caller lists the org's requests whoever
 // sent them: an admin always, a reviewer only a list ReviewScopeReviews holds
 // whole, the requests waiting for review (?status=needs_review) or the data
-// requests (?flowKind=data_request), or the review items of a kind, waiting
-// or decided (?reviewKind=). Any other list is the ones they sent.
+// requests (?flowKind=data_request), the review items of a kind, waiting or
+// decided (?reviewKind=), or everything that waits (?waiting=true). Any other
+// list is the ones they sent.
 func listsEveryRequest(ctx context.Context, filter RequestFilter) bool {
 	if organization.ActsAsAdmin(ctx) {
 		return true
@@ -666,7 +669,7 @@ func listsEveryRequest(ctx context.Context, filter RequestFilter) bool {
 		return false
 	}
 	return filter.DataRequests || (filter.Status != nil && *filter.Status == StatusNeedsReview) ||
-		filter.ReviewKind != nil
+		filter.ReviewKind != nil || filter.WaitingReviews
 }
 
 // reviewScope is the requests the caller reaches on a review route, which
@@ -883,10 +886,21 @@ type reviewItemCountsResponse struct {
 	StepSessions int                `json:"stepSessions"`
 }
 
+// reviewItemCounts is what waits for a reviewer. Every member's page asks, so
+// it need not learn the caller's rights first; who cannot decide is told that
+// nothing waits for them, never the org's numbers.
 func (h *Handler) reviewItemCounts(w http.ResponseWriter, r *http.Request) error {
-	tally, err := h.service.ReviewCounts(r.Context(), orgFromRequest(r).ID)
-	if err != nil {
-		return mapError(err)
+	var tally ReviewTally
+	if organization.MayReview(r.Context()) {
+		var err error
+		if tally, err = h.service.ReviewCounts(r.Context(), orgFromRequest(r).ID); err != nil {
+			return mapError(err)
+		}
+	} else {
+		tally.Kinds = make(map[ReviewKind]int, len(ReviewKinds))
+		for _, kind := range ReviewKinds {
+			tally.Kinds[kind] = 0
+		}
 	}
 	respond.JSON(w, r, http.StatusOK, reviewItemCountsResponse{
 		Counts: tally.Kinds, Sessions: tally.Sessions, StepSessions: tally.StepSessions,

@@ -20,6 +20,7 @@ export const AUDIT_TONE_CLASSES: Record<AuditTone, string> = {
 const ACTION_VISUAL: Record<string, { icon: IconName; tone: AuditTone }> = {
   "organization.created": { icon: "add", tone: "green" },
   "organization.updated": { icon: "edit", tone: "blue" },
+  "organization.test_mode_changed": { icon: "edit", tone: "amber" },
   "membership.invited": { icon: "email", tone: "amber" },
   "membership.invite_resent": { icon: "email", tone: "amber" },
   "membership.invite_revoked": { icon: "close", tone: "red" },
@@ -242,6 +243,8 @@ export function auditActionLabel(action: string, t: TFunction): string {
       return t("auditLog.actions.orgUpdated");
     case "organization.deleted":
       return t("auditLog.actions.orgDeleted");
+    case "organization.test_mode_changed":
+      return t("auditLog.actions.orgTestModeChanged");
     case "membership.invited":
       return t("auditLog.actions.memberInvited");
     case "membership.invite_resent":
@@ -356,6 +359,10 @@ export function auditActionLabel(action: string, t: TFunction): string {
       return t("auditLog.actions.walletUnitActivated");
     case "wallet.unit_revoked":
       return t("auditLog.actions.walletUnitRevoked");
+    case "wsca.account_activated":
+      return t("auditLog.actions.wscaAccountActivated");
+    case "wsca.account_rotated":
+      return t("auditLog.actions.wscaAccountRotated");
     case "kvk.registration_validated":
       return t("auditLog.actions.kvkRegistrationValidated");
     case "kvk.registration_not_validated":
@@ -593,6 +600,8 @@ export function auditTargetLabel(targetType: string, t: TFunction): string {
       return t("auditLog.targets.walletRepresentation");
     case "wallet_unit":
       return t("auditLog.targets.walletUnit");
+    case "wsca_account":
+      return t("auditLog.targets.wscaAccount");
     case "kvk_registration":
       return t("auditLog.targets.kvkRegistration");
     case "postguard_key":

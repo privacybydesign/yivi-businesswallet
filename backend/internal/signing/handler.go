@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/auth"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/events"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/respond"
 )
@@ -55,6 +56,7 @@ type signingService interface {
 
 	// The external-signee flow, keyed by the invitation token alone (no session).
 	ExternalView(ctx context.Context, token string) (ExternalView, error)
+	ExternalRequestID(ctx context.Context, token string) (uuid.UUID, error)
 	StartExternalLink(ctx context.Context, token string) (Start, error)
 	StartExternalSign(ctx context.Context, token string) (Start, error)
 	DeclineExternalSign(ctx context.Context, token, reason string) error
@@ -70,7 +72,12 @@ type Handler struct {
 	svc         signingService
 	requireUser func(http.Handler) http.Handler
 	authorize   func(http.Handler) http.Handler
+	// events tells an external signee's page when its request moves.
+	events *events.Hub
 }
+
+// SetEvents streams an external signee's request changes from hub.
+func (h *Handler) SetEvents(hub *events.Hub) { h.events = hub }
 
 func NewHandler(svc signingService, requireUser, authorize func(http.Handler) http.Handler) *Handler {
 	return &Handler{svc: svc, requireUser: requireUser, authorize: authorize}
@@ -103,6 +110,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	// path is their whole authorization — exactly like GET /invite/{token}. Each route
 	// resolves the token to a single signer row and reads nothing else from the caller.
 	mux.Handle("GET /signing/external/{token}", respond.HandlerFunc(h.externalView))
+	mux.Handle("GET /signing/external/{token}/events", respond.HandlerFunc(h.externalEvents))
 	mux.Handle("GET /signing/external/{token}/document", respond.HandlerFunc(h.externalDocument))
 	mux.Handle("POST /signing/external/{token}/credential/link", respond.HandlerFunc(h.externalLink))
 	mux.Handle("POST /signing/external/{token}/sign", respond.HandlerFunc(h.externalSign))
@@ -433,6 +441,20 @@ func (h *Handler) externalView(w http.ResponseWriter, r *http.Request) error {
 	}
 	respond.JSON(w, r, http.StatusOK, view)
 	return nil
+}
+
+// externalEvents streams an event each time the signee's request or one of
+// its signers moves, so the page re-reads then instead of polling. The events
+// carry no data.
+func (h *Handler) externalEvents(w http.ResponseWriter, r *http.Request) error {
+	requestID, err := h.svc.ExternalRequestID(r.Context(), r.PathValue("token"))
+	if err := h.mapExternalError(err); err != nil {
+		return err
+	}
+	if h.events == nil {
+		return h.mapExternalError(ErrInvalidToken)
+	}
+	return h.events.Serve(w, r, events.Topic(events.SigningRequest, requestID))
 }
 
 // externalLink starts an external signee's credential-link ceremony.

@@ -94,6 +94,15 @@ const closedReviewOrder = `COALESCE(GREATEST(
 		(SELECT max(a.occurred_at) ` + identityReviewDecided + `)),
 	r.completed_at, r.created_at) DESC, r.created_at DESC`
 
+// waitingReview is a request r that waits for a reviewer: it reads
+// needs_review, or one of its steps has a pending review item. It is the four
+// lists the pages used to read one by one (?status=needs_review and
+// ?reviewKind=address, employment, diplomas), as one predicate.
+var waitingReview = `(` + effectiveStatusColumn + ` = 'needs_review'
+	OR ` + reviewItemMatches(`'address'`, `'pending'`) + `
+	OR ` + reviewItemMatches(`'employment'`, `'pending'`) + `
+	OR ` + reviewItemMatches(`'diplomas'`, `'pending'`) + `)`
+
 // reviewItemMatches is a request r with a review item of kind $k in state $s,
 // stored or its own review: the filter of RequestFilter.ReviewKind.
 func reviewItemMatches(k, s string) string {
@@ -337,7 +346,7 @@ func (s *RequestStore) ReviewCounts(ctx context.Context, orgID uuid.UUID) (Revie
 			SELECT `+sessionReviewWaits+` AS own, `+sessionReviewKindColumn+` AS own_kind,
 				`+address+` AS address, `+employment+` AS employment, `+diplomas+` AS diplomas
 			FROM identity_proofing_requests r
-			WHERE r.organization_id = $1 AND r.purged_at IS NULL
+			WHERE r.organization_id = $1 AND r.purged_at IS NULL AND `+inOrgMode+`
 		)
 		SELECT count(*) FILTER (WHERE own AND own_kind = $4), count(*) FILTER (WHERE own AND own_kind = $5),
 			count(*) FILTER (WHERE address), count(*) FILTER (WHERE employment), count(*) FILTER (WHERE diplomas),

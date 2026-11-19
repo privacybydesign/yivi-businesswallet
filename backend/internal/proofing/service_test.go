@@ -402,6 +402,10 @@ func (f *fakeRequests) Get(_ context.Context, _, id uuid.UUID) (Request, error) 
 	return *f.stored, nil
 }
 
+func (f *fakeRequests) Reread(ctx context.Context, req Request) (Request, error) {
+	return f.Get(ctx, req.OrganizationID, req.ID)
+}
+
 func (f *fakeRequests) ListDue(_ context.Context, now time.Time, _ int) ([]Request, error) {
 	if f.stored == nil || !f.stored.stillOpen() || now.Before(f.stored.session.ExpiresAt) {
 		return []Request{}, nil

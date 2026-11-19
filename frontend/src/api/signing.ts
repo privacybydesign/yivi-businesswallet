@@ -340,6 +340,12 @@ export const externalSigningSchema = z.object({
 });
 export type ExternalSigning = z.infer<typeof externalSigningSchema>;
 
+// The stream that tells the external signee's page when its request moves: a
+// Server-Sent Events URL, for an EventSource.
+export function externalSigningEventsUrl(token: string): string {
+  return absoluteApiUrl(`${externalBase(token)}/events`);
+}
+
 export function getExternalSigning(
   token: string,
   signal?: AbortSignal,

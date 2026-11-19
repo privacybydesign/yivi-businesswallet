@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Outlet, useMatches } from "react-router";
+import { useTranslation } from "react-i18next";
 import { useLogoutMutation, useMeQuery } from "../api/auth.queries";
 import {
   useMyOrganizationsQuery,
@@ -17,6 +18,7 @@ import { BrandProvider, MobileNavContext, Sidebar } from "../ui";
 import * as React from "react";
 
 export default function Root(): React.JSX.Element | null {
+  const { t } = useTranslation();
   const { data: me } = useMeQuery();
   const logout = useLogoutMutation();
   const matches = useMatches();
@@ -118,6 +120,11 @@ export default function Root(): React.JSX.Element | null {
             onNavigate={closeNav}
           />
           <main className="min-w-0 flex-1">
+            {activeOrg?.testMode && (
+              <output className="bg-warning-bg text-warning-fg block px-4 py-2 text-[13px] font-semibold sm:px-8">
+                {t("testMode.banner")}
+              </output>
+            )}
             <Outlet />
           </main>
         </div>

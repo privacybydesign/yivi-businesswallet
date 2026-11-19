@@ -12,6 +12,7 @@ import (
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/database"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/lifecycle"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/registryprovider"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/walletunit"
@@ -34,7 +35,7 @@ const (
 	heldSourceBootstrap = "bootstrap"
 )
 
-const orgColumns = `id, name, slug, kvk_number, euid, digital_address, status, bootstrapped_at`
+const orgColumns = `id, name, slug, kvk_number, euid, digital_address, status, bootstrapped_at, test_mode`
 
 // statusAudit maps an org status change to its audit action.
 var statusAudit = map[string]string{
@@ -61,7 +62,7 @@ func NewStore(db database.DB, recorder audit.Recorder, units unitProvisioner) *S
 }
 
 func scanOrg(row interface{ Scan(...any) error }, org *organization.Organization) error {
-	return row.Scan(&org.ID, &org.Name, &org.Slug, &org.KVKNumber, &org.EUID, &org.DigitalAddress, &org.Status, &org.BootstrappedAt)
+	return row.Scan(&org.ID, &org.Name, &org.Slug, &org.KVKNumber, &org.EUID, &org.DigitalAddress, &org.Status, &org.BootstrappedAt, &org.TestMode)
 }
 
 // RegisterOrganization creates the organization/business wallet atomically from a
@@ -77,8 +78,9 @@ func (s *Store) RegisterOrganization(ctx context.Context, reg Registration) (org
 	requestorUserID := reg.RequestorUserID
 	kvkContactAddress := reg.KVKContactAddress
 	err := database.InTx(ctx, s.db, func(q database.Querier) error {
-		const insOrg = `INSERT INTO organizations (id, name, slug, kvk_number, euid, digital_address)
-			VALUES ($1, $2, $3, $4, $5, $6) RETURNING ` + orgColumns
+		// A registered org starts in test mode; a platform admin makes it live.
+		const insOrg = `INSERT INTO organizations (id, name, slug, kvk_number, euid, digital_address, test_mode)
+			VALUES ($1, $2, $3, $4, $5, $6, true) RETURNING ` + orgColumns
 		err := scanOrg(q.QueryRow(ctx, insOrg, reg.OrgID, att.LegalName, reg.Slug, att.KVKNumber, att.EUID, reg.DigitalAddress), &org)
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation {
@@ -97,7 +99,10 @@ func (s *Store) RegisterOrganization(ctx context.Context, reg Registration) (org
 
 		if err := s.audit.Record(ctx, q, audit.OrganizationCreated,
 			audit.Target{Type: audit.TargetOrganization, ID: org.ID.String(), OrgID: &org.ID},
-			audit.Created(map[string]any{"name": org.Name, "slug": org.Slug, "kvkNumber": org.KVKNumber})); err != nil {
+			audit.Created(map[string]any{
+				"name": org.Name, "slug": org.Slug, "kvkNumber": org.KVKNumber,
+				"testMode": org.TestMode,
+			})); err != nil {
 			return err
 		}
 
@@ -191,20 +196,30 @@ func insertRepresentations(ctx context.Context, q database.Querier, orgID, reque
 }
 
 // SetStatus transitions an org/wallet (suspend/revoke) and audits the change.
+// A move lifecycle does not allow, such as suspending a revoked wallet, is
+// refused with lifecycle.ErrTransition.
 func (s *Store) SetStatus(ctx context.Context, orgID uuid.UUID, status string) (organization.Organization, error) {
 	var org organization.Organization
 	err := database.InTx(ctx, s.db, func(q database.Querier) error {
-		const update = `UPDATE organizations SET status = $1, updated_at = now() WHERE id = $2 RETURNING ` + orgColumns
-		err := scanOrg(q.QueryRow(ctx, update, status, orgID), &org)
+		// Locked, so the check and the write see the same status.
+		var before string
+		err := q.QueryRow(ctx, `SELECT status FROM organizations WHERE id = $1 FOR UPDATE`, orgID).Scan(&before)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return organization.ErrNotFound
 		}
 		if err != nil {
+			return fmt.Errorf("wallet: read status org %s: %w", orgID, err)
+		}
+		if err := lifecycle.Transition(before, status); err != nil {
+			return err
+		}
+		const update = `UPDATE organizations SET status = $1, updated_at = now() WHERE id = $2 RETURNING ` + orgColumns
+		if err := scanOrg(q.QueryRow(ctx, update, status, orgID), &org); err != nil {
 			return fmt.Errorf("wallet: set status org %s: %w", orgID, err)
 		}
 		return s.audit.Record(ctx, q, statusAudit[status],
 			audit.Target{Type: audit.TargetOrganization, ID: org.ID.String(), OrgID: &orgID},
-			audit.Updated(nil, map[string]any{"status": status}))
+			audit.Updated(map[string]any{"status": before}, map[string]any{"status": status}))
 	})
 	return org, err
 }

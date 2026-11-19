@@ -321,9 +321,15 @@ func (s *Store) SignerByToken(ctx context.Context, rawToken string) (externalSig
 // CompleteRequest marks the request completed (all signers signed) and audits it.
 func (s *Store) CompleteRequest(ctx context.Context, orgID, id uuid.UUID) error {
 	return database.InTx(ctx, s.db, func(q database.Querier) error {
-		const update = `UPDATE signing_requests SET status=$2, updated_at=now() WHERE id=$1`
-		if _, err := q.Exec(ctx, update, id, StatusCompleted); err != nil {
+		// Only a request still awaiting signatures completes, so one a decline
+		// ended is not brought back and none is completed, or audited, twice.
+		const update = `UPDATE signing_requests SET status=$2, updated_at=now() WHERE id=$1 AND status=$3`
+		tag, err := q.Exec(ctx, update, id, StatusCompleted, StatusAwaitingSignatures)
+		if err != nil {
 			return fmt.Errorf("signing: complete request %s: %w", id, err)
+		}
+		if tag.RowsAffected() == 0 {
+			return nil
 		}
 		return s.audit.Record(ctx, q, audit.SigningCompleted,
 			audit.Target{Type: audit.TargetSigningRequest, ID: id.String(), OrgID: &orgID},
@@ -348,6 +354,40 @@ func (s *Store) SetDelivery(ctx context.Context, orgID, id uuid.UUID, status, re
 	})
 }
 
+// StalledDelivery names a completed request whose delivery never finished.
+type StalledDelivery struct {
+	OrgID     uuid.UUID
+	RequestID uuid.UUID
+}
+
+// stalledDeliveryBatch caps one redelivery pass.
+const stalledDeliveryBatch = 50
+
+// ListStalledDeliveries returns completed requests still pending delivery
+// after olderThan: their delivery goroutine died with its process.
+func (s *Store) ListStalledDeliveries(ctx context.Context, olderThan time.Duration) ([]StalledDelivery, error) {
+	const q = `SELECT organization_id, id FROM signing_requests
+		WHERE status = $1 AND delivery_status = $2 AND updated_at < now() - make_interval(secs => $3)
+		ORDER BY updated_at LIMIT $4`
+	rows, err := s.db.Query(ctx, q, StatusCompleted, DeliveryPending, olderThan.Seconds(), stalledDeliveryBatch)
+	if err != nil {
+		return nil, fmt.Errorf("signing: list stalled deliveries: %w", err)
+	}
+	defer rows.Close()
+	var out []StalledDelivery
+	for rows.Next() {
+		var d StalledDelivery
+		if err := rows.Scan(&d.OrgID, &d.RequestID); err != nil {
+			return nil, fmt.Errorf("signing: scan stalled delivery: %w", err)
+		}
+		out = append(out, d)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("signing: stalled deliveries rows: %w", err)
+	}
+	return out, nil
+}
+
 // MarkSignerFailed marks one signer's attempt failed with a redaction-safe reason
 // and audits it. It deliberately does NOT touch the request status: an error (or
 // timeout) on one signer must leave the request awaiting_signatures and retryable,
@@ -357,9 +397,14 @@ func (s *Store) SetDelivery(ctx context.Context, orgID, id uuid.UUID, status, re
 // addresses an internal member and an external signee alike.
 func (s *Store) MarkSignerFailed(ctx context.Context, orgID, id, signerID uuid.UUID, reason string) error {
 	return database.InTx(ctx, s.db, func(q database.Querier) error {
-		const markSigner = `UPDATE signing_request_signers SET status=$3 WHERE request_id=$1 AND id=$2`
-		if _, err := q.Exec(ctx, markSigner, id, signerID, SignerFailed); err != nil {
+		// A signature that already landed stands: a late error must not undo it.
+		const markSigner = `UPDATE signing_request_signers SET status=$3 WHERE request_id=$1 AND id=$2 AND status <> $4`
+		tag, err := q.Exec(ctx, markSigner, id, signerID, SignerFailed, SignerSigned)
+		if err != nil {
 			return fmt.Errorf("signing: mark signer failed %s: %w", id, err)
+		}
+		if tag.RowsAffected() == 0 {
+			return nil
 		}
 		return s.audit.Record(ctx, q, audit.SigningFailed,
 			audit.Target{Type: audit.TargetSigningRequest, ID: id.String(), OrgID: &orgID},

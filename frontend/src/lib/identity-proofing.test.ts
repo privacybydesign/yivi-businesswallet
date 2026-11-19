@@ -65,6 +65,7 @@ import {
   sendableByMail,
   documentScanMessage,
   sessionStage,
+  sessionStep,
   sessionView,
   sendRequestFields,
   verifyStages,
@@ -2347,6 +2348,74 @@ describe("sessionStage", () => {
   it("runs the app's session otherwise", () => {
     expect(sessionStage(app)).toBe("session");
     expect(sessionStage({ ...app, method: "yivi_app" })).toBe("session");
+  });
+});
+
+describe("sessionStep", () => {
+  const running = { view: "running", status: "in_progress" } as const;
+
+  it("shows a step after the identity check before anything else", () => {
+    for (const view of ["address", "documents"] as const) {
+      expect(
+        sessionStep({
+          view,
+          status: "needs_review",
+          method: "pending",
+          scanning: true,
+        }),
+      ).toBe(view);
+    }
+  });
+
+  it("ends an expired session instead of showing an outcome", () => {
+    expect(
+      sessionStep({
+        view: "outcome",
+        status: "expired",
+        method: "idem_app",
+        scanning: false,
+      }),
+    ).toBe("ended");
+    expect(
+      sessionStep({
+        view: "expired",
+        status: "pending",
+        method: "pending",
+        scanning: false,
+      }),
+    ).toBe("ended");
+  });
+
+  it("shows the outcome of a settled session", () => {
+    expect(
+      sessionStep({
+        view: "outcome",
+        status: "approved",
+        method: "yivi_app",
+        scanning: false,
+      }),
+    ).toBe("outcome");
+  });
+
+  it("walks a running session: app choice, then its scan or its app", () => {
+    expect(
+      sessionStep({ ...running, method: "pending", scanning: false }),
+    ).toBe("method");
+    expect(
+      sessionStep({ ...running, method: "yivi_app", scanning: true }),
+    ).toBe("scan");
+    expect(sessionStep({ ...running, method: "browser", scanning: true })).toBe(
+      "scan",
+    );
+    expect(
+      sessionStep({ ...running, method: "browser", scanning: false }),
+    ).toBe("finishing");
+    expect(
+      sessionStep({ ...running, method: "idem_app", scanning: false }),
+    ).toBe("app");
+    expect(
+      sessionStep({ ...running, method: "yivi_app", scanning: false }),
+    ).toBe("app");
   });
 });
 

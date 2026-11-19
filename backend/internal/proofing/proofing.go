@@ -317,6 +317,8 @@ type Request struct {
 	// Hosted is a request its subject opens from a link (ChannelHosted): its
 	// engine session is created only when the subject starts.
 	Hosted bool
+	// Test is a request made while its org was in test mode.
+	Test bool
 	// FlowKind is what the session is for: an identity check, or a person
 	// asking for their data (FlowDataAccess) or its erasure (FlowDataErasure),
 	// which goes to review once the person is proven (see data_request.go).
@@ -706,6 +708,10 @@ type RequestFilter struct {
 	// sessions whose review is over (something decided, nothing waiting) and
 	// the data requests that ended, the latest closed first.
 	ClosedReviews bool
+	// WaitingReviews narrows to what waits for a reviewer, in one read: the
+	// requests that read needs_review and those with an address, a
+	// Verzekeringsbericht or diplomas waiting, the longest in review first.
+	WaitingReviews bool
 }
 
 func (f RequestFilter) reviewState() ReviewState {

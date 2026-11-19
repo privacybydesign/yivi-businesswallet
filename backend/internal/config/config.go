@@ -16,9 +16,20 @@ import (
 
 const (
 	envDatabaseURL = "DATABASE_URL"
-	envLogLevel    = "LOG_LEVEL"
-	envLogFormat   = "LOG_FORMAT"
-	envLogSource   = "LOG_SOURCE"
+	// How many connections the API's pool may open. Replicas times this, plus
+	// the lock pool and listeners, must stay under the server's max_connections.
+	envDatabaseMaxConns     = "DATABASE_MAX_CONNS"
+	defaultDatabaseMaxConns = "10"
+	// Connections kept apart for locks held across a whole operation, so their
+	// holders cannot starve the requests that do the work.
+	envDatabaseLockMaxConns     = "DATABASE_LOCK_MAX_CONNS"
+	defaultDatabaseLockMaxConns = "5"
+	// Longest a single statement may run before Postgres cancels it; 0 is no limit.
+	envDatabaseStatementTimeout     = "DATABASE_STATEMENT_TIMEOUT"
+	defaultDatabaseStatementTimeout = "30s"
+	envLogLevel                     = "LOG_LEVEL"
+	envLogFormat                    = "LOG_FORMAT"
+	envLogSource                    = "LOG_SOURCE"
 
 	envEudiVerifierURL             = "EUDI_VERIFIER_URL"
 	envEudiIssuerChain             = "EUDI_ISSUER_CHAIN"
@@ -393,10 +404,13 @@ const (
 var eudiCredentialSchemes = []string{"pbdf-staging", "pbdf"}
 
 type Config struct {
-	DatabaseDSN string
-	LogLevel    string
-	LogFormat   string
-	LogSource   bool
+	DatabaseDSN              string
+	DatabaseMaxConns         int32
+	DatabaseLockMaxConns     int32
+	DatabaseStatementTimeout time.Duration
+	LogLevel                 string
+	LogFormat                string
+	LogSource                bool
 
 	EudiVerifierURL             string
 	EudiIssuerChain             string
@@ -707,6 +721,7 @@ func Load() (Config, error) {
 	// Each step reads and checks one group of settings, in this order, so the
 	// first misconfiguration found is the one reported.
 	for _, load := range []func(*Config) error{
+		loadDatabase,
 		loadEudiVerifier,
 		loadDurations,
 		loadRequesterCA,
@@ -1173,6 +1188,32 @@ func parseList(raw string) []string {
 		}
 	}
 	return out
+}
+
+func loadDatabase(c *Config) error {
+	var err error
+	if c.DatabaseMaxConns, err = parsePoolSize(envDatabaseMaxConns, defaultDatabaseMaxConns); err != nil {
+		return err
+	}
+	if c.DatabaseLockMaxConns, err = parsePoolSize(envDatabaseLockMaxConns, defaultDatabaseLockMaxConns); err != nil {
+		return err
+	}
+	if c.DatabaseStatementTimeout, err = parseDuration(envDatabaseStatementTimeout, defaultDatabaseStatementTimeout); err != nil {
+		return err
+	}
+	if c.DatabaseStatementTimeout < 0 {
+		return fmt.Errorf("config: %s must not be negative", envDatabaseStatementTimeout)
+	}
+	return nil
+}
+
+func parsePoolSize(key, fallback string) (int32, error) {
+	raw := envOrDefault(key, fallback)
+	n, err := strconv.ParseInt(raw, 10, 32)
+	if err != nil || n < 1 {
+		return 0, fmt.Errorf("config: %s %q must be a whole number of at least 1", key, raw)
+	}
+	return int32(n), nil
 }
 
 func envOrDefault(key, fallback string) string {

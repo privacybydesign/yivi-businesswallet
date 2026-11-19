@@ -141,7 +141,7 @@ people to sign, with the **same API keys** as the identity proofing API (the
 Developers page's tokens; `proofing.Handler.RequireAPIKey`, adapted in
 `cmd/api/signing_adapters.go` so `signing` knows nothing of key storage). Two scopes,
 `signing:read` and `signing:write`; every key has them (migration
-`20261119100300` gave them to existing keys).
+`20261119160300` gave them to existing keys).
 
 | Route | Scope | |
 |---|---|---|
