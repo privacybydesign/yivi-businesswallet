@@ -174,13 +174,13 @@ func TestSPA_CachesHashedAssetsForGood(t *testing.T) {
 
 	asset := httptest.NewRecorder()
 	h.ServeHTTP(asset, httptest.NewRequest(http.MethodGet, "/assets/app.js", nil))
-	if got := asset.Header().Get("Cache-Control"); got != immutableCache {
+	if got := asset.Header().Get(headerCacheControl); got != immutableCache {
 		t.Fatalf("asset Cache-Control = %q, want %q", got, immutableCache)
 	}
 
 	index := httptest.NewRecorder()
 	h.ServeHTTP(index, httptest.NewRequest(http.MethodGet, "/orgs/acme", nil))
-	if got := index.Header().Get("Cache-Control"); got != revalidateCache {
+	if got := index.Header().Get(headerCacheControl); got != revalidateCache {
 		t.Fatalf("index Cache-Control = %q, want %q", got, revalidateCache)
 	}
 }
@@ -255,5 +255,18 @@ func TestSPA_GzippedAssetStaysInsideTheStaticRoot(t *testing.T) {
 	}
 	if _, err := h.gzippedAsset("/assets/app.js"); err != nil {
 		t.Fatalf("gzippedAsset of a real asset: %v", err)
+	}
+}
+
+// /assets/<page> is a client route of an org whose slug is "assets": only a
+// file-like path under /assets/ is a missing chunk.
+func TestSPA_AssetsSlugPageIsStillAClientRoute(t *testing.T) {
+	h := New(stubPinger{}, writeStaticSite(t))
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/assets/members", nil))
+
+	if rec.Code != http.StatusOK || rec.Body.String() != "<!doctype html>index" {
+		t.Fatalf("/assets/members: status %d body %q, want the index document", rec.Code, rec.Body.String())
 	}
 }

@@ -71,14 +71,16 @@ func TestMemberInsightsCountsTheWholeOrg(t *testing.T) {
 	if empty.Members != 0 {
 		t.Errorf("a plain member read %d members, want 0", empty.Members)
 	}
-	for status, n := range empty.Identity {
+	wantAllZero(t, "identity", empty.Identity)
+	wantAllZero(t, "screening", empty.Screening)
+}
+
+// wantAllZero fails for each status of a tally that counts someone.
+func wantAllZero(t *testing.T, what string, tally map[string]int) {
+	t.Helper()
+	for status, n := range tally {
 		if n != 0 {
-			t.Errorf("a plain member read identity %s = %d, want 0", status, n)
-		}
-	}
-	for status, n := range empty.Screening {
-		if n != 0 {
-			t.Errorf("a plain member read screening %s = %d, want 0", status, n)
+			t.Errorf("a plain member read %s %s = %d, want 0", what, status, n)
 		}
 	}
 }

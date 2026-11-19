@@ -4,7 +4,7 @@
 CREATE TRIGGER signing_requests_event
 AFTER INSERT OR UPDATE ON signing_requests
 FOR EACH ROW
-EXECUTE FUNCTION notify_wallet_event('signing', 'organization_id');
+EXECUTE FUNCTION notify_wallet_event('signing');
 
 CREATE TRIGGER signing_requests_event_request
 AFTER UPDATE ON signing_requests

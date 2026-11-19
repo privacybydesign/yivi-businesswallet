@@ -325,7 +325,7 @@ export default function Members(): React.JSX.Element {
               {t("members.adminOnly")}
             </p>
           </Card>
-        ) : members.isError && !org.isPending ? (
+        ) : members.isError ? (
           <Card className="p-6">
             <p className="text-error text-[14px]">
               {t("members.loadError", { message: members.error.message })}

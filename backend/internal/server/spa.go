@@ -19,6 +19,7 @@ const (
 	// Vite names every file under /assets/ after a hash of its content, so a
 	// given URL never changes and a browser may keep it for good.
 	hashedAssetsPrefix = "/assets/"
+	headerCacheControl = "Cache-Control"
 	immutableCache     = "public, max-age=31536000, immutable"
 	// The index document names the current hashed files, so it is revalidated
 	// on every visit or a deploy would not reach an open browser.
@@ -64,9 +65,10 @@ func (h spaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := filepath.Join(h.staticPath, r.URL.Path)
 
 	fi, err := os.Stat(path)
-	if os.IsNotExist(err) && strings.HasPrefix(r.URL.Path, hashedAssetsPrefix) {
+	if os.IsNotExist(err) && strings.HasPrefix(r.URL.Path, hashedAssetsPrefix) && filepath.Ext(r.URL.Path) != "" {
 		// A hashed file that is gone (a tab from before a deploy asks for its old
-		// chunk) is never a client route. The index document here would be read
+		// chunk) is never a client route; /assets/<page> without an extension
+		// is one, of an org whose slug is "assets". The index document here would be read
 		// as a broken script; a 404 lets the page reload itself.
 		http.NotFound(w, r)
 		return
@@ -77,7 +79,7 @@ func (h spaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		for _, ph := range h.pageHeaderers {
 			ph.PageHeaders(r, w.Header())
 		}
-		w.Header().Set("Cache-Control", revalidateCache)
+		w.Header().Set(headerCacheControl, revalidateCache)
 		http.ServeFile(w, r, filepath.Join(h.staticPath, h.indexPath))
 		return
 	}
@@ -94,12 +96,12 @@ func (h spaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if strings.HasPrefix(r.URL.Path, hashedAssetsPrefix) {
-		w.Header().Set("Cache-Control", immutableCache)
+		w.Header().Set(headerCacheControl, immutableCache)
 		if h.serveGzipped(w, r, path) {
 			return
 		}
 	} else {
-		w.Header().Set("Cache-Control", revalidateCache)
+		w.Header().Set(headerCacheControl, revalidateCache)
 	}
 
 	http.FileServer(http.Dir(h.staticPath)).ServeHTTP(w, r)

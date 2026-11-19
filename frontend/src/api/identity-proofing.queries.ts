@@ -951,9 +951,8 @@ function verifyQueryKey(target: VerifyTarget): readonly unknown[] {
     : ["identity-proofing", "hosted", target.token];
 }
 
-// What a hosted link's stream sends (events.ProofingRequest and
-// events.ProofingProgress in the backend).
-const HOSTED_EVENT_KINDS = ["proofing-request", "proofing-progress"] as const;
+// What a hosted link's stream sends (events.ProofingRequest in the backend).
+const HOSTED_EVENT_KINDS = ["proofing-request"] as const;
 
 // The progress a verify page follows while the subject can still act.
 export function useProofingProgressQuery(
@@ -979,14 +978,17 @@ export function useProofingProgressQuery(
         ? getProofingRequest(target.slug, target.requestId, signal)
         : getHostedProofingStatus(target.token, signal),
     // The fallback while no stream is up.
-    refetchInterval: (query) =>
-      streaming
-        ? false
-        : progressPollContinues(query.state.data, query.state.error)
-          ? ON_SCREEN_POLL_INTERVAL_MS
-          : reviewPollContinues(query.state.data, query.state.error)
-            ? REVIEW_POLL_INTERVAL_MS
-            : false,
+    refetchInterval: (query) => {
+      if (streaming) {
+        return false;
+      }
+      if (progressPollContinues(query.state.data, query.state.error)) {
+        return ON_SCREEN_POLL_INTERVAL_MS;
+      }
+      return reviewPollContinues(query.state.data, query.state.error)
+        ? REVIEW_POLL_INTERVAL_MS
+        : false;
+    },
   });
 }
 

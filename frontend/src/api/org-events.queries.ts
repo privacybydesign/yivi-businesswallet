@@ -22,7 +22,7 @@ const LIST_GATE_MS = 1_000;
 const PROGRESS_GATE_MS = 250;
 
 // The last part of the keys a verify session's progress is read under.
-const PROGRESS_READS: readonly unknown[] = ["progress", "app"];
+const PROGRESS_READS: ReadonlySet<unknown> = new Set(["progress", "app"]);
 
 // What each kind of event re-reads, and after how long.
 const REREADS: Record<
@@ -44,7 +44,7 @@ const REREADS: Record<
     gateMs: PROGRESS_GATE_MS,
     reads: (slug) => ({
       queryKey: proofingRequestsQueryKey(slug),
-      predicate: (query) => PROGRESS_READS.includes(query.queryKey.at(-1)),
+      predicate: (query) => PROGRESS_READS.has(query.queryKey.at(-1)),
     }),
   },
   webhooks: {

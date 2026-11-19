@@ -73,7 +73,11 @@ export function signingAvailabilityQueryOptions(
 
 // Position of the read's name in a signing key, after the org's prefix.
 const SIGNING_READ_KEY_INDEX = 4;
-const REQUEST_READS: readonly unknown[] = ["request", "pending", "requests"];
+const REQUEST_READS: ReadonlySet<unknown> = new Set([
+  "request",
+  "pending",
+  "requests",
+]);
 
 // Matches the org's reads that a signing request moving can change.
 export function signingRequestReads(
@@ -82,7 +86,7 @@ export function signingRequestReads(
   return ({ queryKey }) =>
     queryKey[2] === slug &&
     queryKey[3] === "signing" &&
-    REQUEST_READS.includes(queryKey[SIGNING_READ_KEY_INDEX]);
+    REQUEST_READS.has(queryKey[SIGNING_READ_KEY_INDEX]);
 }
 
 export function signingCredentialQueryKey(slug: string): readonly string[] {
@@ -134,11 +138,7 @@ export function useSigningRequestQuery(
     // only the fallback while that stream is down.
     refetchInterval: (query) => {
       const data = query.state.data;
-      if (
-        streaming ||
-        !data ||
-        data.status !== SIGNING_STATUS.awaitingSignatures
-      ) {
+      if (streaming || data?.status !== SIGNING_STATUS.awaitingSignatures) {
         return false;
       }
       const mine = myUserId

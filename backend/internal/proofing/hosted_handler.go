@@ -434,9 +434,11 @@ func (h *Handler) hostedStatus(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-// hostedEvents streams an event each time the link's request, or a session of
-// its org in the engine, moves, so the page re-reads its status then instead
-// of polling. The events carry no data.
+// hostedEvents streams an event each time the link's request, or its session
+// in the engine, moves, so the page re-reads its status then instead of
+// polling. It follows this one request only: an org-wide topic would have
+// every open hosted page re-read on every other page's progress, each read
+// against the org's hosted call budget. The events carry no data.
 func (h *Handler) hostedEvents(w http.ResponseWriter, r *http.Request) error {
 	req, err := h.service.HostedStatus(r.Context(), r.PathValue("token"))
 	if err != nil {
@@ -445,9 +447,7 @@ func (h *Handler) hostedEvents(w http.ResponseWriter, r *http.Request) error {
 	if h.events == nil {
 		return mapError(ErrRequestNotFound)
 	}
-	return h.events.Serve(w, r,
-		events.Topic(events.ProofingRequest, req.ID),
-		events.Topic(events.ProofingProgress, req.OrganizationID))
+	return h.events.Serve(w, r, events.Topic(events.ProofingRequest, req.ID))
 }
 
 type hostedStartRequest struct {

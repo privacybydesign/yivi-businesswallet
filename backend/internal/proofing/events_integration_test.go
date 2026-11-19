@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/events"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/testdb"
@@ -130,5 +132,50 @@ func TestWaitingReviewsListIsTheFourListsInOne(t *testing.T) {
 		if !got[id] {
 			t.Errorf("request %s is in one of the four lists but not in the waiting list", id)
 		}
+	}
+}
+
+// A session moving in the engine tells the page that follows its own request,
+// and no other request's page: with an org-wide topic every open hosted page
+// re-read on every other page's progress.
+func TestEventsTellOnlyTheRequestOfAMovingSession(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	requests := NewRequestStore(pool, audit.NopRecorder{}, newTestCipher(t))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	orgID := makeOrg(t, pool, "acme")
+	mine := storeSelfDeclaredAddress(t, requests, orgID, makeUser(t, pool, "sam@example.org"), "s1")
+
+	// The request's session id, given one if the fixture attached none.
+	const sessionID = "session-of-mine"
+	if _, err := pool.Exec(ctx, `UPDATE identity_proofing_requests
+		SET ips_session_id = $2, ips_session_token_ciphertext = COALESCE(ips_session_token_ciphertext, '\x00')
+		WHERE id = $1`, mine.ID, sessionID); err != nil {
+		t.Fatalf("give the request a session id: %v", err)
+	}
+
+	hub := events.NewHub()
+	own, stopOwn := hub.Subscribe(events.Topic(events.ProofingRequest, mine.ID))
+	defer stopOwn()
+	other, stopOther := hub.Subscribe(events.Topic(events.ProofingRequest, uuid.New()))
+	defer stopOther()
+	org, stopOrg := hub.Subscribe(events.Topic(events.ProofingProgress, orgID))
+	defer stopOrg()
+	go hub.Run(ctx, pool)
+	// Every subscriber is told once LISTEN holds.
+	waitEvent(t, own, events.ProofingRequest, "LISTEN holding")
+	waitEvent(t, other, events.ProofingRequest, "LISTEN holding")
+	waitEvent(t, org, events.ProofingProgress, "LISTEN holding")
+
+	if _, err := pool.Exec(ctx, `INSERT INTO identity_proofing_sessions (id, organization_id, token_hash, status, expires_at, data)
+		VALUES ($1, $2, 'hash', 'opened', now() + interval '10 minutes', '\x00')`, sessionID, orgID); err != nil {
+		t.Fatalf("insert the session: %v", err)
+	}
+	waitEvent(t, own, events.ProofingRequest, "its session moving")
+	waitEvent(t, org, events.ProofingProgress, "a session of the org moving")
+	select {
+	case <-other:
+		t.Error("another request's page was told of this session")
+	case <-time.After(300 * time.Millisecond):
 	}
 }

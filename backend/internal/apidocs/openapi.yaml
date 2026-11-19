@@ -11248,8 +11248,8 @@ paths:
       summary: Follow a hosted proofing link
       security: []
       description: >-
-        A Server-Sent Events stream that sends an event, with no data, each time the link's
-        session moves, so the page reads `GET /api/v1/proof/{token}/status` then instead of
+        A Server-Sent Events stream that sends a `proofing-request` event, with no data, each
+        time the link's own session moves, so the page reads `GET /api/v1/proof/{token}/status` then instead of
         polling it. A comment line keeps the stream open.
       responses:
         '200':

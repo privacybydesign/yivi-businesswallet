@@ -6,7 +6,7 @@ DROP FUNCTION notify_identity_proofing_review_items();
 CREATE TRIGGER identity_proofing_review_items_event
 AFTER INSERT OR UPDATE OR DELETE ON identity_proofing_review_items
 FOR EACH ROW
-EXECUTE FUNCTION notify_wallet_event('reviews', 'organization_id');
+EXECUTE FUNCTION notify_wallet_event('reviews');
 
 -- +goose Down
 DROP TRIGGER identity_proofing_review_items_event ON identity_proofing_review_items;
