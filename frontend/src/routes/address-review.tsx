@@ -5,9 +5,10 @@ import { useMeQuery } from "../api/auth.queries";
 import type {
   AddressReviewInput,
   ProofingRequest,
+  ReviewTarget,
   StepReviewKind,
 } from "../api/identity-proofing";
-import { useDecideStepReviewMutation } from "../api/identity-proofing.queries";
+import { useDecideStepReviewFor } from "../api/identity-proofing.queries";
 import { useWhenFormatter } from "../lib/format-when";
 import {
   addressVerificationNote,
@@ -34,6 +35,7 @@ import {
   REVIEW_HINT,
   REVIEW_TEXTAREA,
   ReviewSection,
+  ReviewProgress,
   SessionDecisions,
 } from "./proofing-review-parts";
 import { useAfterDecision } from "../lib/use-after-decision";
@@ -49,10 +51,10 @@ const ADDRESS_WHY_HINT = {
 // registered one it differs from), the identity check it came with (decided
 // already, and never changed by this), and the decision.
 export function AddressReview({
-  slug,
+  target,
   request,
 }: Readonly<{
-  slug: string;
+  target: ReviewTarget;
   request: ProofingRequest;
 }>): React.JSX.Element {
   const { t } = useTranslation();
@@ -79,6 +81,7 @@ export function AddressReview({
         subtitle={subtitle}
       />
       <div className="flex max-w-3xl flex-col gap-6 p-4 sm:p-8">
+        <ReviewProgress request={request} />
         <ReviewSection
           id="address-review-why"
           title={t("identityProofing.reviews.address.whyTitle")}
@@ -114,7 +117,7 @@ export function AddressReview({
                 {t(`identityProofing.reviews.check.own.${own}`)}
               </output>
             ) : (
-              <StepDecision slug={slug} request={request} kind="address" />
+              <StepDecision target={target} request={request} kind="address" />
             ))}
           {review !== undefined && review !== "pending" && (
             <output className="border-line bg-surface-2 text-ink rounded-yivi block border px-4 py-3 text-[13.5px]">
@@ -125,7 +128,9 @@ export function AddressReview({
             </output>
           )}
         </ReviewSection>
-        <BackToReviews to={reviewPath(slug)} />
+        {target.kind === "org" && (
+          <BackToReviews to={reviewPath(target.slug)} />
+        )}
       </div>
     </>
   );
@@ -135,21 +140,21 @@ export function AddressReview({
 // reason the audit log keeps. The review then goes on to the session's next
 // part waiting, else back to the Reviews page.
 export function StepDecision({
-  slug,
+  target,
   request,
   kind,
   confirmBlocked = false,
 }: Readonly<{
-  slug: string;
+  target: ReviewTarget;
   request: ProofingRequest;
   kind: StepReviewKind;
   // A file whose seal nobody checked yet: rejecting is all that remains.
   confirmBlocked?: boolean;
 }>): React.JSX.Element {
   const { t } = useTranslation();
-  const afterDecision = useAfterDecision(slug);
+  const afterDecision = useAfterDecision(target);
   const requestId = request.id;
-  const decide = useDecideStepReviewMutation(slug, requestId, kind);
+  const decide = useDecideStepReviewFor(target, requestId, kind);
   const [reason, setReason] = useState("");
   const [touched, setTouched] = useState(false);
   const problem = reasonProblem(reason);

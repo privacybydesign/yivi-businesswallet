@@ -326,7 +326,7 @@ func TestPurgeStripsReviewReason(t *testing.T) {
 	ctx := context.Background()
 	const reason = "Anna Jansen's photo matched on a second look"
 	req := createStarted(t, f.requests, newStoredRequest(f.orgID, f.sam, f.subject("", "a@example.org", "")), "s1")
-	if err := f.requests.RecordReviewDecision(ctx, req, StatusApproved, reason, ""); err != nil {
+	if err := f.requests.RecordReviewDecision(ctx, req, StatusApproved, reason, "", ""); err != nil {
 		t.Fatalf("RecordReviewDecision: %v", err)
 	}
 	leaks := func() int {

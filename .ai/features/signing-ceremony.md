@@ -5,6 +5,12 @@ Status: **implemented** (backend + gated frontend). Builds on the CSC provider s
 **RP-centric Signature Creation Application (SCA)** driving a remote QTSP's CSC API v2 to
 create a qualified electronic signature over a PDF (PAdES).
 
+> **The default provider is now the wallet itself.** An organisation that connected nothing
+> signs with the built-in signing service, whose authorization is a Yivi disclosure
+> (`.ai/features/yivi-signing.md`, which also covers the signing API). This document describes
+> the ceremony as the client of any CSC provider; where it says the wallet step needs an EUDI
+> reference wallet, that is the reference QTSP behind `--profile signer` only.
+
 ## Who does what
 
 The QTSP reference implementation is **backend-only** and owns the wallet ceremony: on
@@ -24,6 +30,8 @@ a ceremony. So signing is split:
 1. **Link credential** (once, `POST /orgs/{slug}/signing/credential/link`): a `scope=service`
    ceremony → `credentials/list` (auto-issues if none) → `credentials/info` → cache the
    credential id + certificate + chain per (org, user) in `signing_credentials`.
+   The row records the provider it was linked at (`provider_base_url`): after the org
+   changes provider the old credential no longer counts and the signer links again.
 2. **Sign a document** (per doc, `POST /orgs/{slug}/signing/requests`): prepare the PDF against
    the cached cert to get the hash → `scope=credential` `authorize` binding that hash (SCAL2)
    → token → `signHash` → embed. One wallet scan per document.

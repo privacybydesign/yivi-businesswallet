@@ -1,12 +1,8 @@
 import { useRef } from "react";
 import { useTranslation } from "react-i18next";
 import * as React from "react";
-import {
-  isHexColor,
-  isInvalidColor,
-  readableTextOn,
-} from "../lib/identity-proofing";
-import { Button, Icon, Input } from "../ui";
+import { isHexColor, isInvalidColor } from "../lib/identity-proofing";
+import { Button, Input } from "../ui";
 import { InitialMark } from "./proofing-ui";
 
 export const LABEL = "text-ink text-[13px] font-semibold";
@@ -24,8 +20,6 @@ const PRESET_COLORS = [
 // Shown when there is no colour: the Yivi default the mail falls back to.
 export const FALLBACK_PREVIEW_COLOR = "#1A1A1A";
 const LOGO_ACCEPT = "image/png,image/jpeg,image/gif,image/webp";
-const PREVIEW_QR_ICON = 40;
-const PREVIEW_MARK = "h-6 w-6 rounded text-[11px]";
 
 // The fields a branding form edits; a picked logo file or its removal is kept
 // beside the text until it is saved.
@@ -50,8 +44,8 @@ const LOGO_STATE_KEYS = {
 } as const satisfies Record<LogoSource, string>;
 
 // The branding fields shared by the org's and a flow's form: display name,
-// logo, colour, support contact and privacy statement. children are further
-// controls for the contact grid.
+// logo, colour (unless hideColor), support contact and privacy statement.
+// children are further controls for the contact grid.
 export function BrandingFields({
   idPrefix,
   draft,
@@ -60,6 +54,7 @@ export function BrandingFields({
   fallbackName,
   fallbackColor = FALLBACK_PREVIEW_COLOR,
   placeholders,
+  hideColor = false,
   children,
 }: Readonly<{
   idPrefix: string;
@@ -75,6 +70,7 @@ export function BrandingFields({
     support: string;
     privacy: string;
   };
+  hideColor?: boolean;
   children?: React.ReactNode;
 }>): React.JSX.Element {
   const { t } = useTranslation();
@@ -158,15 +154,17 @@ export function BrandingFields({
         </div>
       </div>
 
-      <ColorField
-        id={`${idPrefix}-color`}
-        label={t("identityProofing.branding.primaryColor")}
-        hint={t("identityProofing.branding.primaryColorHint")}
-        hexLabel={t("identityProofing.branding.hexColor")}
-        placeholder={placeholders.color}
-        value={draft.primaryColor}
-        onChange={(primaryColor) => onChange({ primaryColor })}
-      />
+      {!hideColor && (
+        <ColorField
+          id={`${idPrefix}-color`}
+          label={t("identityProofing.branding.primaryColor")}
+          hint={t("identityProofing.branding.primaryColorHint")}
+          hexLabel={t("identityProofing.branding.hexColor")}
+          placeholder={placeholders.color}
+          value={draft.primaryColor}
+          onChange={(primaryColor) => onChange({ primaryColor })}
+        />
+      )}
 
       <div className="grid gap-4 md:grid-cols-2">
         <div className="flex flex-col gap-1.5">
@@ -263,93 +261,6 @@ export function ColorField({
       ) : (
         <p className={HINT}>{hint}</p>
       )}
-    </div>
-  );
-}
-
-interface MailPreviewProps {
-  name: string;
-  color: string;
-  logoUri: string;
-  supportContact: string;
-  privacyUrl: string;
-}
-
-// A sketch of the proofing mail with the draft branding, under its caption:
-// what the subject sees before they scan.
-export function MailPreview(
-  props: Readonly<MailPreviewProps>,
-): React.JSX.Element {
-  const { t } = useTranslation();
-  return (
-    <div>
-      <div className={`${CAPTION} mb-2`}>
-        {t("identityProofing.branding.preview.caption")}
-      </div>
-      <MailPreviewCard {...props} />
-    </div>
-  );
-}
-
-// The proofing mail sketch alone, for a preview that names it itself.
-export function MailPreviewCard({
-  name,
-  color,
-  logoUri,
-  supportContact,
-  privacyUrl,
-}: Readonly<MailPreviewProps>): React.JSX.Element {
-  const { t } = useTranslation();
-  const fill = color || FALLBACK_PREVIEW_COLOR;
-  const onFill = readableTextOn(fill);
-  return (
-    <div className="border-line bg-surface-2 rounded-xl border p-4">
-      <div className="mb-3 flex items-center gap-2">
-        {logoUri ? (
-          <img
-            src={logoUri}
-            alt=""
-            className={`bg-surface-3 object-contain ${PREVIEW_MARK}`}
-          />
-        ) : (
-          <InitialMark name={name} color={fill} className={PREVIEW_MARK} />
-        )}
-        <span className="text-ink text-[13px] font-semibold">{name}</span>
-      </div>
-      <div className="bg-surface border-line rounded-lg border p-5">
-        <h3 className="text-ink text-[17px] leading-snug font-bold">
-          {t("identityProofing.branding.preview.heading", { name })}
-        </h3>
-        <p className="text-ink-soft mt-2 text-[12.5px]">
-          {t("identityProofing.branding.preview.body", { name })}
-        </p>
-        <div className="border-line text-muted mx-auto my-4 flex h-24 w-24 items-center justify-center rounded-md border">
-          <Icon name="scan_qrcode" size={PREVIEW_QR_ICON} />
-        </div>
-        <div
-          className="rounded-md py-2.5 text-center text-[13px] font-semibold"
-          style={{ backgroundColor: fill, color: onFill }}
-        >
-          {t("identityProofing.branding.preview.button")}
-        </div>
-        {supportContact && (
-          <p className="text-ink-soft mt-3 text-[12px]">
-            {t("identityProofing.branding.preview.support", {
-              contact: supportContact,
-            })}
-          </p>
-        )}
-        {privacyUrl && (
-          <p className="text-ink-soft mt-1 text-[12px] break-all">
-            {t("identityProofing.branding.preview.privacy", {
-              url: privacyUrl,
-            })}
-          </p>
-        )}
-      </div>
-      <p className="text-muted mt-3 text-center text-[11px]">
-        {t("identityProofing.branding.preview.footer")}
-      </p>
     </div>
   );
 }

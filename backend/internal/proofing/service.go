@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"math"
 	"net/http"
 	"slices"
 	"strings"
@@ -20,7 +21,6 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/openid4vpverifier"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingprovider"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/safehttp"
-	"github.com/privacybydesign/yivi-businesswallet/backend/internal/themesettings"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
 )
 
@@ -86,12 +86,13 @@ type requestStore interface {
 	Stats(ctx context.Context, orgID uuid.UUID, requestedBy *uuid.UUID, since time.Time) ([]StatsRow, error)
 	GetExternal(ctx context.Context, orgID, id uuid.UUID) (Request, error)
 	Get(ctx context.Context, orgID, id uuid.UUID) (Request, error)
+	Reread(ctx context.Context, req Request) (Request, error)
 	ListDue(ctx context.Context, now time.Time, limit int) ([]Request, error)
 	NextDeadline(ctx context.Context, now time.Time) (time.Time, error)
 	GetBySession(ctx context.Context, sessionID string) (Request, error)
 	GetByLinkToken(ctx context.Context, hash []byte) (Request, error)
 	LapseLinks(ctx context.Context, now time.Time, limit int) (int, error)
-	RecordReviewDecision(ctx context.Context, req Request, decided Status, reason, errorCode string) error
+	RecordReviewDecision(ctx context.Context, req Request, decided Status, reason, errorCode, apiReviewer string) error
 	RecordHandover(ctx context.Context, req Request, expiresAt time.Time) error
 	ListPurgeDue(ctx context.Context, limit int) ([]Request, error)
 	DeferPurge(ctx context.Context, id uuid.UUID) error
@@ -104,7 +105,7 @@ type requestStore interface {
 	AddEmployment(ctx context.Context, req Request, emp Employment) (bool, error)
 	RecordEmploymentRejected(ctx context.Context, req Request, reason, failedCheck string) error
 	SetRegisteredAddress(ctx context.Context, req Request, addr *Address) error
-	DecideStepReview(ctx context.Context, req Request, kind ReviewKind, reviewerID uuid.UUID, decided ReviewState, reason string) (*time.Time, error)
+	DecideStepReviewBy(ctx context.Context, req Request, kind ReviewKind, by stepDecider, decided ReviewState, reason string) (*time.Time, error)
 	RejectPendingReviewItems(ctx context.Context, orgID uuid.UUID, code, reason string) error
 	LapseReviewItems(ctx context.Context, now time.Time, limit int) (int, error)
 	NextReviewItemDue(ctx context.Context) (time.Time, error)
@@ -131,6 +132,7 @@ type apiKeyStore interface {
 	Create(ctx context.Context, orgID, createdBy uuid.UUID, name string, scopes []string) (APIKey, string, error)
 	List(ctx context.Context, orgID uuid.UUID) ([]APIKey, error)
 	Revoke(ctx context.Context, orgID, id uuid.UUID) (APIKey, error)
+	Secret(ctx context.Context, orgID, id uuid.UUID) (string, error)
 	Authenticate(ctx context.Context, raw string) (APIKeyCaller, error)
 	Touch(ctx context.Context, caller APIKeyCaller) error
 }
@@ -138,11 +140,10 @@ type apiKeyStore interface {
 type orgSettingsStore interface {
 	Get(ctx context.Context, orgID uuid.UUID) (Settings, error)
 	Save(ctx context.Context, orgID uuid.UUID, change SessionSettingsChange, legal *LegalRetention, origins *[]string) (Settings, error)
-	SaveBranding(ctx context.Context, orgID uuid.UUID, b Branding, logo LogoChange) (Settings, error)
+	SaveBranding(ctx context.Context, orgID uuid.UUID, b Branding) (Settings, error)
 	SyncEngineRetention(ctx context.Context, orgID uuid.UUID, sync func(context.Context, Settings) error) error
 	MarkEngineRetentionStale(ctx context.Context, orgID uuid.UUID) error
 	StaleEngineRetention(ctx context.Context) ([]uuid.UUID, error)
-	Logo(ctx context.Context, orgID uuid.UUID) (Logo, error)
 }
 
 type pauseStore interface {
@@ -191,6 +192,11 @@ type Service struct {
 	// unchecked keeps the files whose seal could not be checked at upload;
 	// nil fails such an upload.
 	unchecked uncheckedDocumentStore
+	// reviewLinks holds the links to the hosted review page.
+	reviewLinks reviewLinkStore
+	// reviewBaseURL is the hosted review page a review link's token is
+	// appended to.
+	reviewBaseURL string
 	// sealRetryDelay is the wait between tries of an unreachable seal check.
 	sealRetryDelay time.Duration
 	// flowAddressSettings is each flow's AddressMode; nil asks for none.
@@ -248,6 +254,8 @@ type Stores struct {
 	// DataRequests holds each flow's kind and a data request's matches; nil
 	// makes every flow an identity check.
 	DataRequests dataRequestStore
+	// ReviewLinks holds the links to the hosted review page; nil makes none.
+	ReviewLinks reviewLinkStore
 }
 
 // NewService builds the proofing service. A nil mailer skips the e-mail (tests).
@@ -257,7 +265,7 @@ func NewService(stores Stores, ips Provider, verifier verifier, mailer Mailer) *
 		webhooks: stores.Webhooks, events: stores.Events, pauses: stores.Pauses, flowHostedSettings: stores.FlowHosted,
 		flowBrandings:       stores.FlowBranding,
 		flowDiplomaSettings: stores.FlowDiplomas, diplomas: stores.Diplomas, dataRequests: stores.DataRequests,
-		unchecked: stores.Unchecked, sealRetryDelay: sealCheckRetryDelay,
+		unchecked: stores.Unchecked, sealRetryDelay: sealCheckRetryDelay, reviewLinks: stores.ReviewLinks,
 		flowAddressSettings: stores.FlowAddresses, flowEmploymentSettings: stores.FlowEmployment,
 		ips: ips, verifier: verifier, mailer: mailer, now: time.Now,
 		readChecks: newReadThrottle(readReconcileEvery),
@@ -527,8 +535,14 @@ func (s *Service) validSelection(ctx context.Context, org Org, sel FlowSelection
 // combination of steps, checks and assurance level; its refusal comes back as a
 // *proofingprovider.RejectedError.
 func (s *Service) CreateFlow(ctx context.Context, org Org, in proofingprovider.FlowSpec) (proofingprovider.Flow, error) {
-	in, err := normalizeFlow(in)
+	in, err := withLevelNeeds(in)
 	if err != nil {
+		return proofingprovider.Flow{}, err
+	}
+	if in, err = normalizeFlow(in); err != nil {
+		return proofingprovider.Flow{}, err
+	}
+	if in, err = checkEditorChoices(in, nil); err != nil {
 		return proofingprovider.Flow{}, err
 	}
 	// A new flow's hosted page has the defaults until its admin sets it.
@@ -553,11 +567,21 @@ func (s *Service) CreateFlow(ctx context.Context, org Org, in proofingprovider.F
 // naming dg1: an empty list would leave what it releases to the engine. A data
 // request flow is the wallet's, and not edited (ErrDataRequestFlow).
 func (s *Service) EditFlow(ctx context.Context, org Org, id string, in proofingprovider.FlowSpec) (proofingprovider.Flow, error) {
-	in, err := normalizeFlow(in)
+	in, err := withLevelNeeds(in)
 	if err != nil {
 		return proofingprovider.Flow{}, err
 	}
+	if in, err = normalizeFlow(in); err != nil {
+		return proofingprovider.Flow{}, err
+	}
 	if err := s.refuseDataRequestFlow(ctx, org, id); err != nil {
+		return proofingprovider.Flow{}, err
+	}
+	current, err := s.orgFlow(ctx, org, id)
+	if err != nil {
+		return proofingprovider.Flow{}, err
+	}
+	if in, err = checkEditorChoices(in, &current.FlowSpec); err != nil {
 		return proofingprovider.Flow{}, err
 	}
 	required, err := s.identityRequired(ctx, org.ID, id)
@@ -648,10 +672,21 @@ func normalizeFlow(in proofingprovider.FlowSpec) (proofingprovider.FlowSpec, err
 	if !sessionTTLAllowed(in.SessionTTLSeconds) {
 		return in, fmt.Errorf("%w: the session lifetime must be 2, 5 or 10 minutes", ErrInvalidInput)
 	}
+	steps, err := editorSteps(in.Steps)
+	if err != nil {
+		return in, err
+	}
+	in.Steps = steps
+	if err := checkRequestedAttributes(in); err != nil {
+		return in, err
+	}
+	if err := checkFaceMatchThreshold(in); err != nil {
+		return in, err
+	}
 	in.SelfieLocation = ""
 	if !hasFaceStep(in.Steps) {
 		in.FaceProvider = ""
-		return in, nil
+		return in, checkYiviOnly(in)
 	}
 	in.SelfieLocation = selfieLocationNative
 	if in.FaceProvider == "" {
@@ -667,8 +702,178 @@ func normalizeFlow(in proofingprovider.FlowSpec) (proofingprovider.FlowSpec, err
 			return in, fmt.Errorf("%w: the face is checked in the document scan only with the document photo", ErrInvalidInput)
 		}
 		in.SelfieLocation = selfieLocationBrowser
+		// ID Scan matches only a face its liveness check passed.
+		if !slices.Contains(in.RequiredChecks, checkFaceLiveness) {
+			in.RequiredChecks = append(slices.Clone(in.RequiredChecks), checkFaceLiveness)
+		}
+	}
+	return in, checkYiviOnly(in)
+}
+
+// editorStepOrder is every step the flow editor offers, in the order it sends
+// them: the order the Idem app runs them in.
+var editorStepOrder = []string{stepDocumentCapture, stepDocumentPhoto, stepNFCRead, stepFaceVerification}
+
+// editorSteps is steps in editorStepOrder; a step the editor does not offer,
+// or one named twice, is refused.
+func editorSteps(steps []string) ([]string, error) {
+	for i, step := range steps {
+		if !slices.Contains(editorStepOrder, step) {
+			return nil, fmt.Errorf("%w: unknown step %q: a flow takes %s", ErrInvalidInput, step, strings.Join(editorStepOrder, ", "))
+		}
+		if slices.Contains(steps[:i], step) {
+			return nil, fmt.Errorf("%w: step %q is named twice", ErrInvalidInput, step)
+		}
+	}
+	return slices.DeleteFunc(slices.Clone(editorStepOrder), func(step string) bool { return !slices.Contains(steps, step) }), nil
+}
+
+// attributeSteps are the requested items the editor offers, each with the
+// steps that produce it; an item is only requested next to one of them.
+var attributeSteps = map[string][]string{
+	attributeDocument:      {stepDocumentCapture, stepDocumentPhoto},
+	attributeAgeOver:       {stepNFCRead, stepDocumentPhoto},
+	attributeChipChecks:    {stepNFCRead},
+	attributeDG11:          {stepNFCRead},
+	attributeFacePhoto:     {stepNFCRead},
+	attributeBiometrics:    {stepFaceVerification},
+	attributeSelfie:        {stepFaceVerification},
+	attributeDocumentImage: {stepDocumentPhoto},
+}
+
+// checkRequestedAttributes refuses an item the editor does not offer, and one
+// none of in's steps produces. outcome_only stands alone.
+func checkRequestedAttributes(in proofingprovider.FlowSpec) error {
+	for _, attribute := range in.RequestedAttributes {
+		if attribute == attributeOutcomeOnly {
+			if len(in.RequestedAttributes) > 1 {
+				return fmt.Errorf("%w: %q releases nothing else, so it stands alone", ErrInvalidInput, attributeOutcomeOnly)
+			}
+			continue
+		}
+		steps, ok := attributeSteps[attribute]
+		if !ok {
+			return fmt.Errorf("%w: unknown requested attribute %q", ErrInvalidInput, attribute)
+		}
+		if !slices.ContainsFunc(steps, func(step string) bool { return slices.Contains(in.Steps, step) }) {
+			return fmt.Errorf("%w: %q needs one of the steps %s", ErrInvalidInput, attribute, strings.Join(steps, ", "))
+		}
+	}
+	return nil
+}
+
+// faceMatchThresholdSteps is how many steps the editor's face match slider
+// has from 0 to 1: a threshold is a whole hundredth.
+const faceMatchThresholdSteps = 100
+
+// checkFaceMatchThreshold refuses a face match threshold the editor's slider
+// cannot set.
+func checkFaceMatchThreshold(in proofingprovider.FlowSpec) error {
+	threshold, ok := in.CheckThresholds[checkFaceMatch]
+	if !ok {
+		return nil
+	}
+	scaled := threshold * faceMatchThresholdSteps
+	if math.Abs(scaled-math.Round(scaled)) > faceMatchThresholdTolerance {
+		return fmt.Errorf("%w: the face match threshold is a whole hundredth, such as 0.75", ErrInvalidInput)
+	}
+	return nil
+}
+
+// faceMatchThresholdTolerance absorbs the float error of a hundredth sent as
+// JSON (0.29 * 100 is 28.999999999999996).
+const faceMatchThresholdTolerance = 1e-9
+
+// flowRetentionDays are the retentions the editor offers a flow, besides
+// following the org's (0).
+var flowRetentionDays = []int{1, 30, 90}
+
+// checkEditorChoices refuses what the flow editor offers no choice for, unless
+// current, the active version being edited (nil for a new flow), already has
+// it: the editor keeps a stored value as it is. A setting the editor does not
+// show is carried over from current when in leaves it out.
+func checkEditorChoices(in proofingprovider.FlowSpec, current *proofingprovider.FlowSpec) (proofingprovider.FlowSpec, error) {
+	var was proofingprovider.FlowSpec
+	if current != nil {
+		was = *current
+	}
+	if err := checkAgeChoice(in, was); err != nil {
+		return in, err
+	}
+	if err := checkRetentionChoice(in, was); err != nil {
+		return in, err
+	}
+	types, err := editorDocumentTypesChoice(in.AcceptedDocumentTypes, was.AcceptedDocumentTypes)
+	if err != nil {
+		return in, err
+	}
+	in.AcceptedDocumentTypes = types
+	return carryUnshownSettings(in, was)
+}
+
+func checkAgeChoice(in, was proofingprovider.FlowSpec) error {
+	if !slices.Contains(in.RequestedAttributes, attributeAgeOver) || in.AgeOver == was.AgeOver {
+		return nil
+	}
+	if _, ok := openid4vpverifier.AgeClaim(in.AgeOver); !ok {
+		return fmt.Errorf("%w: the age check asks one of the ages %v", ErrInvalidInput, openid4vpverifier.AgeClaimAges())
+	}
+	return nil
+}
+
+func checkRetentionChoice(in, was proofingprovider.FlowSpec) error {
+	if in.RetentionOverrideSeconds == 0 || in.RetentionOverrideSeconds == was.RetentionOverrideSeconds ||
+		slices.ContainsFunc(flowRetentionDays, func(days int) bool { return in.RetentionOverrideSeconds == days*secondsPerDay }) {
+		return nil
+	}
+	return fmt.Errorf("%w: a flow keeps its data for %v days, or follows the organisation", ErrInvalidInput, flowRetentionDays)
+}
+
+// editorDocumentTypesChoice is types as the editor stores them, refusing a
+// type it does not offer unless was already has it.
+func editorDocumentTypesChoice(types, was []string) ([]string, error) {
+	for _, t := range types {
+		if !slices.Contains(editorDocumentTypes, t) && !slices.Contains(was, t) {
+			return types, fmt.Errorf("%w: unknown accepted document type %q: a flow takes %s", ErrInvalidInput, t, strings.Join(editorDocumentTypes, ", "))
+		}
+	}
+	// Every kind and nothing else is any document, which an empty list says.
+	if !slices.Equal(types, was) && len(types) == len(documentKindNames) &&
+		!slices.ContainsFunc(documentKindNames, func(kind string) bool { return !slices.Contains(types, kind) }) {
+		return nil, nil
+	}
+	return types, nil
+}
+
+// carryUnshownSettings carries the settings the editor does not show over from
+// was when in leaves them all out, and refuses a change to them.
+func carryUnshownSettings(in, was proofingprovider.FlowSpec) (proofingprovider.FlowSpec, error) {
+	if in.LegalBasis == "" && in.ProcessingPurpose == "" && in.AssuranceTiers == nil {
+		in.LegalBasis, in.ProcessingPurpose, in.AssuranceTiers = was.LegalBasis, was.ProcessingPurpose, was.AssuranceTiers
+	}
+	if in.LegalBasis != was.LegalBasis || in.ProcessingPurpose != was.ProcessingPurpose || !slices.Equal(in.AssuranceTiers, was.AssuranceTiers) {
+		return in, fmt.Errorf("%w: legalBasis, processingPurpose and assuranceTiers are not set on a flow", ErrInvalidInput)
 	}
 	return in, nil
+}
+
+// documentKindNames are the document kinds the editor offers; editorDocumentTypes
+// adds the registered personal data.
+var (
+	documentKindNames = []string{
+		proofingprovider.DocumentKindPassport, proofingprovider.DocumentKindIdentityCard,
+		proofingprovider.DocumentKindResidencePermit, proofingprovider.DocumentKindDrivingLicence,
+	}
+	editorDocumentTypes = append(slices.Clone(documentKindNames), openid4vpverifier.SourcePersonalData)
+)
+
+// checkYiviOnly refuses a flow locked to the Yivi app that the Yivi app cannot
+// run: no app could start it.
+func checkYiviOnly(in proofingprovider.FlowSpec) error {
+	if len(in.Apps) == 1 && in.Apps[0] == appYivi && !yiviAppAvailable(proofingprovider.Flow{FlowSpec: in}) {
+		return fmt.Errorf("%w: the Yivi app cannot run this flow (a face check without the chip read, or a level above low), so it cannot be its only app", ErrInvalidInput)
+	}
+	return nil
 }
 
 // flowSessionTTL is how long a session of f runs: the flow's own lifetime when
@@ -1174,7 +1379,7 @@ type mailSend struct {
 // proofingMail is the mail a request sends. A member's is the org's; an
 // external person's is signed with and styled as the flow's branding over the
 // org's, with its support contact and privacy statement. A logo that cannot be
-// read is left out (the wordmark shows): a cosmetic loss must not block the
+// read is left out (the org's shows): a cosmetic loss must not block the
 // send. A flow's branding that cannot be read blocks it, since the mail would
 // otherwise go out in another look than the admin set.
 func (s *Service) proofingMail(ctx context.Context, org Org, settings *Settings, send mailSend) (email.ProofingMail, error) {
@@ -1458,7 +1663,7 @@ func (s *Service) matchDataRequest(ctx context.Context, tenant proofingprovider.
 	}
 	// Another reconcile may have finished between this one's read
 	// and the lock.
-	fresh, err := s.requests.Get(ctx, req.OrganizationID, req.ID)
+	fresh, err := s.requests.Reread(ctx, req)
 	if err != nil {
 		release()
 		slog.WarnContext(ctx, "identity proofing: read the data request to match failed",
@@ -1632,12 +1837,6 @@ func (s *Service) ExternalRequest(ctx context.Context, orgID, id uuid.UUID) (Req
 	return s.readReconciled(ctx, req)
 }
 
-// StoredExternalRequest is one of the org's external requests as stored,
-// without re-checking the engine: what a headless poll answers from.
-func (s *Service) StoredExternalRequest(ctx context.Context, orgID, id uuid.UUID) (Request, error) {
-	return s.requests.GetExternal(ctx, orgID, id)
-}
-
 // ExternalRequestPage is a page of the org's external requests, newest first,
 // from stored state (no the engine call), and the cursor of the next page ("" at
 // the end). A cursor that does not decode is ErrInvalidInput.
@@ -1678,7 +1877,7 @@ func (s *Service) CancelRequest(ctx context.Context, orgID, id uuid.UUID) (Reque
 	if errors.Is(err, errCancelSessionMoved) {
 		// A hosted start raced the cancel; a session is attached once, so the
 		// second read holds the last one.
-		if req, err = s.requests.Get(ctx, req.OrganizationID, req.ID); err != nil {
+		if req, err = s.requests.Reread(ctx, req); err != nil {
 			return Request{}, err
 		}
 		err = s.cancelOnce(ctx, req)
@@ -1884,7 +2083,7 @@ func (s *Service) purge(ctx context.Context, req Request) error {
 	if err := s.purgeOnce(ctx, req); !errors.Is(err, errPurgeSessionMoved) {
 		return err
 	}
-	fresh, err := s.requests.Get(ctx, req.OrganizationID, req.ID)
+	fresh, err := s.requests.Reread(ctx, req)
 	if err != nil {
 		return err
 	}
@@ -2117,7 +2316,7 @@ func (s *Service) startYivi(ctx context.Context, req Request, sess *ipsSession) 
 		return YiviStart{}, err
 	}
 	started, err := s.verifier.StartProofing(ctx, openid4vpverifier.ProofingRequest{
-		Sources: yiviSources(f), Claims: claims, Address: req.Address.asked(),
+		Sources: yiviSources(f), Claims: claims, Address: req.Address.asked(), BSN: keepsBSN(f),
 	})
 	if err != nil {
 		return YiviStart{}, err
@@ -2369,6 +2568,11 @@ func (s *Service) APIKeys(ctx context.Context, orgID uuid.UUID) ([]APIKey, error
 	return s.apiKeys.List(ctx, orgID)
 }
 
+// APIKeySecret is one of the org's active keys itself (APIKeyStore.Secret).
+func (s *Service) APIKeySecret(ctx context.Context, orgID, id uuid.UUID) (string, error) {
+	return s.apiKeys.Secret(ctx, orgID, id)
+}
+
 // RevokeAPIKey stops one of the org's keys authenticating.
 func (s *Service) RevokeAPIKey(ctx context.Context, orgID, id uuid.UUID) (APIKey, error) {
 	return s.apiKeys.Revoke(ctx, orgID, id)
@@ -2445,34 +2649,20 @@ func (s *Service) Settings(ctx context.Context, orgID uuid.UUID) (Settings, erro
 	return s.orgSettings.Get(ctx, orgID)
 }
 
-// SaveBranding replaces the org's branding. The colour is a #rrggbb hex, the
-// privacy statement an https URL; empty fields fall back.
-func (s *Service) SaveBranding(ctx context.Context, orgID uuid.UUID, b Branding, logo LogoChange) (Settings, error) {
+// SaveBranding replaces what the org's branding says besides its theme. The
+// privacy statement is an https URL; empty fields fall back.
+func (s *Service) SaveBranding(ctx context.Context, orgID uuid.UUID, b Branding) (Settings, error) {
 	b, err := checkBranding(b)
 	if err != nil {
 		return Settings{}, err
 	}
-	return s.orgSettings.SaveBranding(ctx, orgID, b, logo)
+	return s.orgSettings.SaveBranding(ctx, orgID, b)
 }
 
 // checkBranding trims b's fields and refuses one that cannot be saved.
 func checkBranding(b Branding) (Branding, error) {
 	b.DisplayName = strings.TrimSpace(b.DisplayName)
 	b.PrimaryColor = strings.TrimSpace(b.PrimaryColor)
-	b.SecondaryColor = strings.TrimSpace(b.SecondaryColor)
-	b.FontFamily = strings.TrimSpace(b.FontFamily)
-	for name, color := range map[string]*string{
-		"text": &b.TextColor, "surface": &b.SurfaceColor, "border": &b.BorderColor, "link": &b.LinkColor,
-		"success": &b.SuccessColor, "warning": &b.WarningColor, "error": &b.ErrorColor, "top bar": &b.TopbarColor,
-	} {
-		*color = strings.TrimSpace(*color)
-		if *color != "" && !hexColor.MatchString(*color) {
-			return Branding{}, fmt.Errorf("%w: the %s colour must be a hex colour like #1f5b4a", ErrInvalidInput, name)
-		}
-	}
-	if b.FontFamily != "" && !themesettings.ValidFontFamily(b.FontFamily) {
-		return Branding{}, fmt.Errorf("%w: the font must be a comma-separated font-family list", ErrInvalidInput)
-	}
 	b.SupportContact = strings.TrimSpace(b.SupportContact)
 	b.PrivacyURL = strings.TrimSpace(b.PrivacyURL)
 	switch {
@@ -2480,8 +2670,6 @@ func checkBranding(b Branding) (Branding, error) {
 		return Branding{}, fmt.Errorf("%w: the display name is too long", ErrInvalidInput)
 	case b.PrimaryColor != "" && !hexColor.MatchString(b.PrimaryColor):
 		return Branding{}, fmt.Errorf("%w: the primary colour must be a hex colour like #1f5b4a", ErrInvalidInput)
-	case b.SecondaryColor != "" && !hexColor.MatchString(b.SecondaryColor):
-		return Branding{}, fmt.Errorf("%w: the secondary colour must be a hex colour like #1f5b4a", ErrInvalidInput)
 	case len(b.SupportContact) > maxSupportContactLen:
 		return Branding{}, fmt.Errorf("%w: the support contact is too long", ErrInvalidInput)
 	case len(b.PrivacyURL) > maxWebhookURLLength:
@@ -2493,11 +2681,6 @@ func checkBranding(b Branding) (Branding, error) {
 		}
 	}
 	return b, nil
-}
-
-// Logo returns the org's logo, or ErrNoLogo.
-func (s *Service) Logo(ctx context.Context, orgID uuid.UUID) (Logo, error) {
-	return s.orgSettings.Logo(ctx, orgID)
 }
 
 // sessionTTLAllowed is whether a flow may set seconds as its session lifetime:

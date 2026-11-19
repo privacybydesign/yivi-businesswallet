@@ -102,7 +102,9 @@ export default function Members(): React.JSX.Element {
 
   const org = useOrganizationQuery(slug);
   const isAdmin = org.data?.role === "admin";
-  const screeningSettings = useScreeningSettingsQuery(slug, isAdmin);
+  // The admin-only reads start with the page instead of after the org read
+  // says who is asking: the backend refuses them for anyone else.
+  const screeningSettings = useScreeningSettingsQuery(slug, true);
   const showVog = screeningConfigured(screeningSettings.data);
   const widths = showVog ? COLUMN_WIDTHS_WITH_VOG : COLUMN_WIDTHS;
   const columnCount = showVog ? COLUMN_COUNT + 1 : COLUMN_COUNT;
@@ -161,23 +163,13 @@ export default function Members(): React.JSX.Element {
       limit: PAGE_SIZE,
       offset: page * PAGE_SIZE,
     },
-    isAdmin,
+    true,
   );
 
   // Per-status counts for the subtitle breakdown, independent of the active
   // filter/search (which only narrow the toolbar's result count).
-  const activeCount = useOrganizationMembersQuery(
-    slug,
-    { status: "active", limit: 1 },
-    isAdmin,
-  );
-  const pendingCount = useOrganizationMembersQuery(
-    slug,
-    { status: "invited", limit: 1 },
-    isAdmin,
-  );
-  const activeTotal = activeCount.data?.total;
-  const pendingTotal = pendingCount.data?.total;
+  const activeTotal = members.data?.activeTotal;
+  const pendingTotal = members.data?.invitedTotal;
 
   const resend = useResendInvitationMutation(slug);
   const revoke = useRevokeInvitationMutation(slug);
@@ -299,8 +291,7 @@ export default function Members(): React.JSX.Element {
       <TopBar
         title={t("members.title")}
         subtitle={
-          org.isPending ||
-          (isAdmin && (activeCount.isPending || pendingCount.isPending))
+          org.isPending || members.isPending
             ? t("common.loading")
             : activeTotal !== undefined && pendingTotal !== undefined
               ? t("members.summary", {

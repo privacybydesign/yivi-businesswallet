@@ -33,6 +33,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/emailchannel"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/employment"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/eudiholder"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/events"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/idscan"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/issuersettings"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/logging"
@@ -74,6 +75,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/walletunit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/wsca"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/wscawallet"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/yivicsc"
 )
 
 const (
@@ -81,7 +83,12 @@ const (
 	shutdownTimeout = 10 * time.Second
 
 	verifierProbeTimeout = 10 * time.Second
-	verifierHTTPTimeout  = 15 * time.Second
+	// hostedSigningProbeTimeout bounds the built-in signing service's boot probe:
+	// one read of its certificate authority, and on a first boot its making.
+	hostedSigningProbeTimeout = 10 * time.Second
+	// apiPrefix is where the versioned API is served under the app's origin.
+	apiPrefix           = "/api/v1"
+	verifierHTTPTimeout = 15 * time.Second
 
 	qerdsProbeTimeout = 10 * time.Second
 	qerdsHTTPTimeout  = 30 * time.Second
@@ -420,7 +427,10 @@ func attestationIssuerURL(cfg config.Config) string {
 // as a QERDS message to its digital address, carrying a structured OpenID4VCI
 // credential offer in the body (the recipient's wallet redeems it), not a claim
 // link.
-type qerdsOfferSender struct{ svc *qerds.Service }
+type qerdsOfferSender struct {
+	svc  *qerds.Service
+	orgs *organization.Store
+}
 
 func (a qerdsOfferSender) SendCredentialOffer(ctx context.Context, orgID uuid.UUID, toAddress, orgName, credentialName, offerURI string) error {
 	body, err := attestation.MarshalCredentialOfferEnvelope(orgName, credentialName, offerURI)
@@ -428,6 +438,20 @@ func (a qerdsOfferSender) SendCredentialOffer(ctx context.Context, orgID uuid.UU
 		return err
 	}
 	subject := fmt.Sprintf("Credential offer: %s", credentialName)
+	_, err = a.svc.Send(ctx, orgID, "", toAddress, subject, body, nil)
+	return err
+}
+
+func (a qerdsOfferSender) SendOfferDeclined(ctx context.Context, orgID uuid.UUID, toAddress, credentialName, offerURI string) error {
+	org, err := a.orgs.GetByID(ctx, orgID)
+	if err != nil {
+		return err
+	}
+	body, err := attestation.MarshalOfferDeclinedEnvelope(org.Name, credentialName, offerURI)
+	if err != nil {
+		return err
+	}
+	subject := fmt.Sprintf("Credential offer declined: %s", credentialName)
 	_, err = a.svc.Send(ctx, orgID, "", toAddress, subject, body, nil)
 	return err
 }
@@ -564,21 +588,21 @@ func newWalletUnitSigner(cfg config.Config) (*walletunit.Signer, error) {
 	return walletunit.NewEphemeralSigner(walletUnitName + " ephemeral provider")
 }
 
-// wscaAccounts reads an org's WSCA account (wsca.ErrNotActivated when it has none).
-type wscaAccounts interface {
+// wscaAccountGetter reads an org's WSCA account (wsca.ErrNotActivated when it has none).
+type wscaAccountGetter interface {
 	Get(ctx context.Context, orgID uuid.UUID) (wsca.Account, error)
 }
 
 // walletUnitKeys reports the SKA an org's holder keys get: only when the
-// deployment binds holder keys in the WSCA, describes its HSM, and the org
+// irmago holder binds holder keys in the WSCA, the deployment describes its HSM, and the org
 // activated its WSCA account. Anything else gets no SKA, so no badge.
 type walletUnitKeys struct {
-	accounts wscaAccounts
+	accounts wscaAccountGetter
 	levels   []string
 }
 
-func newWalletUnitKeys(cfg config.Config, accounts wscaAccounts) walletUnitKeys {
-	if cfg.AttestationHolderWSCAURL == "" {
+func newWalletUnitKeys(cfg config.Config, accounts wscaAccountGetter) walletUnitKeys {
+	if cfg.AttestationHolder != config.HolderIrmago || cfg.AttestationHolderWSCAURL == "" {
 		return walletUnitKeys{}
 	}
 	return walletUnitKeys{accounts: accounts, levels: cfg.WalletUnitSKAKeyStorage}
@@ -653,13 +677,25 @@ func run() error {
 	startupCtx, cancel := context.WithTimeout(ctx, pingTimeout)
 	defer cancel()
 
-	pool, err := database.New(startupCtx, cfg.DatabaseDSN)
+	pool, err := database.NewWithOptions(startupCtx, cfg.DatabaseDSN, database.Options{
+		MaxConns: cfg.DatabaseMaxConns, StatementTimeout: cfg.DatabaseStatementTimeout,
+	})
 	if err != nil {
 		return err
 	}
 	defer pool.Close()
+	// No statement timeout here: a lock is waited for, then held idle.
+	lockPool, err := database.NewWithOptions(startupCtx, cfg.DatabaseDSN, database.Options{MaxConns: cfg.DatabaseLockMaxConns, HoldsLocks: true})
+	if err != nil {
+		return err
+	}
+	defer lockPool.Close()
 
-	w := &wiring{cfg: cfg, pool: pool}
+	// One LISTEN tells every open page what changed, so none polls for it.
+	hub := events.NewHub()
+	go hub.Run(ctx, pool)
+
+	w := &wiring{cfg: cfg, pool: pool, lockPool: lockPool, events: hub}
 	defer w.close()
 	for _, build := range []func(context.Context) error{
 		w.buildAuth,
@@ -680,9 +716,12 @@ func run() error {
 // wiring holds what run builds, stage by stage: each stage reads what the
 // earlier ones left here. closers are released, last first, when run returns.
 type wiring struct {
-	cfg     config.Config
-	pool    *pgxpool.Pool
-	closers []func()
+	cfg  config.Config
+	pool *pgxpool.Pool
+	// lockPool carries the locks held across a whole operation.
+	lockPool *pgxpool.Pool
+	events   *events.Hub
+	closers  []func()
 
 	verifier           *openid4vpverifier.Client
 	notificationStore  *notifications.Store
@@ -702,13 +741,13 @@ type wiring struct {
 	qerdsStore         *qerds.Store
 	qerdsService       *qerds.Service
 	proofingEngine     *proofingengine.Engine
-	proofingReviews    *proofing.ReviewFeed
 	selfReview         auth.SelfReview
 
 	authHandler           *auth.Handler
 	orgHandler            *organization.Handler
 	qerdsHandler          *qerds.Handler
 	walletHandler         *wallet.Handler
+	walletRegistry        registryProvider
 	postguardHandler      *postguard.Handler
 	emailHandler          *email.Handler
 	issuerSettingsHandler *issuersettings.Handler
@@ -725,8 +764,12 @@ type wiring struct {
 	provisioningHandler   *provisioning.Handler
 	cscHandler            *csc.Handler
 	signingHandler        *signing.Handler
-	proofingHandler       *proofing.Handler
-	proofingApp           server.Registerer
+	signingService        *signing.Service
+	signingAPIHandler     *signing.APIHandler
+	// yiviCSCHandler serves the wallet's own signing service; nil when it is off.
+	yiviCSCHandler  *yivicsc.Handler
+	proofingHandler *proofing.Handler
+	proofingApp     server.Registerer
 }
 
 func (w *wiring) close() {
@@ -854,11 +897,11 @@ func (w *wiring) buildOrganizations(ctx context.Context) error {
 
 	// Daily re-identification reminder sweep (#240 §6): mails members whose
 	// identity is due soon or overdue, per each org's own policy.
-	organization.NewIdentityScheduler(w.orgStore, w.emailService, cfg.AppBaseURL).Start(ctx, organization.DefaultIdentityScheduleInterval)
+	organization.NewIdentityScheduler(w.orgStore, w.emailService, cfg.AppBaseURL).Start(ctx, w.pool, organization.DefaultIdentityScheduleInterval)
 
 	// Daily VOG reminder sweep (#242 §6): mails members whose VOG is expiring
 	// soon or has expired, per each org's own screening policy.
-	organization.NewScreeningScheduler(w.orgStore, w.emailService, cfg.AppBaseURL).Start(ctx, organization.DefaultScreeningScheduleInterval)
+	organization.NewScreeningScheduler(w.orgStore, w.emailService, cfg.AppBaseURL).Start(ctx, w.pool, organization.DefaultScreeningScheduleInterval)
 	return nil
 }
 
@@ -919,9 +962,8 @@ func (w *wiring) buildMessaging(ctx context.Context) error {
 	if err := probe(ctx, qerdsProbeTimeout, registry); err != nil {
 		return fmt.Errorf("wallet registry ping: %w", err)
 	}
-	walletStore := wallet.NewStore(w.pool, w.recorder, walletunit.NewStore(w.pool, w.recorder))
-	walletService := wallet.NewService(walletStore, registry, w.authService, w.userStore, w.qerdsStore, cfg.QerdsDefaultAddressDomain)
-	w.walletHandler = wallet.NewHandler(walletService, w.sessionIssuer, w.requireUser, w.orgHandler.Authorize)
+	// The wallet service also needs the holder engine, so buildAttestations builds it.
+	w.walletRegistry = registry
 
 	// PostGuard is an optional org capability; unlike the verifier/QERDS/registry
 	// it has no fatal boot gate (a send surfaces a clear error if unconfigured).
@@ -938,6 +980,16 @@ func (w *wiring) buildMessaging(ctx context.Context) error {
 		slog.String("websiteUrl", cfg.PostGuardWebsiteURL),
 		slog.String("pkgUrl", cfg.PostGuardPkgURL),
 		slog.String("cryptifyUrl", cfg.PostGuardCryptifyURL))
+	return nil
+}
+
+// buildWallet wires wallet registration: the KVK registry from buildMessaging and
+// the EBWOID issuer, which stores the org's owner identification data in holder.
+// Only the seeded register's stub issuer exists until KVK's issuer (YIV-622).
+func (w *wiring) buildWallet(holder eudiholder.Holder) error {
+	walletStore := wallet.NewStore(w.pool, w.recorder, walletunit.NewStore(w.pool, w.recorder))
+	walletService := wallet.NewService(walletStore, w.walletRegistry, wallet.OwnerID{Issuer: registryprovider.StubEBWOIDIssuer{}, Holder: holder}, w.authService, w.userStore, w.qerdsStore, w.cfg.QerdsDefaultAddressDomain)
+	w.walletHandler = wallet.NewHandler(walletService, w.sessionIssuer, w.requireUser, w.orgHandler.Authorize)
 	return nil
 }
 
@@ -961,12 +1013,15 @@ func (w *wiring) buildAttestations(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	wscaStore := wsca.NewStore(w.pool, wscaCipher)
+	wscaStore := wsca.NewStore(w.pool, wscaCipher, w.recorder)
 
 	w.themeSettingsHandler = themesettings.NewHandler(w.themeSettingsStore, w.requireUser, w.orgHandler.Authorize)
 
 	attHolder, err := w.openAttestationHolder(ctx, wscaStore)
 	if err != nil {
+		return err
+	}
+	if err := w.buildWallet(attHolder); err != nil {
 		return err
 	}
 
@@ -1019,6 +1074,7 @@ func (w *wiring) buildAttestations(ctx context.Context) error {
 	logQerdsInboundPolicy(ctx, cfg, trustedSenders)
 	w.qerdsService.SetInboundConsumer(chainedInboundConsumer{
 		attestation.NewOfferReceiver(attestationStore, trustedSenders),
+		attestation.NewDeclineReceiver(attestationStore),
 		openid4vppresenter.NewReceiver(presenterService),
 	})
 
@@ -1026,7 +1082,7 @@ func (w *wiring) buildAttestations(ctx context.Context) error {
 	// credential offer is received without an operator being logged in.
 	startQerdsInboundPoller(ctx, w.qerdsService, cfg.QerdsInboundPollInterval)
 	attestationService := attestation.NewService(
-		attestationStore, attIssuer, issuerSettingsStore, w.emailService, qerdsOfferSender{w.qerdsService}, attestationStore, attestationStore, attHolder, cfg.AppBaseURL,
+		attestationStore, attIssuer, issuerSettingsStore, w.emailService, qerdsOfferSender{svc: w.qerdsService, orgs: w.orgStore}, attestationStore, attestationStore, attHolder, cfg.AppBaseURL,
 	)
 	// Re-read the issuer status list of every held credential, so a credential
 	// revoked after it was received stops reading as valid. Deploys come more
@@ -1036,7 +1092,7 @@ func (w *wiring) buildAttestations(ctx context.Context) error {
 	// an invitation. Wired via a setter (like the inbound QERDS consumer) because
 	// the org service is constructed before the attestation service.
 	w.orgService.SetOnboardingIssuer(attestation.NewOnboardingIssuer(attestationStore, attestationService))
-	w.attestationHandler = attestation.NewHandler(attestationStore, attestationStore, attestationStore, attestationStore, attestationService, issuerSettingsStore, attestationStore, w.orgStore, attestationIssuerURL(cfg), w.requireUser, w.orgHandler.Authorize)
+	w.attestationHandler = attestation.NewHandler(attestationStore, attestationService, issuerSettingsStore, w.orgStore, attestationIssuerURL(cfg), w.requireUser, w.orgHandler.Authorize)
 
 	// Org-admin WSCA holder-wallet lifecycle (activate / rotate). It shares the
 	// sealed-secret store + keystore layout with the holder redeem path so a wallet
@@ -1195,7 +1251,7 @@ func (w *wiring) buildIntegrations(ctx context.Context) error {
 	provisioningService := provisioning.NewService(provisioningStore, provisioningOrgStore, provisioningOrgStore, w.emailService, cfg.AppBaseURL)
 	provisioningService.Register(provisioner.NewEntra(&http.Client{Timeout: provisioningHTTPTimeout}))
 	w.provisioningHandler = provisioning.NewHandler(provisioningStore, provisioningService, w.requireUser, w.orgHandler.Authorize)
-	provisioning.NewScheduler(provisioningStore, provisioningService).Start(ctx, provisioning.DefaultSyncInterval)
+	provisioning.NewScheduler(provisioningStore, provisioningService).Start(ctx, w.pool, provisioning.DefaultSyncInterval)
 
 	// Per-org CSC signing-provider settings (a remote QTSP driven over the CSC API
 	// v2). Settings + a connection test only for now; the signing ceremony is a
@@ -1205,8 +1261,15 @@ func (w *wiring) buildIntegrations(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	cscStore := csc.NewStore(w.pool, w.recorder, cscCipher)
-	w.cscHandler = csc.NewHandler(cscStore, csc.NewClient(), w.requireUser, w.orgHandler.Authorize)
+	// The wallet's own signing service, which every org signs with until it
+	// connects another provider. Nil without the key above: it has signing keys
+	// to keep.
+	hosted, err := w.buildHostedSigning(ctx, cscCipher)
+	if err != nil {
+		return err
+	}
+	cscStore := csc.NewStore(w.pool, w.recorder, cscCipher, hosted.builtIn)
+	w.cscHandler = csc.NewHandler(cscStore, csc.NewClient(), hosted.builtIn, w.requireUser, w.orgHandler.Authorize)
 
 	// Qualified document signing: the business wallet as the RP-centric SCA driving
 	// the per-org CSC provider (base URL + OAuth client from cscStore). A request is
@@ -1219,10 +1282,73 @@ func (w *wiring) buildIntegrations(ctx context.Context) error {
 	// SigningRedirectURI is the QTSP-registered OAuth callback; empty falls back to
 	// the localhost default inside NewService (see signing.DefaultRedirectURI). A
 	// hosted deploy sets SIGNING_REDIRECT_URI to its own public callback.
-	w.signingHandler = signing.NewHandler(
-		signing.NewService(signingStore, signingprovider.NewClient(), cscStore, signingMembers{store: w.orgStore}, signingOrgs{store: w.orgStore}, signingDelivery, signingNotify, cfg.SigningRedirectURI, cfg.AppBaseURL, cfg.SigningOAuthIssuerInternal),
-		w.requireUser, w.orgHandler.Authorize)
+	w.signingService = signing.NewService(signingStore, hosted.provider, cscStore, signingMembers{store: w.orgStore}, signingOrgs{store: w.orgStore}, signingDelivery, signingNotify, cfg.SigningRedirectURI, cfg.AppBaseURL, cfg.SigningOAuthIssuerInternal)
+	if hosted.builtIn != nil {
+		w.signingService.UseHostedProvider(hosted.builtIn.BaseURL, hosted.redirectURI)
+	}
+	database.Periodic{Name: "signing-redelivery", Interval: signing.RedeliveryInterval, Runs: w.pool}.
+		Start(ctx, w.signingService.RedeliverStalled)
+	w.signingHandler = signing.NewHandler(w.signingService, w.requireUser, w.orgHandler.Authorize)
+	w.signingHandler.SetEvents(w.events)
 	return nil
+}
+
+// signingProvider is the provider seam the signing ceremony drives.
+type signingProvider interface {
+	Discover(ctx context.Context, baseURL string) (signingprovider.Info, error)
+	AuthorizeURL(issuer string, p signingprovider.AuthorizeParams) string
+	ExchangeToken(ctx context.Context, issuer, clientID, clientSecret, code, codeVerifier, redirectURI string) (signingprovider.Token, error)
+	ListCredentials(ctx context.Context, baseURL, accessToken string) ([]string, error)
+	CredentialInfo(ctx context.Context, baseURL, accessToken, credentialID string) (signingprovider.Credential, error)
+	SignHash(ctx context.Context, baseURL, accessToken, credentialID string, hashesB64 []string, signAlgoOID, hashAlgoOID string) ([]string, error)
+}
+
+// hostedSigning is what the wallet's own signing service contributes to the
+// signing slices: how the settings name it (builtIn, nil when it is off), the
+// callback its built-in client returns to, and the provider the ceremony drives,
+// which answers for the service in process and passes every other provider on.
+type hostedSigning struct {
+	builtIn     *csc.BuiltIn
+	redirectURI string
+	provider    signingProvider
+}
+
+// buildHostedSigning starts the wallet's own signing service (internal/yivicsc)
+// and mounts its routes. Without a CSC encryption key the service is off and the
+// ceremony drives remote providers only. A key that does not open the service's
+// certificate authority fails the boot, as every provider's probe does.
+func (w *wiring) buildHostedSigning(ctx context.Context, cscCipher *crypto.Cipher) (hostedSigning, error) {
+	remote := signingprovider.NewClient()
+	if cscCipher == nil {
+		slog.WarnContext(ctx, "the built-in signing service is off: CSC_ENCRYPTION_KEY is not set, so organisations can only sign with a provider they connect themselves")
+		return hostedSigning{provider: remote}, nil
+	}
+	subjectSecret, clientSecret, err := yivicsc.DeriveSecrets(cscCipher)
+	if err != nil {
+		return hostedSigning{}, err
+	}
+	// The API is served under the app's own origin: by the same container in
+	// production, through the dev server's proxy locally.
+	apiURL := strings.TrimRight(w.cfg.AppBaseURL, "/") + apiPrefix
+	redirectURI := apiURL + signing.CallbackPath
+	service := yivicsc.NewService(yivicsc.NewStore(w.pool, cscCipher), w.verifier, subjectSecret, yivicsc.Config{
+		PublicURL:  apiURL,
+		AppBaseURL: w.cfg.AppBaseURL,
+		Clients:    []yivicsc.Client{{ID: yivicsc.ClientID, Secret: clientSecret, RedirectURI: redirectURI}},
+	})
+	if err := probe(ctx, hostedSigningProbeTimeout, service); err != nil {
+		return hostedSigning{}, fmt.Errorf("built-in signing service: %w", err)
+	}
+	w.yiviCSCHandler = yivicsc.NewHandler(service)
+	info := service.Info()
+	return hostedSigning{
+		builtIn: &csc.BuiltIn{
+			BaseURL: service.BaseURL(), ClientID: yivicsc.ClientID, ClientSecret: clientSecret,
+			Info: csc.Info{Name: info.Name, Specs: info.Specs},
+		},
+		redirectURI: redirectURI,
+		provider:    yivicsc.NewProvider(service, remote),
+	}, nil
 }
 
 func (w *wiring) buildProofing(ctx context.Context) error {
@@ -1252,6 +1378,7 @@ func (w *wiring) buildProofing(ctx context.Context) error {
 		return err
 	}
 	proofingWebhooks := proofing.NewWebhookStore(w.pool, w.recorder, proofingCipher)
+	proofingRequests.UseLockPool(w.lockPool)
 	proofingService := proofing.NewService(
 		proofing.NewStores(w.pool, w.recorder, proofingCipher, proofingRequests, proofingWebhooks),
 		ips, w.verifier, w.emailService)
@@ -1275,6 +1402,7 @@ func (w *wiring) buildProofing(ctx context.Context) error {
 	// The engine tells the service about every session change; a session
 	// nobody finishes is reconciled at its cap. Neither polls.
 	proofingService.SetHostedBaseURL(strings.TrimSuffix(cfg.AppBaseURL, "/") + "/p/")
+	proofingService.SetReviewBaseURL(strings.TrimSuffix(cfg.AppBaseURL, "/") + "/r/")
 	if stub, ok := ips.(interface{ OnSessionChange(func(string)) }); ok {
 		stub.OnSessionChange(func(sessionID string) { proofingService.SessionChanged(proofingJobs, sessionID) })
 	}
@@ -1292,19 +1420,20 @@ func (w *wiring) buildProofing(ctx context.Context) error {
 	// the org's endpoint (https, public addresses only). Without the key no
 	// secret opens, so the deliverer does not run at all.
 	if proofingCipher != nil {
-		database.RunOnNotify(proofingJobs, w.pool, proofing.WebhookChannel, "identity_proofing_webhooks",
-			proofing.NewDeliverer(proofingWebhooks, safehttp.Policy{}).Run)
+		deliverer := proofing.NewDeliverer(proofingWebhooks, safehttp.Policy{})
+		deliverer.SetResults(proofingService)
+		database.RunOnNotify(proofingJobs, w.pool, proofing.WebhookChannel, "identity_proofing_webhooks", deliverer.Run)
 	}
 	w.proofingHandler = proofing.NewHandler(proofingService, w.requireUser, w.orgHandler.Authorize)
+	// The signing API takes the org's API keys, which the proofing handler
+	// authenticates.
+	w.signingAPIHandler = signing.NewAPIHandler(w.signingService, signingAPIAuth{keys: w.proofingHandler, orgs: w.orgStore})
 	proofingIdempotency := proofing.NewIdempotencyStore(w.pool, proofingCipher)
 	w.proofingHandler.SetIdempotencyStore(proofingIdempotency)
 	w.proofingHandler.SetPlatformAdmins(w.platformAdmins)
 	w.proofingHandler.SetSelfReview(w.selfReview)
 	w.proofingHandler.SetAppBranding(brandingResolver)
-	// A reviewer's open pages follow the org's reviews as they change.
-	w.proofingReviews = proofing.NewReviewFeed()
-	go w.proofingReviews.Run(proofingJobs, w.pool)
-	w.proofingHandler.SetReviewFeed(w.proofingReviews)
+	w.proofingHandler.SetEvents(w.events)
 	startPruner(proofingJobs, "identity_proofing_idempotency_keys", cfg.SessionPruneEvery, proofingIdempotency.Prune)
 	startPruner(proofingJobs, "identity_proofing_webhook_deliveries", cfg.SessionPruneEvery, proofingWebhooks.PruneDeliveries)
 	return nil
@@ -1349,9 +1478,7 @@ func (w *wiring) setDocumentCheckers(ctx context.Context, proofingService *proof
 
 // httpServer serves every slice wired so far.
 func (w *wiring) httpServer() *http.Server {
-	handler := server.New(
-		w.pool,
-		w.cfg.StaticDir,
+	features := []server.Registerer{
 		w.presenterHandler,
 		w.requesterHandler,
 		w.requestTemplates,
@@ -1372,9 +1499,15 @@ func (w *wiring) httpServer() *http.Server {
 		w.provisioningHandler,
 		w.cscHandler,
 		w.signingHandler,
+		w.signingAPIHandler,
 		w.proofingHandler,
 		w.proofingApp,
-	)
+		events.NewHandler(w.events, w.requireUser, w.orgHandler.Authorize),
+	}
+	if w.yiviCSCHandler != nil {
+		features = append(features, w.yiviCSCHandler)
+	}
+	handler := server.New(w.pool, w.cfg.StaticDir, features...)
 	// Outermost, so every route and the SPA's page headers see the client
 	// address the trusted proxies report.
 	handler = clientip.Middleware(clientip.NewResolver(w.cfg.TrustedProxies))(handler)
@@ -1391,10 +1524,8 @@ func (w *wiring) httpServer() *http.Server {
 	if w.proofingEngine != nil {
 		httpServer.RegisterOnShutdown(w.proofingEngine.StopWaiting)
 	}
-	// An open review stream ends at once too; the page reconnects elsewhere.
-	if w.proofingReviews != nil {
-		httpServer.RegisterOnShutdown(w.proofingReviews.Stop)
-	}
+	// An open event stream ends at once too; the page reconnects elsewhere.
+	httpServer.RegisterOnShutdown(w.events.Stop)
 	return httpServer
 }
 

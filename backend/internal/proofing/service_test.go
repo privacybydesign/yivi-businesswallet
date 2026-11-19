@@ -49,6 +49,8 @@ type fakeRequests struct {
 	// linkLookups counts GetByLinkToken reads.
 	linkLookups int
 	reviews     []string
+	// apiReviewer is who the last decision's API key or review link named.
+	apiReviewer string
 	// stored is the last request created.
 	stored *Request
 	// registeredAddress is stored's registered address, until an address is added.
@@ -137,8 +139,9 @@ func (f *fakeRequests) LapseLinks(context.Context, time.Time, int) (int, error) 
 	return 0, nil
 }
 
-func (f *fakeRequests) RecordReviewDecision(_ context.Context, _ Request, decided Status, reason, _ string) error {
+func (f *fakeRequests) RecordReviewDecision(_ context.Context, _ Request, decided Status, reason, _, apiReviewer string) error {
 	f.reviews = append(f.reviews, string(decided)+": "+reason)
+	f.apiReviewer = apiReviewer
 	return nil
 }
 
@@ -254,7 +257,8 @@ func (f *fakeRequests) AddAddress(_ context.Context, req Request, addr Address) 
 	return true, nil
 }
 
-func (f *fakeRequests) DecideStepReview(_ context.Context, req Request, kind ReviewKind, _ uuid.UUID, decided ReviewState, _ string) (*time.Time, error) {
+func (f *fakeRequests) DecideStepReviewBy(_ context.Context, req Request, kind ReviewKind, by stepDecider, decided ReviewState, _ string) (*time.Time, error) {
+	f.apiReviewer = by.APIReviewer
 	if f.stored == nil || f.stored.ID != req.ID || f.stored.stepReview(kind) != ReviewPending {
 		return nil, nil
 	}
@@ -398,6 +402,10 @@ func (f *fakeRequests) Get(_ context.Context, _, id uuid.UUID) (Request, error) 
 	return *f.stored, nil
 }
 
+func (f *fakeRequests) Reread(ctx context.Context, req Request) (Request, error) {
+	return f.Get(ctx, req.OrganizationID, req.ID)
+}
+
 func (f *fakeRequests) ListDue(_ context.Context, now time.Time, _ int) ([]Request, error) {
 	if f.stored == nil || !f.stored.stillOpen() || now.Before(f.stored.session.ExpiresAt) {
 		return []Request{}, nil
@@ -468,6 +476,10 @@ func (fakeAPIKeys) Revoke(context.Context, uuid.UUID, uuid.UUID) (APIKey, error)
 	return APIKey{}, ErrAPIKeyNotFound
 }
 
+func (fakeAPIKeys) Secret(context.Context, uuid.UUID, uuid.UUID) (string, error) {
+	return "", ErrAPIKeyNotFound
+}
+
 func (fakeAPIKeys) Authenticate(context.Context, string) (APIKeyCaller, error) {
 	return APIKeyCaller{}, ErrAPIKeyInvalid
 }
@@ -478,7 +490,6 @@ func (fakeAPIKeys) Touch(context.Context, APIKeyCaller) error { return nil }
 // the session settings and redirect origins.
 type fakeOrgSettings struct {
 	settings Settings
-	logo     Logo
 	saves    int
 	// stale is engine_retention_stale; syncs counts the syncs that ran.
 	stale bool
@@ -502,13 +513,7 @@ func (f *fakeOrgSettings) Save(_ context.Context, _ uuid.UUID, change SessionSet
 	return f.settings, nil
 }
 
-func (f *fakeOrgSettings) SaveBranding(_ context.Context, _ uuid.UUID, b Branding, logo LogoChange) (Settings, error) {
-	if logo.Replace {
-		b.HasLogo = len(logo.Logo.Bytes) > 0
-		f.logo = logo.Logo
-	} else {
-		b.HasLogo = f.settings.Branding.HasLogo
-	}
+func (f *fakeOrgSettings) SaveBranding(_ context.Context, _ uuid.UUID, b Branding) (Settings, error) {
 	f.settings.Branding = b
 	return f.settings, nil
 }
@@ -532,13 +537,6 @@ func (f *fakeOrgSettings) StaleEngineRetention(context.Context) ([]uuid.UUID, er
 		return nil, nil
 	}
 	return []uuid.UUID{testOrg.ID}, nil
-}
-
-func (f *fakeOrgSettings) Logo(context.Context, uuid.UUID) (Logo, error) {
-	if !f.settings.Branding.HasLogo {
-		return Logo{}, ErrNoLogo
-	}
-	return f.logo, nil
 }
 
 type fakeIPS struct {
@@ -1543,16 +1541,15 @@ func TestUpdateSettingsAtomic(t *testing.T) {
 	}
 }
 
-// An external person's mail is signed and styled as the org's branding; a
-// member's stays the org's.
+// An external person's mail is signed as the org's branding, in the org's
+// theme; a member's stays the org's.
 func TestExternalMailBranding(t *testing.T) {
 	f := newFixture()
 	ctx := context.Background()
-	logo := LogoChange{Replace: true, Logo: Logo{Bytes: []byte("\x89PNG"), ContentType: "image/png"}}
 	if _, err := f.svc.SaveBranding(ctx, testOrg.ID, Branding{
-		DisplayName: " Acme Verzekeringen ", PrimaryColor: "#1F5B4A",
+		DisplayName:    " Acme Verzekeringen ",
 		SupportContact: "help@acme.example", PrivacyURL: "https://acme.example/privacy",
-	}, logo); err != nil {
+	}); err != nil {
 		t.Fatalf("SaveBranding: %v", err)
 	}
 	f.sendExternal(t, "anna@example.org", "")
@@ -1561,8 +1558,8 @@ func TestExternalMailBranding(t *testing.T) {
 	external, member := f.mailer.sent[0].mail, f.mailer.sent[1].mail
 	if external.OrgName != "Acme Verzekeringen" || external.RequesterName != "Acme Verzekeringen" ||
 		external.SupportContact != "help@acme.example" || external.PrivacyURL != "https://acme.example/privacy" ||
-		external.Brand == nil || external.Brand.PrimaryColor != "#1F5B4A" || external.Brand.Logo.ContentType != "image/png" {
-		t.Errorf("external mail = %+v; want the branded name, contact, privacy statement, colour and logo", external)
+		external.Brand == nil || external.Brand.PrimaryColor != "" || len(external.Brand.Logo.Bytes) != 0 {
+		t.Errorf("external mail = %+v; want the branded name, contact and privacy statement in the theme's look", external)
 	}
 	if member.OrgName != testOrg.Name || member.Brand != nil || member.SupportContact != "" {
 		t.Errorf("member mail = %+v; want the org's, unbranded", member)
@@ -1572,14 +1569,10 @@ func TestExternalMailBranding(t *testing.T) {
 func TestSaveBrandingValidates(t *testing.T) {
 	f := newFixture()
 	for name, b := range map[string]Branding{
-		"colour":       {PrimaryColor: "green"},
-		"text colour":  {TextColor: "#12345"},
-		"top bar":      {TopbarColor: "red"},
-		"font":         {FontFamily: "Arial; color: red"},
 		"http privacy": {PrivacyURL: "http://acme.example/privacy"},
 		"relative":     {PrivacyURL: "/privacy"},
 	} {
-		if _, err := f.svc.SaveBranding(context.Background(), testOrg.ID, b, LogoChange{}); !errors.Is(err, ErrInvalidInput) {
+		if _, err := f.svc.SaveBranding(context.Background(), testOrg.ID, b); !errors.Is(err, ErrInvalidInput) {
 			t.Errorf("%s: err = %v, want ErrInvalidInput", name, err)
 		}
 	}
@@ -1901,6 +1894,23 @@ func TestYiviAsksPhotoOnlyWhenKept(t *testing.T) {
 		}
 		if got := f.verifier.claims[len(f.verifier.claims)-1]; !slices.Equal(got, tc.want) {
 			t.Errorf("%s: claims = %v, want %v", name, got, tc.want)
+		}
+	}
+}
+
+// The Yivi disclosure asks the registered BSN whenever the flow keeps it, in
+// full or masked.
+func TestYiviAsksBSNOnlyWhenKept(t *testing.T) {
+	for policy, want := range map[string]bool{"": false, "omit": false, bsnPolicyMask: true, bsnPolicyRetrieve: true} {
+		f := newFixture()
+		sent := f.sendYivi(t)
+		spec := proofingprovider.FlowSpec{RequestedAttributes: []string{attributeDocument}, BSNPolicy: policy}
+		f.ips.flowVersions = []proofingprovider.Flow{{FlowSpec: spec, ID: sent.Request.FlowID, Version: sent.Request.FlowVersion, Active: true}}
+		if _, err := f.svc.StartYivi(context.Background(), testOrg.ID, sent.Request.ID, nil); err != nil {
+			t.Fatalf("%q: StartYivi: %v", policy, err)
+		}
+		if got := f.verifier.requests[len(f.verifier.requests)-1].BSN; got != want {
+			t.Errorf("policy %q: asks the BSN = %v, want %v", policy, got, want)
 		}
 	}
 }

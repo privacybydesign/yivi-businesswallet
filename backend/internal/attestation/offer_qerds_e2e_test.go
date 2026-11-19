@@ -307,6 +307,18 @@ func TestAcceptOfferRetriableAfterRedeemFailure(t *testing.T) {
 	}
 }
 
+// declineRecorder records the declines a service sends back to an issuer.
+type declineRecorder struct{ sent []string }
+
+func (*declineRecorder) SendCredentialOffer(context.Context, uuid.UUID, string, string, string, string) error {
+	return nil
+}
+
+func (r *declineRecorder) SendOfferDeclined(_ context.Context, _ uuid.UUID, toAddress, _, offerURI string) error {
+	r.sent = append(r.sent, toAddress+" "+offerURI)
+	return nil
+}
+
 // Declining is the other half of the acceptance requirement: the credential must
 // never reach the wallet, and the decision must be final.
 func TestDeclineOfferNeverLoadsTheCredential(t *testing.T) {
@@ -325,10 +337,14 @@ func TestDeclineOfferNeverLoadsTheCredential(t *testing.T) {
 	offerID := queue.queued()[0].ID
 
 	holder := &flakyHolder{StubHolder: eudiholder.NewStubHolder()}
-	service := attestation.NewService(nil, nil, nil, nil, nil, nil, queue, holder, "http://app.test")
+	replies := &declineRecorder{}
+	service := attestation.NewService(nil, nil, nil, nil, replies, nil, queue, holder, "http://app.test")
 
 	if err := service.DeclineOffer(ctx, ruOrg, offerID); err != nil {
 		t.Fatalf("decline offer: %v", err)
+	}
+	if len(replies.sent) != 1 || replies.sent[0] != yiviAddress+" openid-credential-offer://?x=1" {
+		t.Fatalf("the issuer was not told of the decline: %v", replies.sent)
 	}
 	if queue.heldCount() != 0 {
 		t.Fatalf("declining loaded %d credentials into the wallet", queue.heldCount())

@@ -110,6 +110,7 @@ func (h *StubHolder) Redeem(ctx context.Context, orgID uuid.UUID, offerURI strin
 	if err != nil {
 		return Redeemed{}, err
 	}
+	openid4vciissuer.MarkStubRedeemed(offerURI)
 	if ok {
 		h.mu.Lock()
 		if h.displays[orgID] == nil {
@@ -209,6 +210,15 @@ func (h *StubHolder) Delete(_ context.Context, orgID uuid.UUID, ref string) erro
 	defer h.mu.Unlock()
 	delete(h.creds[orgID], ref)
 	delete(h.displays[orgID], ref)
+	return nil
+}
+
+// DropOrganization forgets everything the org holds.
+func (h *StubHolder) DropOrganization(_ context.Context, orgID uuid.UUID) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	delete(h.creds, orgID)
+	delete(h.displays, orgID)
 	return nil
 }
 

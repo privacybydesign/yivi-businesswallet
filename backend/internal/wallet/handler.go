@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/auth"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/lifecycle"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/respond"
 )
@@ -215,6 +216,8 @@ func mapError(err error) error {
 		return &respond.APIError{Status: http.StatusForbidden, Code: "not_a_representative", Message: "you are not registered as a representative of this company"}
 	case errors.Is(err, ErrUnknownKVK):
 		return &respond.APIError{Status: http.StatusUnprocessableEntity, Code: "unknown_kvk", Message: "this KVK number is not in the register"}
+	case errors.Is(err, ErrEBWOIDMismatch):
+		return &respond.APIError{Status: http.StatusUnprocessableEntity, Code: "ebwoid_mismatch", Message: "the owner identification data does not match this company"}
 	case errors.Is(err, ErrAlreadyRegistered):
 		return &respond.APIError{Status: http.StatusConflict, Code: "already_registered", Message: "this company already has a business wallet"}
 	case errors.Is(err, ErrSlugTaken):
@@ -225,6 +228,8 @@ func mapError(err error) error {
 		return badRequest("invalid_slug", "slug may only contain lowercase letters, numbers, and hyphens")
 	case errors.Is(err, organization.ErrNotFound):
 		return &respond.APIError{Status: http.StatusNotFound, Code: "wallet_not_found", Message: "wallet not found"}
+	case errors.Is(err, lifecycle.ErrTransition):
+		return &respond.APIError{Status: http.StatusConflict, Code: "status_transition_not_allowed", Message: "the wallet cannot move to that status from its current one"}
 	case errors.Is(err, ErrRepresentationNotFound):
 		return &respond.APIError{Status: http.StatusNotFound, Code: "representation_not_found", Message: "representation not found"}
 	case errors.Is(err, ErrNotImplemented):

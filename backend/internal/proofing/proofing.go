@@ -79,32 +79,21 @@ const defaultDataRetentionDays = 7
 // the default and the longest.
 var SessionTTLOptions = []time.Duration{2 * time.Minute, 5 * time.Minute, SessionTTL}
 
-// Branding is how the proofing mail to external people and the hosted pages
-// look: DisplayName signs the mail ("" is the org's name), PrimaryColor colours
-// it ("" is the org's), and SupportContact and PrivacyURL are added to it ("" leaves
-// each out). HasLogo reports a stored logo, read with OrgSettingsStore.Logo.
-// SecondaryColor (the Idem app's second colour), the other colours and
-// FontFamily are the rest of its white-label, the same as the org theme's: any
-// one set is a look of its own, and "" in it keeps the design's, not the org's
-// (see AppBrandingResolver); TopbarColor is the app's header.
+// Branding is what the proofing mail to external people, the hosted pages and
+// the Idem app say besides the org's wallet theme, which is their one look:
+// DisplayName signs them ("" is the org's name), SupportContact and PrivacyURL
+// are added ("" leaves each out), HidePoweredBy leaves the "powered by" line
+// off the hosted pages, and ShowTheme puts the theme on the Idem app and the
+// hosted page (off keeps their own look). PrimaryColor and HasLogo are a flow's
+// own colour and logo over the theme's (FlowBranding); an org's are never set.
 type Branding struct {
 	DisplayName    string
 	PrimaryColor   string
-	SecondaryColor string
-	TextColor      string
-	SurfaceColor   string
-	BorderColor    string
-	LinkColor      string
-	SuccessColor   string
-	WarningColor   string
-	ErrorColor     string
-	TopbarColor    string
-	FontFamily     string
 	SupportContact string
 	PrivacyURL     string
 	HasLogo        bool
-	// HidePoweredBy leaves the "powered by" line off the hosted pages.
-	HidePoweredBy bool
+	HidePoweredBy  bool
+	ShowTheme      bool
 }
 
 // Logo is the org's logo image for its proofing mail and hosted pages, sniffed
@@ -123,12 +112,8 @@ type LogoChange struct {
 
 func (b Branding) auditFields() map[string]any {
 	return map[string]any{
-		"displayName": b.DisplayName, "primaryColor": b.PrimaryColor, "secondaryColor": b.SecondaryColor,
-		"textColor": b.TextColor, "surfaceColor": b.SurfaceColor, "borderColor": b.BorderColor,
-		"linkColor": b.LinkColor, "successColor": b.SuccessColor, "warningColor": b.WarningColor,
-		"errorColor": b.ErrorColor, "topbarColor": b.TopbarColor, "fontFamily": b.FontFamily,
-		"supportContact": b.SupportContact, "privacyUrl": b.PrivacyURL, "hasLogo": b.HasLogo,
-		"hidePoweredBy": b.HidePoweredBy,
+		"displayName": b.DisplayName, "supportContact": b.SupportContact, "privacyUrl": b.PrivacyURL,
+		"hidePoweredBy": b.HidePoweredBy, "showTheme": b.ShowTheme,
 	}
 }
 
@@ -225,6 +210,7 @@ func defaultSettings(orgID uuid.UUID) Settings {
 		Session: SessionSettings{
 			SessionTTL: SessionTTL, DataRetentionDays: defaultDataRetentionDays, ErasureHandling: ErasureReview,
 		},
+		Branding: Branding{ShowTheme: true},
 	}
 }
 
@@ -270,13 +256,16 @@ var (
 	// ErrResultNotReady is a result read before the session has an outcome.
 	ErrResultNotReady = errors.New("proofing: the session has no outcome yet")
 	// ErrNotHosted is a headless start of a request not created hosted.
-	ErrNotHosted       = errors.New("proofing: the request was not created hosted")
-	ErrAPIKeyNotFound  = errors.New("proofing: api key not found")
-	ErrAPIKeyInvalid   = errors.New("proofing: invalid api key")
-	ErrRequestNotFound = errors.New("proofing: request not found")
-	ErrWebhookNotFound = errors.New("proofing: webhook not configured")
-	ErrNoLogo          = errors.New("proofing: organization has no logo")
-	ErrInvalidInput    = errors.New("proofing: invalid input")
+	ErrNotHosted      = errors.New("proofing: the request was not created hosted")
+	ErrAPIKeyNotFound = errors.New("proofing: api key not found")
+	// ErrAPIKeyNotRevealable is a key made before keys were kept to be read
+	// again: only its hash is stored.
+	ErrAPIKeyNotRevealable = errors.New("proofing: api key not revealable")
+	ErrAPIKeyInvalid       = errors.New("proofing: invalid api key")
+	ErrRequestNotFound     = errors.New("proofing: request not found")
+	ErrWebhookNotFound     = errors.New("proofing: webhook not configured")
+	ErrNoLogo              = errors.New("proofing: organization has no logo")
+	ErrInvalidInput        = errors.New("proofing: invalid input")
 	// ErrWrongMethod is a Yivi-only call on a request that runs in the Idem app.
 	ErrWrongMethod = errors.New("proofing: the request does not run in the Yivi app")
 	// ErrSessionOver is a call on a request whose session can no longer run.
@@ -328,6 +317,8 @@ type Request struct {
 	// Hosted is a request its subject opens from a link (ChannelHosted): its
 	// engine session is created only when the subject starts.
 	Hosted bool
+	// Test is a request made while its org was in test mode.
+	Test bool
 	// FlowKind is what the session is for: an identity check, or a person
 	// asking for their data (FlowDataAccess) or its erasure (FlowDataErasure),
 	// which goes to review once the person is proven (see data_request.go).
@@ -348,7 +339,10 @@ type Request struct {
 	LegalNotice *LegalNotice
 	// CancelledAt is when an API caller cancelled it; PurgedAt when its data was
 	// erased in the engine and here (the row stays for the audit trail).
-	CancelledAt     *time.Time
+	CancelledAt *time.Time
+	// CancelledBy is who cancelled it (CancelledByAPIKey, …); empty for one
+	// cancelled before the wallet kept it.
+	CancelledBy     CancelledBy
 	PurgedAt        *time.Time
 	RequestedBy     *uuid.UUID
 	RequestedByName string
@@ -506,6 +500,37 @@ func (r Request) liveSession(now time.Time) *ipsSession {
 		return nil
 	}
 	return r.session
+}
+
+// ExpiryReason is why a request expired.
+type ExpiryReason string
+
+const (
+	// ExpiryNotStarted is a hosted link nobody started before it lapsed.
+	ExpiryNotStarted ExpiryReason = "not_started"
+	// ExpiryNotFinished is a session the person did not finish in time.
+	ExpiryNotFinished ExpiryReason = "not_finished"
+	// ExpiryReviewEnded is a review the engine ended before anyone decided it.
+	ExpiryReviewEnded ExpiryReason = "review_ended"
+)
+
+// ExpiryReason is why r reads as expired at now; empty when it does not.
+func (r Request) ExpiryReason(now time.Time) ExpiryReason {
+	if r.EffectiveStatus(now) != StatusExpired {
+		return ""
+	}
+	return r.expiryReason()
+}
+
+// expiryReason is why r expired, given that it did.
+func (r Request) expiryReason() ExpiryReason {
+	switch {
+	case r.Status == StatusNeedsReview:
+		return ExpiryReviewEnded
+	case r.session == nil:
+		return ExpiryNotStarted
+	}
+	return ExpiryNotFinished
 }
 
 // EffectiveStatus is Status with an unfinished request whose session is over
@@ -683,6 +708,10 @@ type RequestFilter struct {
 	// sessions whose review is over (something decided, nothing waiting) and
 	// the data requests that ended, the latest closed first.
 	ClosedReviews bool
+	// WaitingReviews narrows to what waits for a reviewer, in one read: the
+	// requests that read needs_review and those with an address, a
+	// Verzekeringsbericht or diplomas waiting, the longest in review first.
+	WaitingReviews bool
 }
 
 func (f RequestFilter) reviewState() ReviewState {
@@ -1029,6 +1058,24 @@ const (
 	attributeFaceImage = "face_image"
 )
 
+// The face checks a flow requires: the match against the document's photo,
+// and the liveness check.
+const (
+	checkFaceMatch    = "face.match"
+	checkFaceLiveness = "face.liveness"
+)
+
+// secondsPerDay converts a flow's retention in days to its seconds.
+const secondsPerDay = 24 * 60 * 60
+
+// The chip's extra data, the live selfie and the document photos, as a flow
+// requests them.
+const (
+	attributeDG11          = "dg11"
+	attributeSelfie        = "selfie"
+	attributeDocumentImage = "document_image"
+)
+
 // attributeAgeOver is the age check, which withholds the date of birth from
 // the document data next to it.
 const attributeAgeOver = "age_over"
@@ -1040,6 +1087,14 @@ const stepDocumentPhoto = "document_photo"
 // bsnPolicyRetrieve is the flow BSN policy that keeps the BSN; empty is omit.
 const bsnPolicyRetrieve = "retrieve"
 
+// bsnPolicyMask is the flow BSN policy that keeps only the BSN's last digits.
+const bsnPolicyMask = "mask"
+
+// keepsBSN reports whether f keeps the BSN, in full or masked.
+func keepsBSN(f proofingprovider.Flow) bool {
+	return f.BSNPolicy == bsnPolicyRetrieve || f.BSNPolicy == bsnPolicyMask
+}
+
 // takesDocumentPhoto reports whether flow f photographs the document.
 func takesDocumentPhoto(f proofingprovider.Flow) bool {
 	return slices.Contains(f.Steps, stepDocumentPhoto)
@@ -1048,6 +1103,12 @@ func takesDocumentPhoto(f proofingprovider.Flow) bool {
 // scansFace reports whether f checks the face in the document scan.
 func scansFace(f proofingprovider.Flow) bool {
 	return f.FaceProvider == faceProviderIDScan && takesDocumentPhoto(f)
+}
+
+// keepsFacePhotos reports whether f keeps the face photos, so the printed
+// portrait stays visible on its document photos.
+func keepsFacePhotos(f proofingprovider.Flow) bool {
+	return f.KeepFacePhotos != nil && *f.KeepFacePhotos
 }
 
 // redactsDocumentBSN reports whether f's document photo has its BSN covered:
@@ -1093,3 +1154,13 @@ var referencePhotoTypes = []string{"image/jpeg", "image/png", "image/webp"}
 func hasFaceStep(steps []string) bool {
 	return slices.ContainsFunc(steps, func(step string) bool { return slices.Contains(faceSteps, step) })
 }
+
+// CancelledBy is who cancelled a request.
+type CancelledBy string
+
+const (
+	CancelledByAPIKey CancelledBy = "api_key"
+	CancelledByMember CancelledBy = "member"
+	// CancelledBySubject is the person declining on the hosted page.
+	CancelledBySubject CancelledBy = "subject"
+)

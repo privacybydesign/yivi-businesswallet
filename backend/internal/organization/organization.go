@@ -136,6 +136,9 @@ type Organization struct {
 	// switcher can show each org's logo without a per-org theme fetch; the
 	// single-org endpoints leave it empty.
 	LogoURI string `json:"logoUri,omitempty"`
+	// TestMode is an org a platform admin put in test mode: its identity
+	// proofing runs as test sessions, kept apart from its real ones.
+	TestMode bool `json:"testMode"`
 }
 
 type Department struct {

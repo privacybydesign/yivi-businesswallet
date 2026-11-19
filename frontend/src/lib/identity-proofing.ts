@@ -35,7 +35,6 @@ import type {
   WebhookDelivery,
 } from "../api/identity-proofing";
 import type { AuditEvent } from "../api/organization";
-import type { OrgTheme } from "../api/theme";
 import { SUPPORTED_LANGUAGES } from "../i18n/language";
 import type { Language } from "../i18n/language";
 import { errorCode } from "./api-error";
@@ -1502,6 +1501,51 @@ export function sessionView({
   return secondsLeft === 0 && status === "pending" ? "expired" : "running";
 }
 
+// The one thing a verify page's session shows, each state named: the steps
+// after the identity check, the end of a session whose link ran out, the
+// outcome, and what a running session is at. A running one first has its app
+// chosen, then shows the ID scan when it is this page's turn, else waits for
+// the photo's verdict (no app) or shows the app's own session.
+export type SessionStep =
+  | "address"
+  | "documents"
+  | "ended"
+  | "outcome"
+  | "method"
+  | "scan"
+  | "finishing"
+  | "app";
+
+export function sessionStep({
+  view,
+  status,
+  method,
+  scanning,
+}: {
+  view: SessionView;
+  status: string;
+  method: ProofingMethod;
+  scanning: boolean;
+}): SessionStep {
+  if (view === "address" || view === "documents") {
+    return view;
+  }
+  // An expired session ends the page before any outcome shows.
+  if (status === "expired" || view === "expired") {
+    return "ended";
+  }
+  if (view === "outcome") {
+    return "outcome";
+  }
+  if (method === "pending") {
+    return "method";
+  }
+  if (scanning) {
+    return "scan";
+  }
+  return method === "browser" ? "finishing" : "app";
+}
+
 // Where a verify page's session stands, for its stepper: done once it shows
 // the outcome or ended, the app's choice while pending, the document while the
 // ID scan shows or with no app (browser), else the app's session.
@@ -1886,6 +1930,7 @@ const PROOFING_ERROR_KEYS = {
   no_default_flow: "identityProofing.errors.noDefaultFlow",
   proofing_paused: "identityProofing.errors.proofingPaused",
   api_key_not_found: "identityProofing.errors.apiKeyNotFound",
+  api_key_not_revealable: "identityProofing.errors.apiKeyNotRevealable",
   session_not_found: "identityProofing.errors.sessionNotFound",
   not_under_review: "identityProofing.errors.notUnderReview",
   address_not_under_review: "identityProofing.errors.addressNotUnderReview",
@@ -1912,12 +1957,14 @@ const PROOFING_ERROR_KEYS = {
   document_scan_needs_page: "identityProofing.errors.documentScanNeedsPage",
   document_scan_failed: "identityProofing.errors.documentScanFailed",
   document_scan_mismatch: "identityProofing.errors.documentScanMismatch",
+  document_scan_unavailable: "identityProofing.errors.documentScanUnavailable",
   document_scan_done: "identityProofing.errors.documentScanDone",
   document_scan_pending: "identityProofing.errors.documentScanPending",
   no_document_scanner: "identityProofing.errors.noDocumentScanner",
   employment_closed: "identityProofing.errors.employmentClosed",
   employment_not_asked: "identityProofing.errors.employmentNotAsked",
   no_employment_checker: "identityProofing.errors.noEmploymentChecker",
+  no_diploma_checker: "identityProofing.errors.noDiplomaChecker",
   seal_check_unavailable: "identityProofing.errors.sealCheckUnavailable",
   seal_unchecked: "identityProofing.errors.sealUnchecked",
   flow_no_identity: "identityProofing.errors.flowNoIdentity",
@@ -1966,6 +2013,7 @@ export function hostedErrorMessage(error: unknown, t: TFunction): string {
     case "employment_closed":
     case "document_scan_failed":
     case "document_scan_mismatch":
+    case "document_scan_unavailable":
     case "document_scan_done":
     case "document_scan_pending":
     case "seal_check_unavailable":
@@ -2411,57 +2459,6 @@ export function dropsOwnBranding(
   custom: boolean,
 ): boolean {
   return saved.custom && !custom;
-}
-
-// The fields that give a branding a look of its own in the Idem app: a colour
-// or the font. A name, logo, support contact or privacy link alone do not.
-const APP_LOOK_FIELDS = [
-  "primaryColor",
-  "secondaryColor",
-  "textColor",
-  "surfaceColor",
-  "borderColor",
-  "linkColor",
-  "successColor",
-  "warningColor",
-  "errorColor",
-  "topbarColor",
-  "fontFamily",
-] as const satisfies readonly (keyof ProofingBranding)[];
-
-// What the Idem app shows a person outside the org of a flow's branding (see
-// effectiveBranding): the name its mail signs with, its colour, the app's
-// header and the logo; "" keeps the app's own. A branding with a look of its
-// own is shown as it is; otherwise the org's theme, with the branding's logo
-// when it has one. Mirrors AppBrandingResolver and whiteLabeled in
-// backend/internal/proofing/app_branding.go.
-export interface AppLook {
-  name: string;
-  primaryColor: string;
-  headerColor: string;
-  logoUri: string;
-}
-
-export function appLook(
-  branding: ProofingBranding,
-  theme: Pick<OrgTheme, "primaryColor" | "topbarColor" | "logoUri">,
-  orgName: string,
-): AppLook {
-  const name = branding.displayName || orgName;
-  if (APP_LOOK_FIELDS.some((field) => branding[field] !== "")) {
-    return {
-      name,
-      primaryColor: branding.primaryColor,
-      headerColor: branding.topbarColor,
-      logoUri: branding.logoUri,
-    };
-  }
-  return {
-    name,
-    primaryColor: theme.primaryColor,
-    headerColor: theme.topbarColor,
-    logoUri: branding.logoUri || theme.logoUri,
-  };
 }
 
 // The languages a hosted page form shows ticked: none saved is every one.

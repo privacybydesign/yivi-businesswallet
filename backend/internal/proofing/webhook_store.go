@@ -80,7 +80,11 @@ type Delivery struct {
 // it is signed with (the current one, then a rotated-out one still in its
 // overlap) and the lease it was claimed under, which recordAttempt checks.
 type dueDelivery struct {
-	ID          uuid.UUID
+	ID    uuid.UUID
+	OrgID uuid.UUID
+	// RequestID is the session the event is about; nil for a test delivery
+	// and once the session is gone.
+	RequestID   *uuid.UUID
 	Event       string
 	Payload     json.RawMessage
 	Attempts    int
@@ -244,9 +248,10 @@ func (s *WebhookStore) SendTest(ctx context.Context, orgID uuid.UUID) error {
 func (s *WebhookStore) Deliveries(ctx context.Context, orgID uuid.UUID) ([]Delivery, error) {
 	rows, err := s.db.Query(ctx, `SELECT id, event, request_id, endpoint_url, status, attempts, last_status_code,
 			COALESCE(last_error, ''), last_attempt_at, delivered_at, created_at
-		FROM identity_proofing_webhook_deliveries
-		WHERE organization_id = $1
-		ORDER BY created_at DESC, id LIMIT $2`, orgID, maxListedDeliveries)
+		FROM identity_proofing_webhook_deliveries d
+		WHERE d.organization_id = $1 AND (d.request_id IS NULL OR EXISTS (
+			SELECT 1 FROM identity_proofing_requests r WHERE r.id = d.request_id AND `+inOrgMode+`))
+		ORDER BY d.created_at DESC, d.id LIMIT $2`, orgID, maxListedDeliveries)
 	if err != nil {
 		return nil, fmt.Errorf("proofing: list deliveries org %s: %w", orgID, err)
 	}
@@ -346,7 +351,7 @@ func (s *WebhookStore) claimDue(ctx context.Context, limit, perEndpoint int) ([]
 			endpoint_url = due.url
 		FROM due
 		WHERE d.id = due.id
-		RETURNING d.id, d.event, d.payload, d.attempts, d.created_at, d.next_attempt_at, due.url,
+		RETURNING d.id, d.organization_id, d.request_id, d.event, d.payload, d.attempts, d.created_at, d.next_attempt_at, due.url,
 			due.secret_ciphertext, due.previous_ciphertext`,
 		DeliveryPending, limit, deliveryLease.Seconds(), perEndpoint)
 	if err != nil {
@@ -358,7 +363,7 @@ func (s *WebhookStore) claimDue(ctx context.Context, limit, perEndpoint int) ([]
 	for rows.Next() {
 		var d dueDelivery
 		var sealed, previous []byte
-		if err := rows.Scan(&d.ID, &d.Event, &d.Payload, &d.Attempts, &d.CreatedAt, &d.LeasedUntil, &d.URL,
+		if err := rows.Scan(&d.ID, &d.OrgID, &d.RequestID, &d.Event, &d.Payload, &d.Attempts, &d.CreatedAt, &d.LeasedUntil, &d.URL,
 			&sealed, &previous); err != nil {
 			return nil, fmt.Errorf("proofing: scan delivery: %w", err)
 		}

@@ -31,12 +31,8 @@ func NewOrgSettingsStore(db database.DB, recorder audit.Recorder) *OrgSettingsSt
 // settingsColumns reads an org's settings over settingsFrom; the columns of an
 // org that saved none are NULL, which scanSettings reads as the defaults.
 const settingsColumns = `o.id, o.name, s.session_ttl_seconds, s.data_retention_days, s.erasure_handling,
-	COALESCE(s.display_name, ''), COALESCE(s.primary_color, ''), COALESCE(s.secondary_color, ''),
-	COALESCE(s.support_contact, ''), COALESCE(s.privacy_url, ''),
-	COALESCE(s.text_color, ''), COALESCE(s.surface_color, ''), COALESCE(s.border_color, ''), COALESCE(s.link_color, ''),
-	COALESCE(s.success_color, ''), COALESCE(s.warning_color, ''), COALESCE(s.error_color, ''), COALESCE(s.topbar_color, ''),
-	COALESCE(s.font_family, ''),
-	s.logo_bytes IS NOT NULL, COALESCE(s.hide_powered_by, false), s.updated_at, COALESCE(s.allowed_redirect_origins, '{}'),
+	COALESCE(s.display_name, ''), COALESCE(s.support_contact, ''), COALESCE(s.privacy_url, ''),
+	COALESCE(s.hide_powered_by, false), COALESCE(s.show_theme, true), s.updated_at, COALESCE(s.allowed_redirect_origins, '{}'),
 	COALESCE(s.legal_retention_months, 0), COALESCE(s.legal_retention_reason_en, ''), COALESCE(s.legal_retention_reason_nl, '')`
 
 const settingsFrom = ` FROM organizations o
@@ -103,9 +99,8 @@ func scanSettings(row pgx.CollectableRow) (Settings, error) {
 	var updatedAt *time.Time
 	b, legal := &s.Branding, &s.LegalRetention
 	err := row.Scan(&s.OrganizationID, &s.OrgName, &ttlSeconds, &retentionDays, &erasureHandling,
-		&b.DisplayName, &b.PrimaryColor, &b.SecondaryColor, &b.SupportContact, &b.PrivacyURL,
-		&b.TextColor, &b.SurfaceColor, &b.BorderColor, &b.LinkColor, &b.SuccessColor, &b.WarningColor, &b.ErrorColor,
-		&b.TopbarColor, &b.FontFamily, &b.HasLogo, &b.HidePoweredBy, &updatedAt, &s.RedirectOrigins, &legal.Months, &legal.ReasonEN, &legal.ReasonNL)
+		&b.DisplayName, &b.SupportContact, &b.PrivacyURL,
+		&b.HidePoweredBy, &b.ShowTheme, &updatedAt, &s.RedirectOrigins, &legal.Months, &legal.ReasonEN, &legal.ReasonNL)
 	if ttlSeconds != nil {
 		s.Session.SessionTTL = time.Duration(*ttlSeconds) * time.Second
 	}
@@ -307,64 +302,39 @@ func (s *OrgSettingsStore) StaleEngineRetention(ctx context.Context) ([]uuid.UUI
 	return orgs, nil
 }
 
-// SaveBranding replaces the org's branding, and its logo as logo says, and
-// audits identity_proofing.settings_updated with before and after (whether a
-// logo is set, never its bytes).
-func (s *OrgSettingsStore) SaveBranding(ctx context.Context, orgID uuid.UUID, b Branding, logo LogoChange) (Settings, error) {
+// SaveBranding replaces what the org's branding says besides its theme, and
+// audits identity_proofing.settings_updated with before and after.
+func (s *OrgSettingsStore) SaveBranding(ctx context.Context, orgID uuid.UUID, b Branding) (Settings, error) {
 	err := database.InTx(ctx, s.db, func(q database.Querier) error {
 		before, err := getSettings(ctx, q, orgID)
 		if err != nil {
 			return err
 		}
-		after := b
-		after.HasLogo = before.Branding.HasLogo
-		if logo.Replace {
-			after.HasLogo = len(logo.Logo.Bytes) > 0
-		}
-		// A new logo is a change even when one was set before: only its bytes
-		// differ, which the branding does not hold.
-		replaced := logo.Replace && len(logo.Logo.Bytes) > 0
-		if after == before.Branding && !replaced {
+		if equalBranding(b, before.Branding) {
 			return nil
 		}
 		if _, err := q.Exec(ctx, `INSERT INTO identity_proofing_settings
-				(organization_id, display_name, primary_color, secondary_color, support_contact, privacy_url,
-				 logo_bytes, logo_content_type, hide_powered_by,
-				 text_color, surface_color, border_color, link_color, success_color, warning_color, error_color,
-				 topbar_color, font_family)
-			VALUES ($1, NULLIF($2, ''), NULLIF($3, ''), NULLIF($4, ''), NULLIF($5, ''), NULLIF($6, ''),
-				CASE WHEN $7::boolean THEN $8::bytea END, CASE WHEN $7 THEN NULLIF($9::text, '') END, $10,
-				NULLIF($11, ''), NULLIF($12, ''), NULLIF($13, ''), NULLIF($14, ''), NULLIF($15, ''), NULLIF($16, ''),
-				NULLIF($17, ''), NULLIF($18, ''), NULLIF($19, ''))
+				(organization_id, display_name, support_contact, privacy_url, hide_powered_by, show_theme)
+			VALUES ($1, NULLIF($2, ''), NULLIF($3, ''), NULLIF($4, ''), $5, $6)
 			ON CONFLICT (organization_id) DO UPDATE SET
-				display_name = EXCLUDED.display_name, primary_color = EXCLUDED.primary_color,
-				secondary_color = EXCLUDED.secondary_color,
-				support_contact = EXCLUDED.support_contact, privacy_url = EXCLUDED.privacy_url,
-				logo_bytes = CASE WHEN $7 THEN EXCLUDED.logo_bytes ELSE identity_proofing_settings.logo_bytes END,
-				logo_content_type = CASE WHEN $7 THEN EXCLUDED.logo_content_type
-					ELSE identity_proofing_settings.logo_content_type END,
-				hide_powered_by = EXCLUDED.hide_powered_by,
-				text_color = EXCLUDED.text_color, surface_color = EXCLUDED.surface_color,
-				border_color = EXCLUDED.border_color, link_color = EXCLUDED.link_color,
-				success_color = EXCLUDED.success_color, warning_color = EXCLUDED.warning_color,
-				error_color = EXCLUDED.error_color, topbar_color = EXCLUDED.topbar_color,
-				font_family = EXCLUDED.font_family, updated_at = now()`,
-			orgID, b.DisplayName, b.PrimaryColor, b.SecondaryColor, b.SupportContact, b.PrivacyURL,
-			logo.Replace, nilIfEmpty(logo.Logo.Bytes), logo.Logo.ContentType, b.HidePoweredBy,
-			b.TextColor, b.SurfaceColor, b.BorderColor, b.LinkColor, b.SuccessColor, b.WarningColor, b.ErrorColor,
-			b.TopbarColor, b.FontFamily); err != nil {
+				display_name = EXCLUDED.display_name, support_contact = EXCLUDED.support_contact,
+				privacy_url = EXCLUDED.privacy_url, hide_powered_by = EXCLUDED.hide_powered_by,
+				show_theme = EXCLUDED.show_theme, updated_at = now()`,
+			orgID, b.DisplayName, b.SupportContact, b.PrivacyURL, b.HidePoweredBy, b.ShowTheme); err != nil {
 			return fmt.Errorf("proofing: save branding org %s: %w", orgID, err)
 		}
-		changed := after.auditFields()
-		if replaced && before.Branding.HasLogo {
-			changed["logoReplaced"] = true
-		}
-		return s.recordUpdated(ctx, q, orgID, before.Branding.auditFields(), changed)
+		return s.recordUpdated(ctx, q, orgID, before.Branding.auditFields(), b.auditFields())
 	})
 	if err != nil {
 		return Settings{}, err
 	}
 	return s.Get(ctx, orgID)
+}
+
+// equalBranding compares what an org's branding saves.
+func equalBranding(a, b Branding) bool {
+	return a.DisplayName == b.DisplayName && a.SupportContact == b.SupportContact &&
+		a.PrivacyURL == b.PrivacyURL && a.HidePoweredBy == b.HidePoweredBy && a.ShowTheme == b.ShowTheme
 }
 
 func nilIfEmpty(b []byte) []byte {
@@ -378,23 +348,4 @@ func (s *OrgSettingsStore) recordUpdated(ctx context.Context, q database.Querier
 	return s.audit.Record(ctx, q, audit.IdentityProofingSettingsUpdated,
 		audit.Target{Type: audit.TargetIdentityProofingSettings, ID: orgID.String(), OrgID: &orgID},
 		audit.Updated(before, after))
-}
-
-// Logo returns the org's logo, or ErrNoLogo.
-func (s *OrgSettingsStore) Logo(ctx context.Context, orgID uuid.UUID) (Logo, error) {
-	var logo Logo
-	var contentType *string
-	err := s.db.QueryRow(ctx, `SELECT logo_bytes, logo_content_type FROM identity_proofing_settings
-		WHERE organization_id = $1`, orgID).Scan(&logo.Bytes, &contentType)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return Logo{}, ErrNoLogo
-	}
-	if err != nil {
-		return Logo{}, fmt.Errorf("proofing: read logo org %s: %w", orgID, err)
-	}
-	if contentType == nil {
-		return Logo{}, ErrNoLogo
-	}
-	logo.ContentType = *contentType
-	return logo, nil
 }

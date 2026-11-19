@@ -17,6 +17,8 @@ import {
 import { ApiError } from "../api/http";
 import { Button, Card, Input, Select } from "../ui";
 import * as React from "react";
+import { draftChanged } from "../lib/form-draft";
+import { UnsavedChanges } from "./unsaved-changes";
 
 const DECIMAL_RADIX = 10;
 const CONFLICT_STATUS = 409;
@@ -126,8 +128,38 @@ function SmtpForm({
     );
   }
 
+  const dirty = draftChanged(
+    {
+      host,
+      port,
+      username,
+      password,
+      authMechanism,
+      tenantId,
+      clientId,
+      clientSecret,
+      fromName,
+      fromAddress,
+      enabled,
+    },
+    {
+      host: initial.host,
+      port: String(initial.port || DEFAULT_SMTP_PORT),
+      username: initial.username,
+      password: "",
+      authMechanism: initial.authMechanism || SMTP_AUTH_MECHANISMS[0],
+      tenantId: initial.tenantId,
+      clientId: initial.clientId,
+      clientSecret: "",
+      fromName: initial.fromName,
+      fromAddress: initial.fromAddress,
+      enabled: initial.enabled,
+    },
+  );
+
   return (
     <Card className="max-w-2xl p-7">
+      <UnsavedChanges dirty={dirty && !save.isPending} />
       <h2 className="text-[16px] font-semibold">
         {t("emailSettings.heading")}
       </h2>

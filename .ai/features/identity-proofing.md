@@ -33,8 +33,7 @@ this screen) and has two switches, off by default: "Add the person's name" and "
 person pass". The Flows page lists neither GDPR request: one line under the table says See my
 data and Delete my data are always available and links to Settings › Data and privacy. Only a
 platform admin pauses an org's proofing, after which no request can be sent
-(`proofing_paused`, 403) while sent ones run out (§8). A member is sent a
-request from their member detail page (admin-only, like that page). The people
+(`proofing_paused`, 403) while sent ones run out (§8). The people
 an org verifies are its members, or external people with no login: an e-mail
 address and an optional name, a request without a `userId`. The org's own
 backend can send to them through the public API with one of its keys. Sending
@@ -73,7 +72,6 @@ routes, chip verification, results, Regula), `internal/proofingprovider` (the
 seam's value types + a test stub, leaf level),
 `internal/proofing` (org settings, flow selection, members, requests, service,
 handler), `internal/email` (kind `identity_proofing_requested`, the `qr` block),
-`frontend/src/routes/member-proofing.tsx` (the member detail panel),
 `frontend/src/routes/identity-proofing-overview.tsx` (the overview),
 `frontend/src/routes/developers.tsx` + `developers-api-keys.tsx` +
 `developers-webhook.tsx` (the Developers page), `proofing-branding.tsx`
@@ -858,8 +856,17 @@ post-review outcome stay the system's.
 
 - **API keys** (`identity_proofing_api_keys`, `apikey_store.go`) belong to the
   org: `GET` and `POST /orgs/{slug}/identity-proofing/api-keys`, and
-  `DELETE .../api-keys/{keyID}`, admin only. `yp_live_` + 32 random bytes,
-  stored as SHA-256 only, shown once; `prefix` tells keys apart. The page calls
+  `DELETE .../api-keys/{keyID}`, admin only. `yp_live_` + 32 random bytes;
+  `prefix` tells keys apart.
+  - Authenticated by its SHA-256 (`secret_hash`).
+  - Also kept sealed with the proofing cipher (`secret_ciphertext`, migration
+    `20261116100000`), so an admin reads an active key again:
+    `GET .../api-keys/{keyID}/secret` (Show on the Developers page), audited
+    `api_key_revealed`, `no-store`. A key made before has only its hash:
+    `revealable: false`, 409 `api_key_not_revealable`. Without a cipher a key
+    is kept as its hash alone.
+
+  The page calls
   them API tokens. `createdByName` is the creator's display name, absent once
   that user is deleted. One key works
   on every flow and reaches every external request of the org. Revoke is
@@ -888,9 +895,12 @@ post-review outcome stay the system's.
   `GET /proofing/sessions/{id}/result` (scope `results:read`) reads a settled
   session's identity and evidence from the engine on each call (`SessionIdentity`
   decodes the name, birth date, nationality, document type, issuing state and
-  expiry, the checks, and the images: `photo`, `selfie`, `referencePhoto`,
-  `documentImage` and `documentImageBack`; never the document number),
-  audited `result_read`; 404 once erased. The public API never returns an image.
+  expiry, the BSN as the flow's BSN policy releases it, the checks, and the
+  images: `photo`, `selfie`, `referencePhoto`, `documentImage` and
+  `documentImageBack`; never the document number), audited `result_read`; 404
+  once erased. For an approval the public API adds the document's images
+  (`photo`, `documentImage`, `documentImageBack`), never the selfie or the
+  reference photo.
   An org admin reads the same shape in the wallet at
   `GET /orgs/{slug}/identity-proofing/requests/{id}/result`
   (`AdminRequestResult`, sharing `requestResult`), audited `result_read` with the
@@ -907,9 +917,42 @@ post-review outcome stay the system's.
   it into the row's detail list with those photos: one audited read per open
   (`staleTime: Infinity`), and the timeline then shows it.
   Keys carry `scopes` (`sessions:write`, `sessions:read`, `results:read`,
-  `flows:read`); every key gets all four, and only a signed-in org admin
+  `flows:read`, `flows:write`, `settings:read`, `settings:write`,
+  `webhooks:write`); every key gets all of them (migration `20261116090100`
+  gave the keys made before the last four), and only a signed-in org admin
   creates one. A missing scope is 403
   `insufficient_scope`.
+- **Setup over the API** (`api_setup_handler.go`): a key sets up what an admin
+  sets up in the wallet, on the admin's own handlers. `orgFromRequest` answers
+  the key's org on them.
+
+  | Route under `/proofing` | Scope |
+  |---|---|
+  | `POST flows`, `POST flows/{id}/versions`, `.../versions/{v}/activate`, `PUT flow-selection` | `flows:write` |
+  | `GET flows/{id}/versions` | `flows:read` |
+  | `GET`/`PUT flows/{id}/{hosted,address,diplomas,employment}` | `flows:read` / `flows:write` |
+  | `GET`/`PATCH settings` (no branding: wallet only) | `settings:read` / `settings:write` |
+  | `GET`/`PUT`/`DELETE webhook`, `POST webhook/{rotate-secret,test}`, `GET webhook/deliveries` | `webhooks:write` |
+
+  - `GET /proofing/flows` also lists each flow's `allowed`, `hostedEnabled`,
+    `hostedReturnUrl` and step modes.
+  - Audited as the key (`api_key:<prefix>`), as every API write.
+  - A flow's level fills in what it needs (`withLevelNeeds`, `flow_level.go`,
+    on every create and edit, the wallet's too), as the editor's
+    `withAssuranceLevel` does: `low` the chip read and `nfc.passive_auth`;
+    `substantial` also the face check with Regula, every check of
+    `substantialChecks` and a face threshold of at least 0.75; the Idem app
+    added to a `substantial` flow locked to other apps (the Yivi app reaches
+    `low`). `none` or no level requires
+    nothing; `high` is 400. A document photo stays.
+- **Why a session ended**, on the API session and the webhooks:
+  - `cancelledBy` (`cancelled_by`, migration `20261116090000`): `api_key`,
+    `member` or `subject` (declined on the hosted page), from the audit actor
+    of the cancel (`cancelledByOf`). Absent on older rows. Also on
+    `session.cancelled`.
+  - `expiryReason` (`Request.ExpiryReason`, computed): `not_started` (hosted
+    link never started), `not_finished`, `review_ended`. Also on
+    `session.expired`.
   `GET /proofing/sessions?limit=&cursor=` pages the org's external sessions
   newest first from stored state (cursor: created_at + id), `{sessions, nextCursor}`.
   `Idempotency-Key` on create, cancel and the headless start (`idempotency.go`,
@@ -932,9 +975,20 @@ post-review outcome stay the system's.
 
   Headless: `POST /proofing/sessions/{id}/methods/{idem_app|yivi_app}` starts a
   `hosted: true` session in that app from the org's own UI (`appLink` or
-  `walletLink`; not hosted is 409 `not_hosted`); `GET …/methods/{m}/status`
-  answers from stored state. The hosted token is the poll token: the Yivi
-  disclosure poll and a new Idem code run through `/proof/{token}/…`.
+  `walletLink`; not hosted is 409 `not_hosted`).
+  - `GET …/methods/{m}/status` (`HeadlessStatus`) answers the stored state.
+    For a running Yivi session it first hands the engine the disclosure the
+    person finished, which decides it: no page of the wallet's is open to
+    redeem it. One still waiting for the person or the document photo is
+    answered as stored.
+  - `POST …/document-scan` and `POST …/document-scan/finish`
+    (`APIStartDocumentScan`, `APIFinishDocumentScan`) run the document photo
+    in the org's own page: the first answers the scan service's page to embed,
+    the second takes the `transactionId` and `resultId` that page posts. A
+    hosted session not started yet is 409 `session_not_started`.
+  - A new Idem code still runs through `/proof/{token}/claim-link`, and the
+    address, diplomas and Verzekeringsbericht are taken on the hosted page
+    only.
   Sessions are named by an opaque `ps_` id (base32 of the request UUID,
   `public_id.go`) on the public API and in webhooks; the org routes take
   either form.
@@ -983,8 +1037,11 @@ post-review outcome stay the system's.
   `AddAddress`, `DecideAddressReview`, `AddEmployment`); an
   endpoint saved before an event existed is not subscribed to it. `test` is sent on
   request whatever is subscribed. The payload is the session id, status, flow and
-  its kind (`flowKind`), method, assurance and error code: never a name or photo (the API has the
-  name).
+  its kind (`flowKind`), method, assurance and error code: never a name or photo.
+  - `session.verified` adds `result`, the API's result read live when it is
+    sent (`Deliverer.SetResults`, `payloadOf`, audited `result_read` with
+    actor `webhook`): the outbox never stores it. A read that fails fails the
+    attempt, to be retried; a session erased meanwhile goes without one.
   - Only what the person added after the identity check carries personal data
     (`webhookPersonalKeys`, dropped once a delivery is final):
     - `session.diploma_added`: the diploma, without its PDF, name or birth date;
@@ -1101,23 +1158,22 @@ post-review outcome stay the system's.
     - **The org's own purge** (`PurgeRequest`, `DELETE
       /proofing/sessions/{id}`) refuses a check the legal retention still
       holds: 409 `legal_retention` (`RequestStore.HeldUntil`).
-  - **Branding**: display name, `#rrggbb` colour, logo (PNG/JPEG/GIF/WebP,
-    512 KiB; no SVG, mail clients do not render it), support contact, https
-    privacy URL, and whether to hide "powered by" (§7). It applies to the
-    proofing mail of external people (a member's mail is the org's own):
-    subject, heading and requester are the display name, the colour replaces
-    the org's theme primary seed, the logo replaces the org's theme logo (none
-    shows the name as wordmark, never the theme logo), and the `supportContact`
-    / `privacyUrl` paragraphs appear only when set (an all-empty paragraph
-    collapses). The hosted page and the on-screen page show the same display
-    name, colour, logo, support contact and privacy URL.
-  - **White-label** (the same branding save): a second colour
-    (`secondary_color`, the Idem app's), the palette the org theme has (text,
-    surface, border, link, success, warning, error and top bar colours) and a
-    font family, all `#rrggbb` or a CSS font-family list; NULL keeps the
-    design's own. Any colour or the font is a look of its own
-    (`whiteLabeled`); a logo, name, support contact and privacy link alone are
-    not. It applies to the Idem app and the hosted page (below).
+  - **One look**: the org's wallet theme (`themesettings`: colours, font,
+    logo) is the look of the proofing mail, the hosted page and the Idem app.
+    There is no second palette or logo for them.
+    - The old `identity_proofing_settings` look columns (`primary_color`,
+      `secondary_color`, the palette, `font_family`, `logo_bytes`) are left in
+      place but never read or written.
+  - **Branding** (`PUT .../settings/branding`, multipart): what they say besides
+    the look.
+    - `displayName` signs the mail, its subject and the hosted page (empty is
+      the org's name).
+    - `supportContact` and `privacyUrl` (https) are added to the mail and the
+      page; each is left out when empty.
+    - `hidePoweredBy` leaves "powered by" off the hosted page (§7).
+    - `showTheme` (`show_theme`, default true) puts the theme on the Idem app
+      and the hosted page; off, both keep their own look. A form without it
+      keeps it as it is. The mail always wears the theme.
   - **Idem app branding** (`proofing/app_branding.go`, engine `branding.go`):
     the app session view carries `branding`, so the app looks like the
     requester's own: colours (accent as secondary, top bar as header), font and
@@ -1125,30 +1181,28 @@ post-review outcome stay the system's.
     holding the session. It is resolved from the session alone (tenant = org,
     client reference = request), never from the request, through
     `AppBrandingResolver` over `RequestStore.SubjectKindOf` (the subject kind
-    and the request's flow), the org's settings and the flow's own branding: a
-    request to an external person gets the proofing branding its mail and
-    hosted page wear, the flow's own over the org's (`Settings.brandedFor`).
-    With white-label (a colour or the font, a flow's own colour included) that
-    is its colours, font and logo (the flow's, else the org's proofing logo);
-    what it leaves out keeps the design's own, not the org's theme's. Without,
-    the org theme under the name the proofing mail signs with, with the
-    proofing logo (the flow's, else the org's) or else the theme's. A request
-    to a member gets the org theme under the org's name, whatever its flow.
-    Nothing set at either level is no `branding`. `relyingParty` stays the
-    org's own name next to it. The hosted page applies the same look (`theme`
-    in the hosted view).
+    and the request's flow), the org's settings and the flow's own branding.
+    - Every request wears the org theme, unless `showTheme` is off: then no
+      `branding`.
+    - A member's is under the org's name, whatever its flow.
+    - An external person's is under the name the proofing mail signs with,
+      with its flow's own colour and logo over the theme's
+      (`Settings.brandedFor`); without a logo of its own, the theme's.
+    - No theme set is no `branding`. `relyingParty` stays the org's own name
+      next to it.
+    - The hosted page applies the same look (`theme` in the hosted view).
   - **A flow's own branding** (`identity_proofing_flow_branding`, one row per
     org and flow, `flow_branding.go`; a row is "custom for this flow", none is
     "same as the organisation"): `GET` and `PUT
     /orgs/{slug}/identity-proofing/flows/{flowID}/branding` (multipart; `custom`,
     true or false, is required) and `GET .../branding/logo`, admin only. It holds
-    the org's name, colour, logo, support contact and privacy URL; the
-    white-label colours and font and "powered by" stay the org's. Each field it
-    sets replaces the org's, and one left empty, or no logo, falls back to it;
-    the org's white-label colours and font stay under it (`Branding.over`,
+    its own name, colour, logo, support contact and privacy URL, for a product
+    with its own name or look. Each field it sets replaces the org's (the colour
+    and logo the theme's), and one left empty, or no logo, falls back to it;
+    the rest of the theme and "powered by" stay the org's (`Branding.over`,
     mirrored by `effectiveBranding` in `lib/identity-proofing.ts`). It styles
     the flow's proofing mail (`proofingMail`: a branding that cannot be read
-    blocks the mail, a logo that cannot be read leaves the wordmark), its
+    blocks the mail, a logo that cannot be read leaves the theme's), its
     hosted page (`HostedRequest`, `HostedLogo`; where `SetAppBranding` is
     wired, as in `cmd/api` and the integration harness, the page's `theme` and
     logo come from `AppBrandingResolver`, which applies it as well) and the
@@ -1158,18 +1212,53 @@ post-review outcome stay the system's.
     confirm, and checks none of the form's fields or its logo upload (the
     handler does not read it): the tab sends its hidden draft text fields in
     that mode too. Audited `identity_proofing.flow_branding_configured` with
-    before and after. The form is the Branding tab of Edit flow, with a preview
-    that switches between the proofing mail and the Idem app (`appLook` in
-    `lib/identity-proofing.ts` mirrors the resolver for an external person).
+    before and after. The form is the Branding tab of Edit flow, with the
+    branding preview (below).
   - **Allowed redirect origins** (§7).
-  - Branding is under Settings › Branding (the org's, for every flow; the
-    wallet's own look is the separate Settings › Wallet theme).
+  - Settings › Branding (`branding-settings.tsx`; the old `?tab=theme` opens
+    it) is one form with one Save:
+    - "Look": the theme's fields (`ThemeFields`, `lib/use-theme-draft.ts`).
+    - "Name and contact": the branding above, with the `showTheme` switch.
+    - Leaving with unsaved changes asks first (`useBlocker`, and the browser's
+      own prompt on close or reload).
+  - **Branding preview** (`routes/branding-preview.tsx`), beside both branding
+    forms, of the unsaved draft:
+    - Mail: the real mail, rendered by `POST
+      .../settings/branding/mail-preview` (`mail_preview.go`: the form, a
+      flow's with `flowId`/`custom`, and on the Branding tab the unsaved theme
+      with `theme=true`; nothing saved) in a sandboxed frame.
+    - Hosted page: the real page (`HostedPage` in `proof.tsx`) in a
+      same-origin frame on `/preview/hosted`, so its theme applies to the
+      frame alone. The settings post it a hosted view built by
+      `lib/hosted-preview.ts` (the theme, a flow's colour over it, none with
+      the switch off; the org's default flow or the flow being edited).
+    - Idem app: its consent screen drawn in HTML. `lib/idem-look.ts` copies
+      the app's colour rules (vcmrtd `idem/lib/theme/app_theme.dart`: a colour
+      that does not read on white is the app's own) and the strings are the
+      app's `.arb` ones. A change in the app's consent screen needs a change
+      here.
 
-## 5. No test mode
+## 5. Test mode
 
-There are no test keys, scripted outcomes or `livemode`: every key and session
-is real. `IDENTITY_PROOFING_PROVIDER=stub` is the only stand-in, for dev and
+There are no test keys or scripted outcomes: every session runs the real
+check. `IDENTITY_PROOFING_PROVIDER=stub` is the only stand-in, for dev and
 tests (§0).
+
+An org that registers itself (`wallet.Store.RegisterOrganization`) starts in
+test mode; seeded orgs start live. A platform admin switches it
+(`PUT /admin/organizations/{id}/test-mode`, `organizations.test_mode`; the org
+cannot see or change it). Each request then made is stored with `test = true`,
+and every org-scoped read keeps to the org's current mode (`inOrgMode` in
+`request_store.go`): lists, counts, the overview, stats, data request
+matches, the webhook delivery log and a request by id. Going live hides the
+test requests (nothing is deleted; retention still runs), going back to test
+shows them again. Reads by link token or engine session ignore the mode, and so does
+`RequestStore.Reread` (a step re-reading the request it holds), so a
+session keeps running whatever the org switches to. Test sessions carry
+`test: true` in the API, the webhooks and the hosted page, which labels them;
+every API answer to a key of a test-mode org carries `Test-Mode: true`;
+members see a banner. The audit recorder marks every event about a test
+request (`audit_events.test`), whatever records it; the audit log labels it.
 
 ## 6. A new Idem code mid-session
 
@@ -1433,6 +1522,9 @@ decides, of a `kind` (`identity`, `address`, `employment`, `data_request`) in a
 - One review per session: identity, then the Verzekeringsbericht, then the
   address (`nextPart`, `lib/use-after-decision.ts`). After each decision the
   page goes on to the next part ("Next: …"), else back to the list.
+  - On top, the session's parts as steps, the same `Stepper` as the person's
+    flow (`ReviewProgress`, `reviewSteps`): what a reviewer decided, then what
+    waits, at the part the page shows. Not for a review of one part.
 - Each part's page shows "Already decided in this session"
   (`SessionDecisions`): the identity once decided, with its method and level,
   by a reviewer or automatically, and each decided step, with who, when, why.
@@ -1448,6 +1540,32 @@ decides, of a `kind` (`identity`, `address`, `employment`, `data_request`) in a
 - The waiting list is three reads (`useWaitingReviewsQuery`): `?status=needs_review`,
   `?reviewKind=address` and `?reviewKind=employment`, each narrowed before its
   cap of 200, longest waiting first, so the cap leaves out the newest.
+
+**Reviewing outside the wallet** (`review_api.go`, `api_review_handler.go`,
+`review_link.go`, `review_link_handler.go`):
+- **API** (scopes `reviews:read`, `reviews:write`; migration `20261116110000`
+  gives existing keys both):
+  - `GET /proofing/sessions/{id}/review`: `waiting` and `items`
+    (`reviewParts`), decisions, `sealChecks`, and the result
+    (`ExternalReview`), images only while the identity waits. `no-store`.
+  - `POST .../review-items/{kind}` `{decision, reason, reviewer, errorCode?}`
+    (`DecideExternalReview`), `POST .../review-items/{kind}/seal-check`.
+  - The `reviewer` (`apiReviewer`, at most 100 characters) is no member:
+    `ReviewInput.APIReviewer`, kept as `reviewer` in the decision's audit
+    event (`auditReviewerKey`), shown as `decidedBy` (`RequestDecisions`);
+    `decided_by` stays NULL. A reviewer's code is enforced as for a member. No
+    own-review check: the wallet does not know who sent what in the org's system.
+- **Review link** (`identity_proofing_review_links`, migration
+  `20261116110100`): `POST .../review-links` `{reviewer}` answers
+  `{url, expiresAt}`, `/r/<token>`, an hour (`reviewLinkTTL`), identity checks
+  with something waiting only (`nothing_to_review`), audited
+  `review_link_created`. Stops with its key.
+  - Public routes `/review/{token}`, `.../items/{kind}`, `.../seal-check`
+    (`limitReviewLink`), audited as `review_link:<key prefix>`.
+  - The page `routes/review-link.tsx` renders `RequestReview` with a
+    `ReviewTarget` of kind `link` (`useReviewResultQuery`, `useDecideReviewFor`,
+    …), framed by the org's redirect origins only (`reviewFramePolicy`), and
+    posts `proofing.review_completed` once nothing waits (`lib/review-link.ts`).
 
 **Always send to review, per part.**
 - The flow editor's Review section has a toggle per part: the identity proof
@@ -1467,22 +1585,29 @@ decides, of a `kind` (`identity`, `address`, `employment`, `data_request`) in a
   (`reviewReason`) goes first.
 
 **Live updates, no polling.**
-- A trigger on `identity_proofing_requests` (migration `20261029100000`) sends
-  `pg_notify('identity_proofing_reviews', organization_id)` when `status`,
-  `purged_at` or `ips_session_ended_at` changes, whoever writes the row. One on
-  `identity_proofing_review_items` sends it on every insert, update and delete.
-- `proofing.ReviewFeed` holds one LISTEN per API process (`database.Listen`) and
-  tells that org's subscribers. Each (re)connect of the LISTEN tells all of them.
-- `GET .../identity-proofing/reviews/events` (reviewer route) is a Server-Sent
-  Events stream: a `reviews` event with no data per change, and a comment every
-  25 s so a proxy keeps it open. It ends on `RegisterOnShutdown(feed.Stop)`.
-- The sidebar mounts `useReviewEvents` for a reader who may review: every event,
-  and every (re)open of the stream, invalidates the requests key, so the count,
-  the Reviews tabs, Closed and the Overview re-read at once.
-- The tabs of one browser share one stream (`api/review-events.ts`): over
+- The wallet's Observer is `internal/events`. Triggers call
+  `notify_wallet_event(kind, id column)` (migrations `20261118150100` and on),
+  which sends `pg_notify('wallet_events', '<kind>:<id>')`, whoever writes the
+  row. `identity_proofing_requests` sends `reviews` for its org on insert and
+  when `status`, `purged_at` or `ips_session_ended_at` changes, and
+  `proofing-request` (its own id) and `proofing-progress` (its org) on any
+  update. `identity_proofing_review_items` sends `reviews`,
+  `identity_proofing_sessions` `proofing-progress`,
+  `identity_proofing_webhook_deliveries` `webhooks`.
+- `events.Hub` holds one LISTEN per API process (`database.Listen`) and tells
+  the subscribers of each topic. Each (re)connect of the LISTEN tells all of them.
+- `GET /orgs/{slug}/events` (member route) is a Server-Sent Events stream: an
+  event named after its kind, with no data, per change, and a comment every
+  25 s so a proxy keeps it open. It ends on `RegisterOnShutdown(hub.Stop)`. A
+  hosted page has no session, so it follows `GET /proof/{token}/events`.
+- The sidebar mounts `useOrgEvents` (`api/org-events.queries.ts`) for every
+  member: each event re-reads what its kind names (`REREADS`), and every
+  (re)open of the stream re-reads all of it. A read that follows the stream
+  polls only while `useOrgStreamConnected` is false.
+- The tabs of one browser share one stream (`api/org-events.ts`): over
   HTTP/1.1 a browser holds at most six connections per host for all its tabs,
   so a stream per tab left other requests queued until they timed out. The tab
-  holding the Web Lock `review-events:{slug}` opens it and passes each change to
+  holding the Web Lock `org-events:{slug}` opens it and passes each event to
   the others over a `BroadcastChannel`; the next tab takes over when it closes. A row opens its review page, `reviews/{requestId}`: for an identity check
 (`identity-check-review.tsx`) why it waits, the checks the engine ran, the data
 from the chip (an audited result read) and the decision; for a data request §15.
@@ -1757,7 +1882,7 @@ Everything this feature does not do yet, in one place.
   later feature. The hosted page does not follow the app (`waiting` / `connected` /
   `away`) as the on-screen page does, so its session QR stays shown.
 - **Custom domains** for the hosted page are not built: the page is on the
-  wallet's own domain with the org's branding and white-label (§4).
+  wallet's own domain with the org's branding and theme (§4).
 - **Settings still open:**
   - which fields the sender must send with a session, and what a mismatch
     does, cannot be set per flow in the editor (§13 is per session);
@@ -2456,6 +2581,9 @@ with DigiD; the wallet checks UWV's seal and keeps the employment relations.
   - None once purged: the purge erased what they read.
   - Sent as `steps` in the request responses, the public API result and
     every webhook's data.
+  - The public API result (and the webhook's `result`) leaves out what the
+    flow did not produce: `steps` and `diplomas` when empty, and
+    `passiveAuth`/`activeAuth` on evidence other than `emrtd`.
     `session.verified` and `session.review_opened` carry them `open`: the
     event's copy takes the new status and `checked_at` (`RecordOutcome`).
   - `steps_integration_test.go` holds a test per address and diploma path.
@@ -2560,6 +2688,7 @@ step runs with the Idem app or the Yivi app alike.
   | Both sides, camera only | `requireBothSides`, `captureSources` |
   | The page with the BSN (a Dutch passport's back) | `desiredFields: ["personal_number"]` |
   | BSN blacked out, only under BlurBSN | `redactFields: ["personal_number", "mrz_strings", "signature"]` |
+  | Printed portrait blacked out, unless the flow keeps face photos | `redactFields: ["portrait", "ghost_portrait"]` |
   | Image quality (screen, copy, glare, focus, bounds) | the CM account's `PUT /config` |
 
   - `allowedExpiration` and `validateFields` are left out: with them CM stopped
@@ -2579,9 +2708,9 @@ step runs with the Idem app or the Yivi app alike.
   | `document_scan` score, by CM's ranges: below 0.40 fake, 0.90 and up authentic, between (or -1) doubtful | fake rejects (`DOC_NOT_AUTHENTIC`); doubtful goes to review | "Document check: Genuine (97%)" |
   | field `validity` | any `invalid` rejects (`DOC_FIELDS_INVALID`) | "Printed data" |
   | field `comparison` (MRZ, printed text, barcode) | any `no_match` goes to review | "MRZ matches printed text" |
-  | the read fields (MRZ value first) | with no MRZ or chip read, they are the session's document: expiry, accepted document kinds and countries apply, and the name and date of birth are the identity; the BSN only under a retrieve policy | name, date of birth, document |
+  | the read fields (MRZ value first) | with no MRZ or chip read, they are the session's document: expiry, accepted document kinds and countries apply, and the name and date of birth are the identity; the BSN only under a retrieve policy, or masked before storage under a mask policy | name, date of birth, document |
   | document number | must equal the MRZ's, when the app read one (`DOCUMENT_MISMATCH`) | |
-  | holder (name, date of birth) | on the Yivi path, must be the disclosed holder: the same full name (`diploma.SameName`) and, outside an age check, the same date of birth (`scannedHolderOf`); another person rejects (`DOCUMENT_MISMATCH`), no name read goes to review. The disclosure carries no document number, and another document of the same holder passes | |
+  | holder (name, date of birth) | on the Yivi path, must be the disclosed holder: the same full name (`diploma.SameName`) and, outside an age check, the same date of birth (`scannedHolderOf`); another person rejects (`DOCUMENT_MISMATCH`), no name read goes to review. The disclosure carries no document number, and another document of the same holder passes. A disclosed document takes the photo's BSN, under the BSN policy and only with `dg11` requested (`photographedDocument`) | |
   | document type | the document kind (`documentKinds`) | "Document" |
 
   - The result carries `documentCheck` (verdict, score, fields, zones, kind:
@@ -2662,6 +2791,11 @@ step runs with the Idem app or the Yivi app alike.
   - `mrz_strings`: the whole MRZ, as an older Dutch document carries the BSN
     in its optional data (`mrz` is refused).
   - `signature`: the holder's signature, under the same setting.
+- **Portrait**: unless the flow keeps face photos (`keepFacePhotos`), the
+  transaction asks CM to black out the printed portrait as well.
+  - `portrait`: the main printed face.
+  - `ghost_portrait`: its smaller, lighter copy. Not in CM's public docs;
+    CM accepts it and blurs the ghost image.
 - **Face in the scan** (`faceProvider: idscan`): CM's page runs its
   `face_liveness` and `face_match` tasks right after the document scan, in the
   same transaction (`ScanOptions.Face`).
@@ -2753,6 +2887,12 @@ other choice offered.
   - The wallet hands it to the engine under the document credentials' claim
     names (`disclosedIdentity`: `firstName`, `lastName` = prefix and family
     name, `dateOfBirth`).
+  - **BSN**: asked (`ProofingRequest.BSN`, claim `bsn`) only on a flow whose
+    BSN policy keeps it (`retrieve` or `mask`, `keepsBSN`). The engine makes the
+    registered BSN the document's personal number under the flow's policy
+    (`registeredBSN`), over the photographed one, without `dg11` (which comes
+    only with the chip read), and holds the disclosure's own `bsn` to the same
+    policy (`withholdDisclosedBSN`). The result's `identity.bsn` carries it.
   - **Tied to the photographed document** (`personalDataMatch`, chosen by the
     disclosed credential, `disclosesPersonalData`), as a document number ties
     a disclosed document (§18):

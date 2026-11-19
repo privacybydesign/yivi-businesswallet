@@ -423,3 +423,35 @@ func TestEnginePerOrgSchemaIsolation(t *testing.T) {
 		t.Fatalf("org B must be untouched by A's delete: expected 1, got %d", got)
 	}
 }
+
+func TestEngineDropOrganization(t *testing.T) {
+	eng, pool := newTestEngine(t)
+	ctx := context.Background()
+	orgID, other := uuid.New(), uuid.New()
+	for _, id := range []uuid.UUID{orgID, other} {
+		if _, err := eng.Store(ctx, id, sampleCredential("uri:eu.ebw.oid.1", "h-"+id.String())); err != nil {
+			t.Fatalf("store: %v", err)
+		}
+	}
+
+	if err := eng.DropOrganization(ctx, orgID); err != nil {
+		t.Fatalf("drop: %v", err)
+	}
+	var schemas int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM information_schema.schemata WHERE schema_name = $1`,
+		"holder_"+hex.EncodeToString(orgID[:])).Scan(&schemas); err != nil {
+		t.Fatal(err)
+	}
+	if schemas != 0 {
+		t.Fatal("the dropped org's schema is still there")
+	}
+	if n := countBatches(t, pool, other); n != 1 {
+		t.Fatalf("other org batches = %d, want its credential untouched", n)
+	}
+	if err := eng.DropOrganization(ctx, uuid.New()); err != nil {
+		t.Fatalf("drop of an unknown org: %v", err)
+	}
+	if _, err := eng.Store(ctx, orgID, sampleCredential("uri:eu.ebw.oid.1", "again")); err != nil {
+		t.Fatalf("store after drop: %v", err)
+	}
+}

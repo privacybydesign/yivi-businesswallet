@@ -71,7 +71,7 @@ func TestCreateTransaction(t *testing.T) {
 			}))
 			t.Cleanup(srv.Close)
 
-			trx, err := New(testKeyID, testSecret, srv.URL+"/", srv.Client()).CreateTransaction(context.Background(), LocaleDutch, ScanOptions{RedactBSN: redact, MinimumAge: testMinimumAge})
+			trx, err := New(testKeyID, testSecret, srv.URL+"/", srv.Client()).CreateTransaction(context.Background(), LocaleDutch, ScanOptions{RedactBSN: redact, RedactPortrait: redact, MinimumAge: testMinimumAge})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -92,7 +92,7 @@ func TestCreateTransaction(t *testing.T) {
 			// The BSN is printed as the personal number, and on an older
 			// Dutch document in the MRZ too. The signature goes with it.
 			redacted, has := scan["redactFields"].([]any)
-			if has != redact || has && !slices.Equal(redacted, []any{fieldPersonalNumber, fieldMRZ, fieldSignature}) {
+			if has != redact || has && !slices.Equal(redacted, []any{fieldPersonalNumber, fieldMRZ, fieldSignature, fieldPortrait, fieldGhostPortrait}) {
 				t.Errorf("documentScan = %v, want redactFields %v", scan, redact)
 			}
 			// ID Scan enforces the flow's minimum age. allowedExpiration and
@@ -113,6 +113,36 @@ func TestCreateTransactionRefused(t *testing.T) {
 	t.Cleanup(srv.Close)
 	if _, err := New(testKeyID, testSecret, srv.URL, srv.Client()).CreateTransaction(context.Background(), LocaleEnglish, ScanOptions{RedactBSN: true}); err == nil {
 		t.Fatal("CreateTransaction succeeded on a 401")
+	}
+}
+
+// An answer other than the one asked for is an APIError with the status and
+// the message of ID Scan's error body, else the start of the body.
+func TestAPIError(t *testing.T) {
+	for name, tc := range map[string]struct {
+		status  int
+		body    string
+		message string
+	}{
+		"error body":      {http.StatusInternalServerError, `{"status":500,"message":"Internal Server Error"}`, "Internal Server Error"},
+		"plain text body": {http.StatusBadGateway, "upstream down\n", "upstream down"},
+		"no body":         {http.StatusServiceUnavailable, "", http.StatusText(http.StatusServiceUnavailable)},
+	} {
+		t.Run(name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(tc.status)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			t.Cleanup(srv.Close)
+			_, err := New(testKeyID, testSecret, srv.URL, srv.Client()).Result(context.Background(), "trx-1", "res-1")
+			var apiErr *APIError
+			if !errors.As(err, &apiErr) || apiErr.Status != tc.status || apiErr.Message != tc.message {
+				t.Errorf("Result = %v, want an APIError %d %q", err, tc.status, tc.message)
+			}
+			if !strings.Contains(err.Error(), "res-1") || !strings.Contains(err.Error(), "trx-1") {
+				t.Errorf("error %q does not name the result and the transaction", err)
+			}
+		})
 	}
 }
 

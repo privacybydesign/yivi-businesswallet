@@ -133,7 +133,7 @@ func TestProofingAdminHTTPFlow(t *testing.T) {
 	}
 
 	resp := env.postJSON("/api/v1/orgs/acme/identity-proofing/flows", map[string]any{
-		"name": "Passport + face", "steps": []string{"nfc_read", "face_match"}, "requiredChecks": []string{"nfc.passive_auth", "face.match"},
+		"name": "Passport + face", "steps": []string{"document_capture", "nfc_read", "face_verification"}, "requiredChecks": []string{"nfc.passive_auth", "face.match"},
 	})
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("create flow = %d, want 201", resp.StatusCode)
@@ -184,7 +184,7 @@ func TestProofingAdminHTTPFlow(t *testing.T) {
 	// Editing a flow adds a version that is active at once; activating the first
 	// rolls it back.
 	resp = env.postJSON("/api/v1/orgs/acme/identity-proofing/flows/"+flow.ID+"/versions", map[string]any{
-		"name": "Passport + face v2", "steps": []string{"nfc_read", "face_match"}, "requiredChecks": []string{"nfc.passive_auth", "face.match"},
+		"name": "Passport + face v2", "steps": []string{"document_capture", "nfc_read", "face_verification"}, "requiredChecks": []string{"nfc.passive_auth", "face.match"},
 	})
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("new flow version = %d, want 201", resp.StatusCode)
@@ -234,6 +234,7 @@ func TestProofingMemberCannotManage(t *testing.T) {
 		{http.MethodGet, base + "/api-keys", ""},
 		{http.MethodPost, base + "/api-keys", `{"name":"x"}`},
 		{http.MethodDelete, base + "/api-keys/" + noID, ""},
+		{http.MethodGet, base + "/api-keys/" + noID + "/secret", ""},
 		{http.MethodGet, base + "/webhook", ""},
 		{http.MethodPut, base + "/webhook", `{"url":"https://hooks.example.org/yivi","events":["session.verified"]}`},
 		{http.MethodDelete, base + "/webhook", ""},
@@ -249,13 +250,11 @@ func TestProofingMemberCannotManage(t *testing.T) {
 		_ = resp.Body.Close()
 	}
 
-	// Reading the settings and the logo is for every member.
+	// Reading the settings is for every member.
 	settings := decodeJSON[proofingSettingsResp](t, env.do(http.MethodGet, base+"/settings", nil))
 	if settings.SessionTTLSeconds != int(proofing.SessionTTL.Seconds()) {
 		t.Errorf("member settings = %+v, want the default session lifetime", settings)
 	}
-	wantProofingError(t, "member reads the logo of an org without one", env.do(http.MethodGet, base+"/settings/logo", nil),
-		http.StatusNotFound, "not_found")
 
 	// The request routes are member routes: with no flow made available the
 	// request is refused on the flow, not on the role.
@@ -492,6 +491,7 @@ type proofingSettingsResp struct {
 		PrivacyURL     string `json:"privacyUrl"`
 		LogoURI        string `json:"logoUri"`
 		HidePoweredBy  bool   `json:"hidePoweredBy"`
+		ShowTheme      bool   `json:"showTheme"`
 	} `json:"branding"`
 	LegalRetention *struct {
 		Months   int    `json:"months"`
@@ -645,53 +645,41 @@ func TestOrgSettingsHTTPFlow(t *testing.T) {
 	assertOrgBranding(t, env, orgID, base)
 }
 
-// assertOrgBranding saves the org's branding with a logo, checks it round trips
-// beside the other settings saved before, refuses bad fields, and keeps or
-// removes the logo as asked.
+// assertOrgBranding saves the org's branding, checks it round trips beside
+// the other settings saved before with no colour or logo of its own, refuses a
+// bad field, and keeps the theme switch when a form leaves it out.
 func assertOrgBranding(t *testing.T, env *testEnv, orgID uuid.UUID, base string) {
 	t.Helper()
-	logo := testLogoPNG(t)
 	form := map[string]string{
-		"displayName": "Acme Identity", "primaryColor": "#1f5b4a", "supportContact": "help@acme.test",
-		"privacyUrl": "https://acme.test/privacy", "hidePoweredBy": "true",
+		"displayName": "Acme Identity", "supportContact": "help@acme.test",
+		"privacyUrl": "https://acme.test/privacy", "hidePoweredBy": "true", "showTheme": "false",
 	}
-	resp := env.putBranding("acme", form, logo)
+	resp := env.putBranding("acme", form, nil)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("save branding = %d, want 200", resp.StatusCode)
 	}
 	settings := decodeJSON[proofingSettingsResp](t, resp)
 	b := settings.Branding
-	if b.DisplayName != "Acme Identity" || b.PrimaryColor != "#1f5b4a" || b.SupportContact != "help@acme.test" ||
-		b.PrivacyURL != "https://acme.test/privacy" || !b.HidePoweredBy || !strings.HasPrefix(b.LogoURI, base+"/settings/logo?v=") {
-		t.Errorf("branding = %+v; want the saved fields and a logo link", b)
+	if b.DisplayName != "Acme Identity" || b.SupportContact != "help@acme.test" || b.PrivacyURL != "https://acme.test/privacy" ||
+		!b.HidePoweredBy || b.ShowTheme || b.PrimaryColor != "" || b.LogoURI != "" {
+		t.Errorf("branding = %+v; want the saved fields, the theme off, no colour or logo", b)
 	}
 	if len(settings.AllowedRedirectOrigins) != 1 || settings.DataRetentionDays != fixedRetentionDays {
 		t.Errorf("settings after branding = %+v, want the other settings kept", settings)
-	}
-	resp = env.do(http.MethodGet, base+"/settings/logo", nil)
-	served, err := io.ReadAll(resp.Body)
-	_ = resp.Body.Close()
-	if err != nil || resp.StatusCode != http.StatusOK || resp.Header.Get(headerContentType) != contentTypePNG || !bytes.Equal(served, logo) {
-		t.Errorf("logo = %d %q (%d bytes, err %v), want the uploaded PNG", resp.StatusCode, resp.Header.Get(headerContentType), len(served), err)
 	}
 	if n := env.auditCount(orgID, audit.IdentityProofingSettingsUpdated); n != 2 {
 		t.Errorf("settings_updated audits = %d, want 2 after the branding", n)
 	}
 
-	bad := map[string]string{"displayName": "Acme", "primaryColor": "green"}
-	wantProofingError(t, "branding with a colour that is no hex", env.putBranding("acme", bad, nil), http.StatusBadRequest, "invalid_input")
-	bad = map[string]string{"displayName": "Acme", "privacyUrl": "http://acme.test/privacy"}
+	bad := map[string]string{"displayName": "Acme", "privacyUrl": "http://acme.test/privacy"}
 	wantProofingError(t, "branding with a privacy URL that is no https", env.putBranding("acme", bad, nil), http.StatusBadRequest, "invalid_input")
 
-	// A form without a logo keeps it; removeLogo clears it.
-	if kept := decodeJSON[proofingSettingsResp](t, env.putBranding("acme", form, nil)); kept.Branding.LogoURI == "" {
-		t.Errorf("branding saved without a logo field = %+v, want the logo kept", kept.Branding)
+	delete(form, "showTheme")
+	form["displayName"] = "Acme"
+	if kept := decodeJSON[proofingSettingsResp](t, env.putBranding("acme", form, nil)); kept.Branding.ShowTheme ||
+		kept.Branding.DisplayName != "Acme" {
+		t.Errorf("branding saved without showTheme = %+v, want the theme kept off", kept.Branding)
 	}
-	form["removeLogo"] = "true"
-	if removed := decodeJSON[proofingSettingsResp](t, env.putBranding("acme", form, nil)); removed.Branding.LogoURI != "" {
-		t.Errorf("branding saved with removeLogo = %+v, want no logo", removed.Branding)
-	}
-	wantProofingError(t, "removed logo", env.do(http.MethodGet, base+"/settings/logo", nil), http.StatusNotFound, "not_found")
 }
 
 // The org's legal retention is a floor for every flow's retention: it is told
@@ -1104,9 +1092,14 @@ func TestProofingAPIKeyScopesFlow(t *testing.T) {
 		Identity *struct {
 			FamilyName string `json:"familyName"`
 		} `json:"identity"`
+		Photo  *struct{ Data string } `json:"photo"`
+		Selfie *struct{ Data string } `json:"selfie"`
 	}](t, env.apiCall(http.MethodGet, "/api/v1/proofing/sessions/"+approved.ID+"/result", key.Secret, nil))
 	if result.ID != approved.ID || result.Status != "approved" || result.Identity == nil || result.Identity.FamilyName == "" {
 		t.Errorf("result = %+v; want the approved identity", result)
+	}
+	if result.Photo == nil || result.Photo.Data == "" || result.Selfie != nil {
+		t.Errorf("result images = photo %+v, selfie %+v; want the document's portrait and no selfie", result.Photo, result.Selfie)
 	}
 	if n := env.auditCount(orgID, audit.IdentityProofingResultRead); n != 1 {
 		t.Errorf("result_read audits = %d, want 1", n)
@@ -1318,24 +1311,7 @@ func TestProofingReviewDecisionFlow(t *testing.T) {
 	wantProofingError(t, "a flow kind other than data_request", env.do(http.MethodGet, requests+"?flowKind=identity", nil),
 		http.StatusBadRequest, "invalid_input")
 
-	// While it waits, the reviewer reads the identity and the photos it holds.
-	held := decodeJSON[struct {
-		Identity *struct {
-			FamilyName string `json:"familyName"`
-		} `json:"identity"`
-		Photo  *struct{ Data string } `json:"photo"`
-		Selfie *struct{ Data string } `json:"selfie"`
-	}](t, env.do(http.MethodGet, requests+"/"+session.ID+"/result", nil))
-	if held.Identity == nil || held.Identity.FamilyName == "" || held.Photo == nil || held.Photo.Data == "" ||
-		held.Selfie == nil || held.Selfie.Data == "" {
-		t.Errorf("result in review = %+v; want the identity, the chip's photo and the selfie", held)
-	}
-	// The API's own result does not show the identity before an approval.
-	if api := decodeJSON[struct {
-		Identity *struct{} `json:"identity"`
-	}](t, env.apiCall(http.MethodGet, "/api/v1/proofing/sessions/"+session.ID+"/result", key.Secret, nil)); api.Identity != nil {
-		t.Errorf("API result in review carries the identity, want none until approved")
-	}
+	assertReviewResults(t, env, requests, session.ID, key.Secret)
 
 	review := requests + "/" + session.ID + "/review"
 	resp := env.postJSON(review, map[string]any{"decision": "approve"})
@@ -1363,6 +1339,31 @@ func TestProofingReviewDecisionFlow(t *testing.T) {
 	}
 	if list := decodeJSON[[]proofingRequestResp](t, env.do(http.MethodGet, requests+"?status=needs_review", nil)); len(list) != 0 {
 		t.Errorf("requests in review after the decision = %+v, want none", list)
+	}
+}
+
+// assertReviewResults checks what a session waiting for review shows: the
+// reviewer reads the identity and the photos it holds, the API neither.
+func assertReviewResults(t *testing.T, env *testEnv, requests, sessionID, secret string) {
+	t.Helper()
+	// While it waits, the reviewer reads the identity and the photos it holds.
+	held := decodeJSON[struct {
+		Identity *struct {
+			FamilyName string `json:"familyName"`
+		} `json:"identity"`
+		Photo  *struct{ Data string } `json:"photo"`
+		Selfie *struct{ Data string } `json:"selfie"`
+	}](t, env.do(http.MethodGet, requests+"/"+sessionID+"/result", nil))
+	if held.Identity == nil || held.Identity.FamilyName == "" || held.Photo == nil || held.Photo.Data == "" ||
+		held.Selfie == nil || held.Selfie.Data == "" {
+		t.Errorf("result in review = %+v; want the identity, the chip's photo and the selfie", held)
+	}
+	// The API's own result does not show the identity or the photos before an approval.
+	if api := decodeJSON[struct {
+		Identity *struct{} `json:"identity"`
+		Photo    *struct{} `json:"photo"`
+	}](t, env.apiCall(http.MethodGet, "/api/v1/proofing/sessions/"+sessionID+"/result", secret, nil)); api.Identity != nil || api.Photo != nil {
+		t.Errorf("API result in review carries the identity or a photo, want neither until approved")
 	}
 }
 

@@ -61,6 +61,30 @@ join via a claim, not a duplicate).
   `ebcore:iso6523:` prefix). The sub-ID has no place in ISO 6523 and is dropped. `0106` is
   taken from Peppol, not yet from WE BUILD. The AS4 party id type is still `unregistered`.
 
+**EBWOID** (YIV-520). WE BUILD replaced LPID with the EBWOID (EBW Owner Identification
+Data, Art 8–9): an SD-JWT VC with `vct: uri:eu.ebw.oid.1`, claims `id` (the EUID) and
+`name` (rb-ebwoid §5.1). Every new wallet opens holding one:
+
+- `OpenWallet` fixes the org id first (the holder engine is per org), then has the EBWOID
+  issuer put the EBWOID in that org's holder. The org's `name` and `euid` come from the
+  verified credential's claims, not from the register.
+- The EBWOID's EUID must name the company the register validated (country, register and
+  number; the optional third part is ignored), or the open fails with `422
+  ebwoid_mismatch`. Otherwise a valid EBWOID for any company would open this wallet.
+- `RegisterOrganization` writes the org with that id and indexes the EBWOID in
+  `held_attestations` (`source = 'bootstrap'`, audited `attestation.held_received`) in
+  the same tx. When the open fails, the org's holder is dropped again
+  (`DropOrganization`: with the irmago engine its `holder_<org>` schema, files and
+  cached engine), so a mistyped slug leaves nothing behind.
+- The EBWOID comes from `StubEBWOIDIssuer` (`registryprovider`): an unsigned EBWOID
+  built from the seeded register's name and EUID. Dev/CI only. The wallet service takes
+  the issuer as a seam, so a real issuer plugs in there.
+- The registry (`WALLET_REGISTRY_PROVIDER`) still supplies the KVK check and the
+  representatives: the EBWOID carries neither.
+
+Not built: a real EBWOID issuer (OpenID4VCI from KVK). KVK's endpoint is not public and
+needs WE BUILD access (YIV-622).
+
 Still pending: owner-claim matching (`ClaimRepresentation`, 501); a shared strong
 identifier for matching; the async QERDS request→attestation transport.
 

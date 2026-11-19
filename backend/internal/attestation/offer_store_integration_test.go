@@ -177,7 +177,7 @@ func TestDeclineOfferHoldsNothing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RecordOffer: %v", err)
 	}
-	if err := e.store.DeclineOffer(ctx, e.orgID, offer.ID); err != nil {
+	if _, err := e.store.DeclineOffer(ctx, e.orgID, offer.ID); err != nil {
 		t.Fatalf("DeclineOffer: %v", err)
 	}
 
@@ -191,7 +191,7 @@ func TestDeclineOfferHoldsNothing(t *testing.T) {
 	if _, err := e.store.ClaimOffer(ctx, e.orgID, offer.ID); !errors.Is(err, attestation.ErrOfferNotFound) {
 		t.Fatalf("ClaimOffer after decline = %v, want ErrOfferNotFound", err)
 	}
-	if err := e.store.DeclineOffer(ctx, e.orgID, offer.ID); !errors.Is(err, attestation.ErrOfferNotFound) {
+	if _, err := e.store.DeclineOffer(ctx, e.orgID, offer.ID); !errors.Is(err, attestation.ErrOfferNotFound) {
 		t.Fatalf("second DeclineOffer = %v, want ErrOfferNotFound", err)
 	}
 
@@ -229,7 +229,7 @@ func TestGetOfferBySourceMessageSeesDecidedOffersToo(t *testing.T) {
 		t.Errorf("got = %+v, want the pending offer %s", got, offer.ID)
 	}
 
-	if err := e.store.DeclineOffer(ctx, e.orgID, offer.ID); err != nil {
+	if _, err := e.store.DeclineOffer(ctx, e.orgID, offer.ID); err != nil {
 		t.Fatalf("DeclineOffer: %v", err)
 	}
 	decided, err := e.store.GetOfferBySourceMessage(ctx, e.orgID, messageID)
@@ -261,7 +261,7 @@ func TestOfferQueueIsOrgScoped(t *testing.T) {
 	if _, err := e.store.ClaimOffer(ctx, other, offer.ID); !errors.Is(err, attestation.ErrOfferNotFound) {
 		t.Fatalf("ClaimOffer for another org = %v, want ErrOfferNotFound", err)
 	}
-	if err := e.store.DeclineOffer(ctx, other, offer.ID); !errors.Is(err, attestation.ErrOfferNotFound) {
+	if _, err := e.store.DeclineOffer(ctx, other, offer.ID); !errors.Is(err, attestation.ErrOfferNotFound) {
 		t.Fatalf("DeclineOffer for another org = %v, want ErrOfferNotFound", err)
 	}
 	pending, err := e.store.ListPendingOffers(ctx, other)

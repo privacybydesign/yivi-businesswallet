@@ -42,8 +42,8 @@ function lookup(locale: unknown, key: string): unknown {
 }
 
 describe("settings tab layout", () => {
-  it("has thirteen top-level tabs", () => {
-    expect(SETTINGS_TABS).toHaveLength(13);
+  it("has twelve top-level tabs", () => {
+    expect(SETTINGS_TABS).toHaveLength(12);
   });
 
   it("leads with Organisation, Branding and Data and privacy", () => {
@@ -84,12 +84,20 @@ describe("resolveSettingsLocation", () => {
     }
   });
 
-  it("opens the wallet theme on its own key, apart from Branding", () => {
+  it("opens Branding, which holds the wallet theme, for the old theme key", () => {
     expect(resolveSettingsLocation("theme")).toEqual({
-      tab: "theme",
+      tab: "branding",
       section: DEFAULT_COMMUNICATION_SECTION,
     });
     expect(resolveSettingsLocation("branding").tab).toBe("branding");
+  });
+
+  it("opens the default tab for a key the prototype has", () => {
+    for (const value of ["constructor", "toString", "__proto__"]) {
+      expect(resolveSettingsLocation(value).tab, value).toBe(
+        DEFAULT_SETTINGS_TAB,
+      );
+    }
   });
 
   it("opens Data and privacy on its own key", () => {

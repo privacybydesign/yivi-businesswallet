@@ -15,6 +15,7 @@ import (
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -73,6 +74,8 @@ type fakeVerifier struct {
 	identityIssuedAt time.Time
 	// vog, when set, adds a pbdf.vog credential to every presentation.
 	vog *fakeVog
+	// results counts the presentations read.
+	results atomic.Int64
 }
 
 // fakeVog is a disclosed pbdf.vog credential: the identity printed on it and
@@ -94,6 +97,7 @@ func (f *fakeVerifier) StartProofing(ctx context.Context, _ openid4vpverifier.Pr
 }
 
 func (f *fakeVerifier) Result(_ context.Context, _ string) (openid4vpverifier.Presentation, error) {
+	f.results.Add(1)
 	byCredential := map[string]map[string]string{
 		"email": {openid4vpverifier.ClaimEmail: f.email},
 	}
@@ -145,6 +149,10 @@ func (stubQerdsNotifier) SendCredentialOffer(_ context.Context, _ uuid.UUID, _, 
 	return nil
 }
 
+func (stubQerdsNotifier) SendOfferDeclined(_ context.Context, _ uuid.UUID, _, _, _ string) error {
+	return nil
+}
+
 type meBody struct {
 	ID              uuid.UUID `json:"id"`
 	Email           string    `json:"email"`
@@ -163,6 +171,10 @@ type testEnv struct {
 	// proofing stands in for the proofing engine: a test sets its Outcome,
 	// before creating a session, to have the subject finish it.
 	proofing *proofingprovider.Stub
+	// proofingService and webhooks are what cmd/api hands the webhook
+	// deliverer, for a test that sends the outbox.
+	proofingService *proofing.Service
+	webhooks        *proofing.WebhookStore
 }
 
 // presenterMode picks which posture newTestEnv wires the inbound OpenID4VP
@@ -225,7 +237,7 @@ func newTestEnv(t *testing.T, mode presenterMode, platformAdmins ...string) *tes
 		stubEmailNotifier{}, stubQerdsNotifier{}, attestationStore, attestationStore, eudiholder.NewStubHolder(), "http://app.test",
 	)
 	orgService.SetOnboardingIssuer(attestation.NewOnboardingIssuer(attestationStore, attestationService))
-	attestationHandler := attestation.NewHandler(attestationStore, attestationStore, attestationStore, attestationStore, attestationService, issuerSettingsStore, attestationStore, orgStore, "", requireUser, orgHandler.Authorize)
+	attestationHandler := attestation.NewHandler(attestationStore, attestationService, issuerSettingsStore, orgStore, "", requireUser, orgHandler.Authorize)
 
 	// Inbound OpenID4VP under the dev posture the Compose stack runs with: plain
 	// http to the in-process fake verifier, request objects signed by a relying
@@ -266,11 +278,13 @@ func newTestEnv(t *testing.T, mode presenterMode, platformAdmins ...string) *tes
 	proofingStub := proofingprovider.NewStub()
 	proofingRecorder := audit.NewDBRecorder()
 	proofingRequests := proofing.NewRequestStore(pool, proofingRecorder, proofingCipher)
+	proofingWebhooks := proofing.NewWebhookStore(pool, proofingRecorder, proofingCipher)
 	proofingService := proofing.NewService(proofing.NewStores(pool, proofingRecorder, proofingCipher,
 		proofingRequests,
-		proofing.NewWebhookStore(pool, proofingRecorder, proofingCipher),
+		proofingWebhooks,
 	), proofingStub, fake, nil)
 	proofingService.SetHostedBaseURL("http://wallet.test/p/")
+	proofingService.SetReviewBaseURL("http://wallet.test/r/")
 	proofingHandler := proofing.NewHandler(proofingService, requireUser, orgHandler.Authorize)
 	proofingHandler.SetPlatformAdmins(admins)
 	proofingHandler.SetIdempotencyStore(proofing.NewIdempotencyStore(pool, proofingCipher))
@@ -296,6 +310,9 @@ func newTestEnv(t *testing.T, mode presenterMode, platformAdmins ...string) *tes
 		fake:     fake,
 		verifier: verifierIdentity,
 		proofing: proofingStub,
+
+		proofingService: proofingService,
+		webhooks:        proofingWebhooks,
 	}
 }
 

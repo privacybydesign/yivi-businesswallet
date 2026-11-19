@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -175,6 +176,9 @@ func sessionEventData(req Request, status Status) map[string]any {
 	if req.ExpectsSubject {
 		data["expectedSubject"] = true
 	}
+	if status == StatusExpired {
+		data["expiryReason"] = string(req.expiryReason())
+	}
 	if steps := req.Steps(time.Now()); len(steps) > 0 {
 		data["steps"] = steps
 	}
@@ -186,6 +190,13 @@ func sessionEventData(req Request, status Status) map[string]any {
 func enqueueRequestWebhook(ctx context.Context, q database.Querier, req Request, event string, data map[string]any) error {
 	if !req.External() {
 		return nil
+	}
+	if req.Test {
+		data = maps.Clone(data)
+		if data == nil {
+			data = map[string]any{}
+		}
+		data["test"] = true
 	}
 	return enqueueWebhook(ctx, q, req.OrganizationID, event, &req.ID, data)
 }

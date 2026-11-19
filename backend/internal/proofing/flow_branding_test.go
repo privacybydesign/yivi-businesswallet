@@ -55,10 +55,7 @@ func (f *fakeFlowBranding) Logo(_ context.Context, _ uuid.UUID, flowID string) (
 
 const contentTypePNG = "image/png"
 
-var (
-	orgLogo  = Logo{Bytes: []byte("\x89PNG org"), ContentType: contentTypePNG}
-	flowLogo = Logo{Bytes: []byte("\x89PNG flow"), ContentType: contentTypePNG}
-)
+var flowLogo = Logo{Bytes: []byte("\x89PNG flow"), ContentType: contentTypePNG}
 
 // brandedFixture is a fixture whose org has a full branding and whose chipFlow
 // has its own, which sets only a name and a logo.
@@ -68,9 +65,9 @@ func brandedFixture(t *testing.T) fixture {
 	f.svc.flowBrandings = newFakeFlowBranding()
 	ctx := context.Background()
 	if _, err := f.svc.SaveBranding(ctx, testOrg.ID, Branding{
-		DisplayName: "Acme Verzekeringen", PrimaryColor: "#1F5B4A",
+		DisplayName:    "Acme Verzekeringen",
 		SupportContact: "help@acme.example", PrivacyURL: "https://acme.example/privacy",
-	}, LogoChange{Replace: true, Logo: orgLogo}); err != nil {
+	}); err != nil {
 		t.Fatalf("SaveBranding: %v", err)
 	}
 	if _, err := f.svc.SaveFlowBranding(ctx, testOrg, chipFlow.ID, FlowBranding{
@@ -83,13 +80,12 @@ func brandedFixture(t *testing.T) fixture {
 
 func TestBrandingOver(t *testing.T) {
 	base := Branding{
-		DisplayName: "Org", PrimaryColor: "#111111", SecondaryColor: "#333333", TextColor: "#444444",
-		SurfaceColor: "#555555", BorderColor: "#666666", LinkColor: "#777777", SuccessColor: "#888888",
-		WarningColor: "#999999", ErrorColor: "#AAAAAA", TopbarColor: "#BBBBBB", FontFamily: "Nunito, sans-serif",
-		SupportContact: "org@example.org", PrivacyURL: "https://org.example/privacy", HasLogo: true, HidePoweredBy: true,
+		DisplayName: "Org", PrimaryColor: "#111111",
+		SupportContact: "org@example.org", PrivacyURL: "https://org.example/privacy", HasLogo: true,
+		HidePoweredBy: true, ShowTheme: true,
 	}
 	// with is base with the fields of own's name, colour, contact and privacy
-	// link replaced: the white-label colours and font are not a flow's to set.
+	// link replaced.
 	with := func(name, color, contact, privacy string) Branding {
 		b := base
 		b.DisplayName, b.PrimaryColor, b.SupportContact, b.PrivacyURL = name, color, contact, privacy
@@ -110,10 +106,6 @@ func TestBrandingOver(t *testing.T) {
 		"one field": {
 			Branding{PrimaryColor: "#222222"},
 			with("Org", "#222222", "org@example.org", "https://org.example/privacy"),
-		},
-		"white-label of its own": {
-			Branding{SecondaryColor: "#CCCCCC", TopbarColor: "#DDDDDD", FontFamily: "Inter, sans-serif"},
-			base,
 		},
 	}
 	for name, c := range cases {
@@ -147,7 +139,7 @@ func TestMailUsesFlowBranding(t *testing.T) {
 	own := f.mailer.sent[0].mail
 	if own.OrgName != "Acme Reizen" || own.RequesterName != "Acme Reizen" ||
 		own.SupportContact != "help@acme.example" || own.PrivacyURL != "https://acme.example/privacy" ||
-		own.Brand == nil || own.Brand.PrimaryColor != "#1F5B4A" || !bytes.Equal(own.Brand.Logo.Bytes, flowLogo.Bytes) {
+		own.Brand == nil || own.Brand.PrimaryColor != "" || !bytes.Equal(own.Brand.Logo.Bytes, flowLogo.Bytes) {
 		t.Errorf("mail on the flow with its own branding = %+v; want its name and logo, the org's other fields", own)
 	}
 
@@ -156,8 +148,8 @@ func TestMailUsesFlowBranding(t *testing.T) {
 	}
 	f.sendExternal(t, "bram@example.org", "")
 	shared := f.mailer.sent[1].mail
-	if shared.OrgName != "Acme Verzekeringen" || !bytes.Equal(shared.Brand.Logo.Bytes, orgLogo.Bytes) {
-		t.Errorf("mail after going back to the org's branding = %+v; want the org's name and logo", shared)
+	if shared.OrgName != "Acme Verzekeringen" || len(shared.Brand.Logo.Bytes) != 0 {
+		t.Errorf("mail after going back to the org's branding = %+v; want the org's name and the theme's logo", shared)
 	}
 }
 
@@ -185,8 +177,8 @@ func TestMailBlockedByBranding(t *testing.T) {
 	}
 }
 
-// A flow with no logo of its own shows the org's.
-func TestMailLogoFallsBackToOrg(t *testing.T) {
+// A flow with no logo of its own leaves the mail the org theme's.
+func TestMailLogoFallsBackToTheme(t *testing.T) {
 	f := brandedFixture(t)
 	if _, err := f.svc.SaveFlowBranding(context.Background(), testOrg, chipFlow.ID, FlowBranding{
 		Custom: true, DisplayName: "Acme Reizen",
@@ -194,8 +186,8 @@ func TestMailLogoFallsBackToOrg(t *testing.T) {
 		t.Fatalf("SaveFlowBranding: %v", err)
 	}
 	f.sendExternal(t, "anna@example.org", "")
-	if got := f.mailer.sent[0].mail.Brand.Logo.Bytes; !bytes.Equal(got, orgLogo.Bytes) {
-		t.Errorf("logo = %q, want the org's", got)
+	if got := f.mailer.sent[0].mail.Brand.Logo.Bytes; len(got) != 0 {
+		t.Errorf("logo = %q, want none (the theme's)", got)
 	}
 }
 
@@ -216,7 +208,7 @@ func TestHostedUsesFlowBranding(t *testing.T) {
 		t.Fatalf("HostedRequest: %v", err)
 	}
 	b := hosted.Settings.Branding
-	if hosted.Settings.SignedAs() != "Acme Reizen" || b.PrimaryColor != "#1F5B4A" || !b.HasLogo {
+	if hosted.Settings.SignedAs() != "Acme Reizen" || b.SupportContact != "help@acme.example" || !b.HasLogo {
 		t.Errorf("hosted settings = %+v, want the flow's name over the org's other fields", hosted.Settings)
 	}
 	logo, err := f.svc.HostedLogo(context.Background(), token)

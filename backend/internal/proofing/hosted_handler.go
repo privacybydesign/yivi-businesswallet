@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/email"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/events"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingprovider"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/ratelimit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/respond"
@@ -46,6 +47,12 @@ const frameNone = "frame-ancestors 'none'"
 // against its source's hostedSourceLimit, and an unknown link against its
 // authFailureLimit, as limitHosted counts them.
 func (h *Handler) PageHeaders(r *http.Request, header http.Header) {
+	if token, ok := strings.CutPrefix(r.URL.Path, reviewPagePrefix); ok {
+		if token != "" && !strings.Contains(token, "/") {
+			header.Set(headerCSP, h.reviewFramePolicy(r, token))
+		}
+		return
+	}
 	token, ok := strings.CutPrefix(r.URL.Path, hostedPagePrefix)
 	if !ok || token == "" || strings.Contains(token, "/") {
 		return
@@ -86,6 +93,7 @@ func (h *Handler) framePolicy(r *http.Request, token string) string {
 func (h *Handler) registerHosted(mux *http.ServeMux) {
 	mux.Handle("GET /proof/{token}", h.limitHosted(h.hostedView))
 	mux.Handle("GET /proof/{token}/status", h.limitHosted(h.hostedStatus))
+	mux.Handle("GET /proof/{token}/events", h.limitHosted(h.hostedEvents))
 	mux.Handle("POST /proof/{token}/start", h.limitHosted(h.hostedStart))
 	mux.Handle("POST /proof/{token}/decline", h.limitHosted(h.hostedDecline))
 	mux.Handle("GET /proof/{token}/logo", h.limitHosted(h.hostedLogo))
@@ -250,8 +258,10 @@ type hostedViewResponse struct {
 	EmbedOrigins []string `json:"embedOrigins"`
 	// Language is the page's language (en/nl); absent leaves the browser's.
 	// Locales are the languages the flow's page offers; empty is every one.
-	Language     string         `json:"language,omitempty"`
-	Locales      []email.Locale `json:"locales"`
+	Language string         `json:"language,omitempty"`
+	Locales  []email.Locale `json:"locales"`
+	// Test is a session of an org in test mode, labelled so on the page.
+	Test         bool `json:"test,omitempty"`
 	Organization struct {
 		Name              string           `json:"name"`
 		Branding          brandingResponse `json:"branding"`
@@ -364,6 +374,7 @@ func (h *Handler) hostedView(w http.ResponseWriter, r *http.Request) error {
 	out.SessionID = publicSessionID(hosted.Request.ID)
 	out.RedirectURL = liveRedirect(hosted.Request.RedirectURL, hosted.Settings, hosted.FlowSettings)
 	out.Language = string(hosted.Request.Language)
+	out.Test = hosted.Request.Test
 
 	st := hosted.Settings
 	out.EmbedOrigins = append([]string{}, st.RedirectOrigins...)
@@ -371,13 +382,11 @@ func (h *Handler) hostedView(w http.ResponseWriter, r *http.Request) error {
 	out.Organization.Name = st.SignedAs()
 	out.Organization.Branding = brandingResponse{
 		DisplayName: st.Branding.DisplayName, PrimaryColor: st.Branding.PrimaryColor,
-		SecondaryColor: st.Branding.SecondaryColor,
 		SupportContact: st.Branding.SupportContact, PrivacyURL: st.Branding.PrivacyURL,
-		HidePoweredBy: st.Branding.HidePoweredBy,
+		HidePoweredBy: st.Branding.HidePoweredBy, ShowTheme: st.Branding.ShowTheme,
 	}
 	// The logo is the one the theme comes with: the flow's own, else the org's
-	// proofing logo, or the org's theme's for an org without white-labeling of
-	// its own.
+	// theme's.
 	theme, hasLogo, err := h.hostedTheme(r, hosted.Request)
 	if err != nil {
 		return fmt.Errorf("proofing: hosted page theme: %w", err)
@@ -426,6 +435,22 @@ func (h *Handler) hostedStatus(w http.ResponseWriter, r *http.Request) error {
 	}
 	respond.JSON(w, r, http.StatusOK, newHostedProgress(req, time.Now()))
 	return nil
+}
+
+// hostedEvents streams an event each time the link's request, or its session
+// in the engine, moves, so the page re-reads its status then instead of
+// polling. It follows this one request only: an org-wide topic would have
+// every open hosted page re-read on every other page's progress, each read
+// against the org's hosted call budget. The events carry no data.
+func (h *Handler) hostedEvents(w http.ResponseWriter, r *http.Request) error {
+	req, err := h.service.HostedStatus(r.Context(), r.PathValue("token"))
+	if err != nil {
+		return mapError(err)
+	}
+	if h.events == nil {
+		return mapError(ErrRequestNotFound)
+	}
+	return h.events.Serve(w, r, events.Topic(events.ProofingRequest, req.ID))
 }
 
 type hostedStartRequest struct {

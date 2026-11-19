@@ -96,7 +96,7 @@ Two cross-section rules keep the same bytes from being written twice:
 - `qerds/messages.json` references each ASiC-E container by path. The per-message
   evidence records (type, provider ref, qualified timestamp) live in the container's
   own index, so a container still makes sense after someone lifts it out of the bundle.
-- An owner-ID credential the org holds (today the KVK registration attestation) is
+- An owner-ID credential the org holds (its EBWOID, `uri:eu.ebw.oid.1`) is
   written once, under `owner-identification/credentials/`. `attestations/held.json`
   still lists its held-index row and points at that same path, deduplicated by
   `credential_ref`; #121 owns the file, #122 owns the reference.
@@ -354,7 +354,7 @@ requested it.
    let a receiving wallet verify provenance rather than trust the transport. Out of
    scope for `1.0`; needs a qualified certificate first (#28).
 4. **Annex II conformance for owner ID data.** Today the org's owner-ID credential is
-   the KVK registration attestation as SD-JWT VC (`wallet-bootstrap.md`). Whether that
+   the EBWOID as SD-JWT VC (`wallet-bootstrap.md`). Whether that
    satisfies Art 8(3)'s Annex II reference, or whether an mdoc profile is required
    alongside it, is a regulatory reading we have not confirmed.
 5. **Termination bundles.** #125 exports on service termination or provider

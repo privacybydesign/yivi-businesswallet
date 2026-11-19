@@ -66,6 +66,9 @@ type OfferRequest struct {
 	// claim token remains the access boundary. Real recipient binding would
 	// require sending the PIN over a genuinely separate channel.
 	UseTxCode bool
+	// AwaitRedeem keeps a stub offer pending until the stub holder redeems it, as a
+	// real issuer does until a wallet collects the credential. Only the stub reads it.
+	AwaitRedeem bool
 }
 
 // Offer is a created credential offer: the opaque issuance id we poll on plus the

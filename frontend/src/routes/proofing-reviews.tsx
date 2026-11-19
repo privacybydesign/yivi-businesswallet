@@ -60,11 +60,11 @@ export default function ProofingReviews(): React.JSX.Element {
   const org = useOrganizationQuery(slug);
   const isAdmin = org.data?.role === "admin";
   const canReview = org.data?.canReview === true;
-  const waiting = useWaitingReviewsQuery(slug, { enabled: canReview });
+  const waiting = useWaitingReviewsQuery(slug, { enabled: true });
   const [searchParams] = useSearchParams();
   const tab = reviewTabFrom(searchParams.get(SHOW_PARAM));
   const waitingNow = waitingOldestFirst(waiting.data?.requests ?? []);
-  const itemCounts = useReviewItemCountsQuery(slug, { enabled: canReview });
+  const itemCounts = useReviewItemCountsQuery(slug, { enabled: true });
   const counts = itemCounts.data && reviewCounts(itemCounts.data);
   // What shows instead of the reviews to anyone without the right, and until
   // the org is known.

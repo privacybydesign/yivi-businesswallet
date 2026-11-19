@@ -50,7 +50,7 @@ func newSettingsResponse(slug string, s Settings) settingsResponse {
 		SessionTTLSeconds:      int(s.Session.SessionTTL.Seconds()),
 		DataRetentionDays:      s.Session.DataRetentionDays,
 		ErasureHandling:        s.Session.ErasureHandling,
-		Branding:               newBrandingResponse(slug, s),
+		Branding:               newBrandingResponse(s),
 		LegalRetention:         newLegalRetentionBody(s.LegalRetention),
 		AllowedRedirectOrigins: append([]string{}, s.RedirectOrigins...),
 	}
@@ -84,13 +84,22 @@ type updateSettingsRequest struct {
 }
 
 func (h *Handler) updateSettings(w http.ResponseWriter, r *http.Request) error {
+	settings, err := h.changeSettings(r)
+	if err != nil {
+		return err
+	}
+	return h.respondSettings(w, r, settings)
+}
+
+// changeSettings applies the updateSettingsRequest in r's body to its org.
+func (h *Handler) changeSettings(r *http.Request) (Settings, error) {
 	var body updateSettingsRequest
 	if err := decode(r, &body); err != nil {
-		return err
+		return Settings{}, err
 	}
 	if body.SessionTTLSeconds == nil && body.DataRetentionDays == nil && body.ErasureHandling == nil &&
 		body.LegalRetention == nil && body.AllowedRedirectOrigins == nil {
-		return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_body", Message: "nothing to update"}
+		return Settings{}, &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_body", Message: "nothing to update"}
 	}
 
 	change := SettingsChange{
@@ -100,7 +109,7 @@ func (h *Handler) updateSettings(w http.ResponseWriter, r *http.Request) error {
 	if body.LegalRetention != nil {
 		legal, err := decodeLegalRetention(body.LegalRetention)
 		if err != nil {
-			return err
+			return Settings{}, err
 		}
 		change.LegalRetention = &legal
 	}
@@ -110,10 +119,9 @@ func (h *Handler) updateSettings(w http.ResponseWriter, r *http.Request) error {
 	}
 	settings, err := h.service.UpdateSettings(r.Context(), orgFromRequest(r).ID, change)
 	if err != nil {
-		return mapError(err)
+		return Settings{}, mapError(err)
 	}
-
-	return h.respondSettings(w, r, settings)
+	return settings, nil
 }
 
 // decodeLegalRetention reads a legalRetention field: null is the zero value,

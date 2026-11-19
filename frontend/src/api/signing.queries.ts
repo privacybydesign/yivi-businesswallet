@@ -8,6 +8,7 @@ import type {
   InfiniteData,
   UseInfiniteQueryResult,
   UseMutationResult,
+  UseQueryOptions,
   UseQueryResult,
 } from "@tanstack/react-query";
 import {
@@ -16,6 +17,7 @@ import {
   createSigningRequest,
   declineExternalSign,
   declineSignRequest,
+  externalSigningEventsUrl,
   getExternalSigning,
   getPendingSigningRequests,
   getSigningAvailability,
@@ -36,6 +38,9 @@ import type {
   SigningRequestPage,
   SigningStart,
 } from "./signing";
+import { useEventStream } from "./event-stream";
+import { useOrgStreamConnected } from "./org-events";
+import { RARELY_CHANGING_STALE_TIME_MS } from "./stale-time";
 
 // While a request is awaiting the wallet ceremony the backend finishes it out of
 // band (the OAuth callback), so the page polls until it settles.
@@ -50,10 +55,38 @@ export function useSigningAvailabilityQuery(
   enabled = true,
 ): UseQueryResult<SigningAvailability, Error> {
   return useQuery({
-    queryKey: signingAvailabilityQueryKey(slug),
-    queryFn: ({ signal }) => getSigningAvailability(slug, signal),
+    ...signingAvailabilityQueryOptions(slug),
     enabled: enabled && slug !== "",
   });
+}
+
+// Shared by the hook and the route loader, so a prefetch fills the same entry.
+export function signingAvailabilityQueryOptions(
+  slug: string,
+): UseQueryOptions<SigningAvailability> {
+  return {
+    queryKey: signingAvailabilityQueryKey(slug),
+    queryFn: ({ signal }) => getSigningAvailability(slug, signal),
+    staleTime: RARELY_CHANGING_STALE_TIME_MS,
+  };
+}
+
+// Position of the read's name in a signing key, after the org's prefix.
+const SIGNING_READ_KEY_INDEX = 4;
+const REQUEST_READS: ReadonlySet<unknown> = new Set([
+  "request",
+  "pending",
+  "requests",
+]);
+
+// Matches the org's reads that a signing request moving can change.
+export function signingRequestReads(
+  slug: string,
+): (query: { queryKey: readonly unknown[] }) => boolean {
+  return ({ queryKey }) =>
+    queryKey[2] === slug &&
+    queryKey[3] === "signing" &&
+    REQUEST_READS.has(queryKey[SIGNING_READ_KEY_INDEX]);
 }
 
 export function signingCredentialQueryKey(slug: string): readonly string[] {
@@ -91,6 +124,7 @@ export function useSigningRequestQuery(
   id: string | null,
   myUserId?: string,
 ): UseQueryResult<SigningRequest, Error> {
+  const streaming = useOrgStreamConnected(slug);
   return useQuery({
     queryKey: signingRequestQueryKey(slug, id ?? ""),
     queryFn: ({ signal }) => getSigningRequest(slug, id!, signal),
@@ -100,9 +134,11 @@ export function useSigningRequestQuery(
     // signed — which can be days — so polling on the request status alone would never
     // stop. Once the caller's own signer entry is signed (or the request is completed
     // or failed), there is nothing left for this card to wait on.
+    // The org's event stream says when the request moves; the poll below is
+    // only the fallback while that stream is down.
     refetchInterval: (query) => {
       const data = query.state.data;
-      if (!data || data.status !== SIGNING_STATUS.awaitingSignatures) {
+      if (streaming || data?.status !== SIGNING_STATUS.awaitingSignatures) {
         return false;
       }
       const mine = myUserId
@@ -210,19 +246,38 @@ export function externalSigningQueryKey(token: string): readonly string[] {
   return ["signing", "external", token];
 }
 
+// What the external signee's stream sends (events.SigningRequest in the backend).
+const EXTERNAL_EVENT_KINDS = ["signing-request"] as const;
+
 export function useExternalSigningQuery(
   token: string,
 ): UseQueryResult<ExternalSigning, Error> {
+  const queryClient = useQueryClient();
+  // The signature is completed out of band (the OAuth callback); the request's
+  // stream says when, and when a co-signer signs.
+  const streaming = useEventStream(
+    token === "" ? null : externalSigningEventsUrl(token),
+    EXTERNAL_EVENT_KINDS,
+    () =>
+      void queryClient.invalidateQueries({
+        queryKey: externalSigningQueryKey(token),
+      }),
+  );
   return useQuery({
     queryKey: externalSigningQueryKey(token),
     queryFn: ({ signal }) => getExternalSigning(token, signal),
     enabled: token !== "",
-    // The signature is completed out of band (the OAuth callback), so poll until the
-    // request settles — the same reason the org page polls.
-    refetchInterval: (query) =>
-      query.state.data?.status === SIGNING_STATUS.awaitingSignatures
+    // The fallback while the stream is down: poll until this signee's own
+    // signature lands. Co-signers can take days, so the request status alone
+    // would never stop the poll.
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      return !streaming &&
+        data?.status === SIGNING_STATUS.awaitingSignatures &&
+        data.signerStatus !== SIGNER_STATUS.signed
         ? POLL_INTERVAL_MS
-        : false,
+        : false;
+    },
   });
 }
 

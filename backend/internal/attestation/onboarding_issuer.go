@@ -3,7 +3,6 @@ package attestation
 import (
 	"context"
 	"log/slog"
-	"maps"
 	"strings"
 
 	"github.com/google/uuid"
@@ -78,9 +77,11 @@ func (i *OnboardingIssuer) IssueOnboarding(ctx context.Context, m organization.O
 // attribute-source binding that resolves to a non-empty value for this member. An
 // unresolved binding falls back to the default (or is simply absent), mirroring
 // the wizard's precedence without inventing values.
-func resolveOnboardingAttributes(template Template, sources map[string]string) map[string]string {
-	attrs := make(map[string]string, len(template.DefaultAttributes)+len(template.AttributeSources))
-	maps.Copy(attrs, template.DefaultAttributes)
+func resolveOnboardingAttributes(template Template, sources map[string]string) map[string]any {
+	attrs := make(map[string]any, len(template.DefaultAttributes)+len(template.AttributeSources))
+	for key, value := range template.DefaultAttributes {
+		attrs[key] = value
+	}
 	for key, token := range template.AttributeSources {
 		if value := sources[token]; value != "" {
 			attrs[key] = value

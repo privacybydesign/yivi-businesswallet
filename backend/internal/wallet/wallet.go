@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/registryprovider"
 )
 
 var (
@@ -24,6 +25,8 @@ var (
 	ErrNotRepresentative = errors.New("wallet: requester is not a listed representative")
 	// ErrUnknownKVK means the KVK number is not in the register at all.
 	ErrUnknownKVK = errors.New("wallet: kvk number not found in the register")
+	// ErrEBWOIDMismatch means the EBWOID names another company than the register.
+	ErrEBWOIDMismatch = errors.New("wallet: owner identification data does not match the register")
 
 	ErrRepresentationNotFound = errors.New("wallet: representation not found")
 	// ErrNotImplemented marks scaffold seams not yet wired. Handlers map it to 501.
@@ -53,6 +56,19 @@ type Representation struct {
 	Claimed    bool       `json:"claimed"`
 	ClaimedAt  *time.Time `json:"claimedAt,omitempty"`
 	CreatedAt  time.Time  `json:"createdAt"`
+}
+
+// Registration is what RegisterOrganization writes: the org (under OrgID, the id
+// its holder engine already stores the EBWOID under), its first owner and the
+// register's attestation, with the identity taken from the EBWOID.
+type Registration struct {
+	OrgID             uuid.UUID
+	RequestorUserID   uuid.UUID
+	Slug              string
+	DigitalAddress    string
+	KVKContactAddress string
+	Attestation       registryprovider.RegistrationAttestation
+	EBWOID            registryprovider.HeldEBWOID
 }
 
 // RegistrationResult is the outcome of registering a wallet: the created

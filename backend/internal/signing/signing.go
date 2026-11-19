@@ -104,6 +104,9 @@ var (
 	ErrNotFound = errors.New("signing: signing request not found")
 	// ErrNotCompleted means the signed document is not ready yet.
 	ErrNotCompleted = errors.New("signing: signing request is not completed")
+	// ErrAuthorizationDenied means the signer came back from the provider without
+	// an authorization: they cancelled, or the provider refused them.
+	ErrAuthorizationDenied = errors.New("signing: the authorization was denied or cancelled")
 	// ErrSessionExpired means the authorization was not completed within SessionTTL.
 	ErrSessionExpired = errors.New("signing: authorization session expired")
 	// ErrInvalidPDF means the uploaded bytes are not a usable PDF.
@@ -270,12 +273,20 @@ type RecipientInput struct {
 
 // Request is the non-document view of a signing request.
 type Request struct {
-	ID               uuid.UUID  `json:"id"`
-	Status           string     `json:"status"`
-	Filename         string     `json:"filename"`
-	Mode             string     `json:"mode"`
-	CreatedBy        uuid.UUID  `json:"createdBy"`
-	CreatedByName    string     `json:"createdByName"`
+	ID            uuid.UUID `json:"id"`
+	Status        string    `json:"status"`
+	Filename      string    `json:"filename"`
+	Mode          string    `json:"mode"`
+	CreatedBy     uuid.UUID `json:"createdBy"`
+	CreatedByName string    `json:"createdByName"`
+	// CreatedVia is how the request was made: by a member in the wallet, or by the
+	// organisation's own software over the API (which leaves CreatedBy zero).
+	CreatedVia string `json:"createdVia"`
+	// NotifySigners is false for an API request whose caller hands out the signing
+	// links itself; no signee is then mailed, at create or when their turn comes.
+	NotifySigners bool `json:"-"`
+	// ReturnURL is where a signee's signing page sends them back to when done.
+	ReturnURL        string     `json:"returnUrl,omitempty"`
 	RecipientChannel string     `json:"recipientChannel"`
 	RecipientName    string     `json:"recipientName,omitempty"`
 	RecipientAddress string     `json:"recipientAddress,omitempty"`
@@ -286,6 +297,40 @@ type Request struct {
 	Signers          []Signer   `json:"signers"`
 	CreatedAt        time.Time  `json:"createdAt"`
 	CompletedAt      *time.Time `json:"completedAt,omitempty"`
+}
+
+// How a request was made (Request.CreatedVia).
+const (
+	CreatedViaMember = "member"
+	CreatedViaAPI    = "api"
+)
+
+// Origin is who made a request: a member in the wallet, or the organisation's own
+// software with one of its API keys.
+type Origin struct {
+	createdBy     *uuid.UUID
+	apiKeyID      *uuid.UUID
+	notifySigners bool
+	returnURL     string
+}
+
+// MemberOrigin is a request a member made in the wallet.
+func MemberOrigin(userID uuid.UUID) Origin {
+	return Origin{createdBy: &userID, notifySigners: true}
+}
+
+// APIOrigin is a request made with an API key. notifySigners false sends no mail:
+// the caller hands each signee their link. returnURL is where a signee's signing
+// page sends them back to; empty for none.
+func APIOrigin(apiKeyID uuid.UUID, notifySigners bool, returnURL string) Origin {
+	return Origin{apiKeyID: &apiKeyID, notifySigners: notifySigners, returnURL: returnURL}
+}
+
+func (o Origin) via() string {
+	if o.createdBy == nil {
+		return CreatedViaAPI
+	}
+	return CreatedViaMember
 }
 
 // Start is what StartLink/StartSign return to the frontend: the authorization URL
@@ -316,4 +361,7 @@ type ExternalView struct {
 	HasCredential bool      `json:"hasCredential"`
 	CanSign       bool      `json:"canSign"`
 	CreatedAt     time.Time `json:"createdAt"`
+	// ReturnURL is where the page sends the signee back to once they signed or
+	// declined: the site that sent them here. Empty for none.
+	ReturnURL string `json:"returnUrl,omitempty"`
 }

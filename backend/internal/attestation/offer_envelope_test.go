@@ -1,6 +1,7 @@
 package attestation_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/attestation"
@@ -42,5 +43,23 @@ func TestParseCredentialOfferEnvelopeRejectsNonOffer(t *testing.T) {
 				t.Errorf("expected %q not to parse as a credential offer", body)
 			}
 		})
+	}
+}
+
+func TestOfferDeclinedEnvelopeCarriesOnlyTheHash(t *testing.T) {
+	const offer = "openid-credential-offer://?credential_offer=secret"
+	body, err := attestation.MarshalOfferDeclinedEnvelope("Zonnedael B.V.", "VAT ID", offer)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(body, "secret") {
+		t.Fatalf("the decline leaks the offer deeplink: %s", body)
+	}
+	env, ok := attestation.ParseOfferDeclinedEnvelope(body)
+	if !ok || env.OfferHash != attestation.OfferHash(offer) {
+		t.Fatalf("parse = %+v, %v", env, ok)
+	}
+	if _, ok := attestation.ParseCredentialOfferEnvelope(body); ok {
+		t.Fatal("a decline parses as a credential offer")
 	}
 }

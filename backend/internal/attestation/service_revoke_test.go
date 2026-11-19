@@ -18,6 +18,7 @@ type fakeIssuer struct {
 	revoked      []string // credential uuids passed to RevokeCredential
 	revokeErr    error
 	lastInstance string
+	status       openid4vciissuer.IssuanceStatus
 }
 
 func (f *fakeIssuer) CreateOffer(context.Context, openid4vciissuer.OfferRequest) (openid4vciissuer.Offer, error) {
@@ -25,7 +26,7 @@ func (f *fakeIssuer) CreateOffer(context.Context, openid4vciissuer.OfferRequest)
 }
 
 func (f *fakeIssuer) Status(context.Context, string, string) (openid4vciissuer.IssuanceStatus, error) {
-	return openid4vciissuer.IssuanceStatus{}, nil
+	return f.status, nil
 }
 
 func (f *fakeIssuer) RevokeCredential(_ context.Context, instance, credentialUUID string) error {
@@ -75,8 +76,14 @@ func (s *fakeStore) SetOffer(context.Context, uuid.UUID, uuid.UUID, string, stri
 	return nil
 }
 func (s *fakeStore) MarkFailed(context.Context, uuid.UUID, uuid.UUID) error { return nil }
-func (s *fakeStore) MarkClaimed(context.Context, uuid.UUID, uuid.UUID, string) (Issued, error) {
-	return Issued{}, nil
+func (s *fakeStore) MarkClaimed(_ context.Context, _, _ uuid.UUID, credentialUUID string) (Issued, error) {
+	s.row.Status = StatusClaimed
+	s.row.CredentialUUID = credentialUUID
+	return s.row, nil
+}
+
+func (s *fakeStore) ListIssued(context.Context, uuid.UUID) ([]Issued, error) {
+	return []Issued{s.row}, nil
 }
 
 func (s *fakeStore) Cancel(context.Context, uuid.UUID, uuid.UUID) (Issued, error) {

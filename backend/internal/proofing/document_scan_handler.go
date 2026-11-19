@@ -88,6 +88,51 @@ func (h *Handler) hostedFinishDocumentScan(w http.ResponseWriter, r *http.Reques
 	return nil
 }
 
+// apiDocumentScanStartRequest is the language the scan service's page speaks,
+// named as the public API names a session's language.
+type apiDocumentScanStartRequest struct {
+	Language string `json:"language"`
+}
+
+// apiStartDocumentScan answers the scan service's page for an org that embeds
+// it in its own page. The body is optional.
+func (h *Handler) apiStartDocumentScan(w http.ResponseWriter, r *http.Request) error {
+	id, err := apiSessionID(r)
+	if err != nil {
+		return err
+	}
+	var body apiDocumentScanStartRequest
+	if r.ContentLength != 0 {
+		r.Body = http.MaxBytesReader(w, r.Body, maxFormBodyBytes)
+		if err := decode(r, &body); err != nil {
+			return err
+		}
+	}
+	url, err := h.service.APIStartDocumentScan(r.Context(), callerFromContext(r.Context()).Org.ID, id, body.Language)
+	if err != nil {
+		return mapError(err)
+	}
+	respond.JSON(w, r, http.StatusOK, documentScanStartResponse{URL: url})
+	return nil
+}
+
+func (h *Handler) apiFinishDocumentScan(w http.ResponseWriter, r *http.Request) error {
+	id, err := apiSessionID(r)
+	if err != nil {
+		return err
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxFormBodyBytes)
+	var body documentScanFinishRequest
+	if err := decode(r, &body); err != nil {
+		return err
+	}
+	if err := h.service.APIFinishDocumentScan(r.Context(), callerFromContext(r.Context()).Org.ID, id, body.TransactionID, body.ResultID); err != nil {
+		return mapError(err)
+	}
+	w.WriteHeader(http.StatusNoContent)
+	return nil
+}
+
 // documentScanState is a request's document photo as its page reads it:
 // pending until the photos reached the engine, done after; empty when its
 // flow takes none.

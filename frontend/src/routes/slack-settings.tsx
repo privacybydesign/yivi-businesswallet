@@ -10,6 +10,7 @@ import type { SlackSettings } from "../api/slack";
 import { ApiError } from "../api/http";
 import { Button, Card, Input } from "../ui";
 import * as React from "react";
+import { UnsavedChanges } from "./unsaved-changes";
 
 const CONFLICT_STATUS = 409;
 const BAD_GATEWAY_STATUS = 502;
@@ -106,8 +107,11 @@ function WebhookForm({
     save.mutate({ webhookUrl: "", enabled: false });
   }
 
+  const dirty = webhookUrl !== "" || enabled !== initial.enabled;
+
   return (
     <Card className="max-w-2xl p-7">
+      <UnsavedChanges dirty={dirty && !save.isPending} />
       <h2 className="text-[16px] font-semibold">
         {t("slackSettings.heading")}
       </h2>

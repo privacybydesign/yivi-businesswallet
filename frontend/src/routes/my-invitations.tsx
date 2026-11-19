@@ -13,8 +13,8 @@ import {
   useMyInvitationsQuery,
 } from "../api/invitations.queries";
 import {
-  myOrganizationsQueryKey,
-  organizationsQueryKey,
+  invalidateOrganizationLists,
+  organizationQueryKey,
 } from "../api/organization.queries";
 import {
   Avatar,
@@ -54,11 +54,10 @@ export default function MyInvitations(): React.JSX.Element {
       {
         onSuccess: (result) => {
           if (result.status === "accepted") {
+            void invalidateOrganizationLists(queryClient);
             void queryClient.invalidateQueries({
-              queryKey: myOrganizationsQueryKey,
-            });
-            void queryClient.invalidateQueries({
-              queryKey: organizationsQueryKey,
+              queryKey: organizationQueryKey(result.organizationSlug),
+              exact: true,
             });
             void navigate(`/${result.organizationSlug}`);
             return;

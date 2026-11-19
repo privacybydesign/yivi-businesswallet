@@ -94,6 +94,15 @@ const closedReviewOrder = `COALESCE(GREATEST(
 		(SELECT max(a.occurred_at) ` + identityReviewDecided + `)),
 	r.completed_at, r.created_at) DESC, r.created_at DESC`
 
+// waitingReview is a request r that waits for a reviewer: it reads
+// needs_review, or one of its steps has a pending review item. It is the four
+// lists the pages used to read one by one (?status=needs_review and
+// ?reviewKind=address, employment, diplomas), as one predicate.
+var waitingReview = `(` + effectiveStatusColumn + ` = 'needs_review'
+	OR ` + reviewItemMatches(`'address'`, `'pending'`) + `
+	OR ` + reviewItemMatches(`'employment'`, `'pending'`) + `
+	OR ` + reviewItemMatches(`'diplomas'`, `'pending'`) + `)`
+
 // reviewItemMatches is a request r with a review item of kind $k in state $s,
 // stored or its own review: the filter of RequestFilter.ReviewKind.
 func reviewItemMatches(k, s string) string {
@@ -166,15 +175,20 @@ func openReviewItem(ctx context.Context, q database.Querier, req Request, kind R
 // when it was decided: nil, and changes nothing, when none waits. The session
 // keeps its outcome.
 func (s *RequestStore) decideReviewItem(ctx context.Context, q database.Querier, req Request, kind ReviewKind,
-	reviewerID uuid.UUID, decided ReviewState, reason string,
+	by stepDecider, decided ReviewState, reason string,
 ) (*time.Time, error) {
+	// Someone deciding through an API key or a review link is no member.
+	var decidedBy *uuid.UUID
+	if by.ID != uuid.Nil {
+		decidedBy = &by.ID
+	}
 	var at time.Time
 	err := q.QueryRow(ctx, `UPDATE identity_proofing_review_items i
 		SET state = $3, decided_by = $4, decided_at = now(), reason = $5
 		FROM identity_proofing_requests r
 		WHERE r.id = i.request_id AND i.request_id = $1 AND i.kind = $2 AND i.state = 'pending' AND r.purged_at IS NULL
 		RETURNING i.decided_at`,
-		req.ID, string(kind), string(decided), reviewerID, reason).Scan(&at)
+		req.ID, string(kind), string(decided), decidedBy, reason).Scan(&at)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -184,14 +198,29 @@ func (s *RequestStore) decideReviewItem(ctx context.Context, q database.Querier,
 	if err := closeUncheckedDocuments(ctx, q, req.ID, kind); err != nil {
 		return nil, err
 	}
+	after := map[string]any{"kind": string(kind), "state": string(decided), "reason": reason}
+	if by.APIReviewer != "" {
+		after[auditReviewerKey] = by.APIReviewer
+	}
 	if err := s.audit.Record(ctx, q, audit.IdentityProofingReviewItemDecided,
 		audit.Target{Type: audit.TargetIdentityProofingRequest, ID: req.ID.String(), OrgID: &req.OrganizationID},
 		audit.Updated(req.auditFields(map[string]any{"kind": string(kind), "state": string(ReviewPending)}),
-			req.auditFields(map[string]any{"kind": string(kind), "state": string(decided), "reason": reason}))); err != nil {
+			req.auditFields(after))); err != nil {
 		return nil, err
 	}
 	return &at, nil
 }
+
+// stepDecider is who decides a review item: a member (ID), or a person the
+// org's API key or review link names (APIReviewer).
+type stepDecider struct {
+	ID          uuid.UUID
+	APIReviewer string
+}
+
+// auditReviewerKey holds, in a decision's audit event, the reviewer an API
+// key or review link named.
+const auditReviewerKey = "reviewer"
 
 // clearReviewItems drops req's waiting items at its purge, with the files
 // they wait on, and the reasons of its decided ones, which may name the
@@ -317,7 +346,7 @@ func (s *RequestStore) ReviewCounts(ctx context.Context, orgID uuid.UUID) (Revie
 			SELECT `+sessionReviewWaits+` AS own, `+sessionReviewKindColumn+` AS own_kind,
 				`+address+` AS address, `+employment+` AS employment, `+diplomas+` AS diplomas
 			FROM identity_proofing_requests r
-			WHERE r.organization_id = $1 AND r.purged_at IS NULL
+			WHERE r.organization_id = $1 AND r.purged_at IS NULL AND `+inOrgMode+`
 		)
 		SELECT count(*) FILTER (WHERE own AND own_kind = $4), count(*) FILTER (WHERE own AND own_kind = $5),
 			count(*) FILTER (WHERE address), count(*) FILTER (WHERE employment), count(*) FILTER (WHERE diplomas),
@@ -352,6 +381,8 @@ type ReviewItemInput struct {
 	// OwnAllowed lets the reviewer decide a check they sent or are the subject
 	// of (auth.SelfReview: a platform admin on a dev stack only).
 	OwnAllowed bool
+	// APIReviewer is ReviewInput.APIReviewer.
+	APIReviewer string
 }
 
 // DecideReviewItem decides request id's waiting item of kind: a step's item
@@ -365,11 +396,12 @@ func (s *Service) DecideReviewItem(ctx context.Context, orgID, id uuid.UUID, kin
 		}
 		return s.decideStepReview(ctx, orgID, id, kind, StepReviewInput{
 			Confirm: in.Confirm, Reason: in.Reason, ReviewerID: in.ReviewerID, Scope: in.Scope, OwnAllowed: in.OwnAllowed,
+			APIReviewer: in.APIReviewer,
 		})
 	}
 	return s.DecideReview(ctx, orgID, id, reviewer, ReviewInput{
 		Approve: in.Confirm, ErrorCode: in.ErrorCode, Reason: in.Reason, Kind: kind,
-		ReviewerID: in.ReviewerID, Scope: in.Scope, OwnAllowed: in.OwnAllowed,
+		ReviewerID: in.ReviewerID, Scope: in.Scope, OwnAllowed: in.OwnAllowed, APIReviewer: in.APIReviewer,
 	})
 }
 

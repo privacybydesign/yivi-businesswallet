@@ -24,8 +24,25 @@ func (h HandlerFunc) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if ClientGone(r) {
+		return
+	}
+
 	slog.ErrorContext(r.Context(), "unhandled handler error",
 		slog.String("error", err.Error()),
 	)
 	Error(w, r, http.StatusInternalServerError, internalErrorCode, internalErrorMsg)
+}
+
+// ClientGone reports that the page dropped the request (it navigated on, or a
+// newer read replaced this one), which fails whatever the handler was doing.
+// That is routine, not an error: nobody is left to answer, and logging it at
+// Error would pollute the severity tier you page on.
+func ClientGone(r *http.Request) bool {
+	if r.Context().Err() == nil {
+		return false
+	}
+	slog.DebugContext(r.Context(), "request dropped by the client",
+		slog.String("method", r.Method), slog.String("path", r.URL.Path))
+	return true
 }

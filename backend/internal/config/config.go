@@ -17,9 +17,20 @@ import (
 
 const (
 	envDatabaseURL = "DATABASE_URL"
-	envLogLevel    = "LOG_LEVEL"
-	envLogFormat   = "LOG_FORMAT"
-	envLogSource   = "LOG_SOURCE"
+	// How many connections the API's pool may open. Replicas times this, plus
+	// the lock pool and listeners, must stay under the server's max_connections.
+	envDatabaseMaxConns     = "DATABASE_MAX_CONNS"
+	defaultDatabaseMaxConns = "10"
+	// Connections kept apart for locks held across a whole operation, so their
+	// holders cannot starve the requests that do the work.
+	envDatabaseLockMaxConns     = "DATABASE_LOCK_MAX_CONNS"
+	defaultDatabaseLockMaxConns = "5"
+	// Longest a single statement may run before Postgres cancels it; 0 is no limit.
+	envDatabaseStatementTimeout     = "DATABASE_STATEMENT_TIMEOUT"
+	defaultDatabaseStatementTimeout = "30s"
+	envLogLevel                     = "LOG_LEVEL"
+	envLogFormat                    = "LOG_FORMAT"
+	envLogSource                    = "LOG_SOURCE"
 
 	envEudiVerifierURL             = "EUDI_VERIFIER_URL"
 	envEudiIssuerChain             = "EUDI_ISSUER_CHAIN"
@@ -226,11 +237,13 @@ const (
 	// rotated by different decisions, and one key per purpose keeps a rotation from
 	// taking out a capability nobody meant to touch.
 	envProvisioningEncryptionKey = "PROVISIONING_ENCRYPTION_KEY"
-	// CSC_ENCRYPTION_KEY (hex 32 bytes) encrypts the per-org CSC signing-provider
-	// client secret at rest. Its own key rather than sharing another: the two are
-	// rotated by different decisions, and one key per purpose keeps a rotation from
-	// taking out a capability nobody meant to touch. Without it an org cannot store
-	// a CSC client secret (internal/csc).
+	// CSC_ENCRYPTION_KEY (hex 32 bytes) seals what signing keeps at rest: the
+	// signing keys and certificate authority of the wallet's own signing service
+	// (internal/yivicsc), and the per-org client secret of any other CSC provider
+	// (internal/csc). Its own key rather than sharing another: the two are rotated
+	// by different decisions, and one key per purpose keeps a rotation from taking
+	// out a capability nobody meant to touch. Without it the wallet's own signing
+	// service is off and an org cannot store a CSC client secret.
 	envCSCEncryptionKey = "CSC_ENCRYPTION_KEY"
 	// SIGNING_OAUTH_ISSUER_INTERNAL overrides the OAuth issuer base the backend uses
 	// for its own server-side token exchange during the signing ceremony, when that
@@ -392,10 +405,13 @@ const (
 var eudiCredentialSchemes = []string{"pbdf-staging", "pbdf"}
 
 type Config struct {
-	DatabaseDSN string
-	LogLevel    string
-	LogFormat   string
-	LogSource   bool
+	DatabaseDSN              string
+	DatabaseMaxConns         int32
+	DatabaseLockMaxConns     int32
+	DatabaseStatementTimeout time.Duration
+	LogLevel                 string
+	LogFormat                string
+	LogSource                bool
 
 	EudiVerifierURL             string
 	EudiIssuerChain             string
@@ -706,6 +722,7 @@ func Load() (Config, error) {
 	// Each step reads and checks one group of settings, in this order, so the
 	// first misconfiguration found is the one reported.
 	for _, load := range []func(*Config) error{
+		loadDatabase,
 		loadEudiVerifier,
 		loadDurations,
 		loadRequesterCA,
@@ -717,8 +734,8 @@ func Load() (Config, error) {
 		loadPostGuard,
 		loadAttestationHolder,
 		loadURLs,
-		loadDevMode,
 		loadSigningRedirectURI,
+		loadDevMode,
 		loadTrustedProxies,
 	} {
 		if err := load(&cfg); err != nil {
@@ -1006,20 +1023,34 @@ func loadDevMode(c *Config) error {
 }
 
 // requireProductionSettings refuses, outside a local stack, plain http to
-// another machine for what the phone or a VOG check sends, and a stub in place
-// of a real check.
+// another machine for what the phone, a browser or a VOG check sends, a switch
+// that allows it, and a stub in place of a real check.
 func requireProductionSettings(c *Config) error {
 	// The Idem app sends chip data, selfies and liveness frames to the first
 	// two, the backend a member's VOG PDF to the third and the ID Scan key to
-	// the last: over the network only with https. Plain http to this machine never leaves it.
+	// the fourth; the rest are the wallet's own pages and callbacks and the
+	// address register: over the network only with https. Plain http to this
+	// machine never leaves it.
 	for key, raw := range map[string]string{
-		envIdentityProofingPublicURL: c.IdentityProofingPublicURL,
-		envRegulaFaceAPIPublicURL:    c.RegulaFaceAPIPublicURL,
-		envVogValidatorURL:           c.VogValidatorURL,
-		envIDScanAPIURL:              c.IDScanAPIURL,
+		envIdentityProofingPublicURL:   c.IdentityProofingPublicURL,
+		envRegulaFaceAPIPublicURL:      c.RegulaFaceAPIPublicURL,
+		envVogValidatorURL:             c.VogValidatorURL,
+		envIDScanAPIURL:                c.IDScanAPIURL,
+		envAppBaseURL:                  c.AppBaseURL,
+		envOpenID4VPRequesterPublicURL: c.OpenID4VPRequesterPublicURL,
+		envAddressLookupURL:            c.AddressLookupURL,
+		envSigningRedirectURI:          c.SigningRedirectURI,
 	} {
 		if raw != "" && !strings.HasPrefix(strings.ToLower(raw), "https://") && !localhostURL(raw) {
 			return fmt.Errorf("config: %s %q must be https outside %s=true (a local stack)", key, raw, envDevMode)
+		}
+	}
+	for key, insecure := range map[string]bool{
+		envOpenID4VPPresenterAllowInsecureHTTP: c.OpenID4VPPresenterAllowInsecureHTTP,
+		envAttestationHolderAllowInsecureHTTP:  c.AttestationHolderAllowInsecureHTTP,
+	} {
+		if insecure {
+			return fmt.Errorf("config: %s allows plain http and private addresses and needs %s=true (a local stack)", key, envDevMode)
 		}
 	}
 	for key, stubbed := range map[string]bool{
@@ -1028,6 +1059,7 @@ func requireProductionSettings(c *Config) error {
 		envDiplomaValidatorProvider:    c.DiplomaValidatorProvider == ProviderStub,
 		envEmploymentValidatorProvider: c.EmploymentValidatorProvider == ProviderStub,
 		envVogValidatorProvider:        c.VogValidatorProvider == ProviderStub,
+		envWalletUnitAttester:          c.WalletUnitAttester == ProviderStub,
 	} {
 		if stubbed {
 			return fmt.Errorf("config: %s stubs out a real check and needs %s=true (a local stack)", key, envDevMode)
@@ -1161,6 +1193,32 @@ func parseList(raw string) []string {
 		}
 	}
 	return out
+}
+
+func loadDatabase(c *Config) error {
+	var err error
+	if c.DatabaseMaxConns, err = parsePoolSize(envDatabaseMaxConns, defaultDatabaseMaxConns); err != nil {
+		return err
+	}
+	if c.DatabaseLockMaxConns, err = parsePoolSize(envDatabaseLockMaxConns, defaultDatabaseLockMaxConns); err != nil {
+		return err
+	}
+	if c.DatabaseStatementTimeout, err = parseDuration(envDatabaseStatementTimeout, defaultDatabaseStatementTimeout); err != nil {
+		return err
+	}
+	if c.DatabaseStatementTimeout < 0 {
+		return fmt.Errorf("config: %s must not be negative", envDatabaseStatementTimeout)
+	}
+	return nil
+}
+
+func parsePoolSize(key, fallback string) (int32, error) {
+	raw := envOrDefault(key, fallback)
+	n, err := strconv.ParseInt(raw, 10, 32)
+	if err != nil || n < 1 {
+		return 0, fmt.Errorf("config: %s %q must be a whole number of at least 1", key, raw)
+	}
+	return int32(n), nil
 }
 
 func envOrDefault(key, fallback string) string {

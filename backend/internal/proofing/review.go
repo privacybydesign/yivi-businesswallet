@@ -99,6 +99,9 @@ type ReviewInput struct {
 	// OwnAllowed lets the reviewer decide a check they sent or are the subject
 	// of (auth.SelfReview: a platform admin on a dev stack only).
 	OwnAllowed bool
+	// APIReviewer is the person deciding in the org's own system, named by an
+	// API key or a review link; empty for a member.
+	APIReviewer string
 }
 
 // ownReview reports whether reviewer is the one who sent req or its subject:
@@ -125,7 +128,7 @@ func (in ReviewInput) validate() error {
 		return fmt.Errorf("%w: an error code is only for a rejection", ErrInvalidInput)
 	case in.ErrorCode != "" && !reviewErrorCodePattern.MatchString(in.ErrorCode):
 		return fmt.Errorf("%w: an error code is 1-64 of A-Z, 0-9 and _", ErrInvalidInput)
-	case in.ReviewerID != uuid.Nil && in.ErrorCode != "" && !slices.Contains(reviewerRejectCodes, in.ErrorCode):
+	case (in.ReviewerID != uuid.Nil || in.APIReviewer != "") && in.ErrorCode != "" && !slices.Contains(reviewerRejectCodes, in.ErrorCode):
 		return fmt.Errorf("%w: a reviewer's error code is one of %s", ErrInvalidInput, strings.Join(reviewerRejectCodes, ", "))
 	}
 	return nil
@@ -191,7 +194,7 @@ func (s *Service) decideEngineReview(ctx context.Context, req Request, reviewer 
 	// The engine has decided: who decided and why is recorded even if the
 	// caller has gone, or the outcome would land as the system's.
 	ctx = context.WithoutCancel(ctx)
-	if err := s.requests.RecordReviewDecision(ctx, req, decided, in.Reason, in.ErrorCode); err != nil {
+	if err := s.requests.RecordReviewDecision(ctx, req, decided, in.Reason, in.ErrorCode, in.APIReviewer); err != nil {
 		return Request{}, err
 	}
 	// A failed read is logged; the engine's notice or the next read records the outcome.

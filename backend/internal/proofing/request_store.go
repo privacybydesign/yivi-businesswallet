@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math/bits"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -22,13 +23,23 @@ import (
 // RequestStore persists proofing requests. The engine session token is sealed
 // with the same deployment key as the org's API key.
 type RequestStore struct {
-	db     database.DB
+	db database.DB
+	// locks is where advisoryLock's long-held transactions run; db unless
+	// UseLockPool set a pool of their own.
+	locks  database.DB
 	audit  audit.Recorder
 	cipher *crypto.Cipher
 }
 
 func NewRequestStore(db database.DB, recorder audit.Recorder, cipher *crypto.Cipher) *RequestStore {
-	return &RequestStore{db: db, audit: recorder, cipher: cipher}
+	return &RequestStore{db: db, locks: db, audit: recorder, cipher: cipher}
+}
+
+// UseLockPool moves the locks held across a whole operation onto locks. Their
+// holder does its work on db, so sharing one pool lets enough holders starve
+// each other of the second connection they all wait for.
+func (s *RequestStore) UseLockPool(locks database.DB) {
+	s.locks = locks
 }
 
 // requestColumns is the SELECT list scanRequest reads, over requestFrom.
@@ -42,14 +53,18 @@ const requestColumns = `r.id, r.organization_id, r.requested_by,
 	r.subject_kind, r.proofed_name_ciphertext, st.data_retention_days, st.legal_retention_months,
 	r.api_key_id, COALESCE(k.name, ''), COALESCE(r.method, ''), COALESCE(r.yivi_transaction_id, ''),
 	COALESCE(r.required_assurance_level, ''), r.link_token_hash IS NOT NULL,
-	r.cancelled_at, r.purged_at, COALESCE(r.redirect_url, ''), COALESCE(r.language, ''), r.diplomas,
+	r.cancelled_at, COALESCE(r.cancelled_by, ''), r.purged_at, COALESCE(r.redirect_url, ''), COALESCE(r.language, ''), r.diplomas,
 	(SELECT min(d.created_at) FROM identity_proofing_request_diplomas d WHERE d.request_id = r.id),
 	r.expects_subject, r.expected_birth_date_ciphertext, r.flow_kind, r.data_export_until, r.data_matches_kept,
 	r.data_matches_held, r.data_held_until, r.retention_override_seconds, r.address, r.address_ciphertext, r.address_added_at,
 	` + stepReviewColumns + `,
 	r.employment, r.employment_ciphertext, r.employment_added_at, COALESCE(r.review_reason, ''),
 	r.document_scan, COALESCE(r.document_scan_transaction_id, ''), r.document_scanned_at, ` + purgeAtColumn + `,
-	` + sealChecksColumn
+	` + sealChecksColumn + `, r.test`
+
+// inOrgMode keeps a request r to the mode its org is in now: a test org sees
+// only its test requests, a live org only its real ones.
+const inOrgMode = `r.test = (SELECT o.test_mode FROM organizations o WHERE o.id = r.organization_id)`
 
 // purgeAtColumn is when a request is purged: purge_at, which every write to
 // its inputs stores (refreshPurgeAt), shown only once it settled. NULL while
@@ -242,12 +257,12 @@ func (s *RequestStore) scanRequest(row pgx.Row) (Request, error) {
 		&r.AssuranceLevel, &r.EIDASLevel, &r.ErrorCode, &r.CreatedAt, &r.UpdatedAt, &r.CompletedAt, &r.CheckedAt,
 		&sessionID, &tokenCT, &sessionExpiresAt, &sessionEndedAt, &sessionTTLSeconds, &r.SubjectUserID, &r.FlowVersion,
 		&r.SubjectKind, &nameCT, &retentionDays, &legalMonths, &r.APIKeyID, &r.APIKeyName, &r.Method, &r.yiviTransactionID,
-		&r.RequiredAssuranceLevel, &r.Hosted, &r.CancelledAt, &r.PurgedAt, &r.RedirectURL, &r.Language,
+		&r.RequiredAssuranceLevel, &r.Hosted, &r.CancelledAt, &r.CancelledBy, &r.PurgedAt, &r.RedirectURL, &r.Language,
 		&r.Diplomas, &r.DiplomasAddedAt, &r.ExpectsSubject, &birthDateCT, &r.FlowKind, &r.DataExportUntil, &r.DataMatchesKept,
 		&heldSessions, &heldUntil, &overrideSeconds,
 		&r.Address, &addressCT, &r.AddressAddedAt, &r.AddressReview, &r.AddressReviewedAt, &r.EmploymentReview, &r.EmploymentReviewedAt, &r.DiplomasReview, &r.DiplomasReviewedAt, &r.StepReviewDueAt, &r.IdentityReviewedAt, &r.Employment, &employmentCT, &r.EmploymentAddedAt, &r.ReviewReason,
 		&r.DocumentScan, &r.documentScanTransactionID, &r.DocumentScannedAt, &r.PurgeAt,
-		&sealChecksJSON); err != nil {
+		&sealChecksJSON, &r.Test); err != nil {
 		return Request{}, err
 	}
 	if err := readSealChecks(&r, sealChecksJSON); err != nil {
@@ -429,11 +444,11 @@ func (s *RequestStore) Create(ctx context.Context, in NewStoredRequest) (Request
 			 flow_id, flow_name, flow_version, link_expires_at, api_key_id, method, required_assurance_level,
 			 link_token_hash, redirect_url, language, diplomas, expects_subject, expected_birth_date_ciphertext,
 			 reference_photo_ciphertext, reference_photo_mime, flow_kind, retention_override_seconds, address, employment,
-			 document_scan)
+			 document_scan, test)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NULLIF($13, ''), NULLIF($14, ''),
 				$15, NULLIF($16, ''), NULLIF($17, ''), COALESCE(NULLIF($18, ''), 'off'),
 				$19, $20, $21, $22, COALESCE(NULLIF($23, ''), 'identity'), NULLIF($24, 0), COALESCE(NULLIF($25, ''), 'off'),
-				COALESCE(NULLIF($26, ''), 'off'), $27)`
+				COALESCE(NULLIF($26, ''), 'off'), $27, (SELECT test_mode FROM organizations WHERE id = $2))`
 		if _, err := q.Exec(ctx, insert, in.ID, in.OrgID, in.RequestedBy, in.Subject.UserID, string(in.Subject.Kind),
 			in.Subject.Name, in.Subject.Email, in.Flow.ID, in.Flow.Name, in.Flow.Version, in.LinkExpiresAt,
 			in.APIKeyID, string(in.Method), in.Flow.RequiredAssuranceLevel, in.LinkTokenHash,
@@ -688,10 +703,13 @@ func (s *RequestStore) NextDeadline(ctx context.Context, now time.Time) (time.Ti
 // RecordReviewDecision audits identity_proofing.review_decided: a member's
 // decision on a request under review, by the actor in ctx, with its reason.
 // The outcome itself lands as any other (RecordOutcome), once the engine settled it.
-func (s *RequestStore) RecordReviewDecision(ctx context.Context, req Request, decided Status, reason, errorCode string) error {
+func (s *RequestStore) RecordReviewDecision(ctx context.Context, req Request, decided Status, reason, errorCode, apiReviewer string) error {
 	fields := map[string]any{"decision": string(decided), "reason": reason}
 	if errorCode != "" {
 		fields["errorCode"] = errorCode
+	}
+	if apiReviewer != "" {
+		fields[auditReviewerKey] = apiReviewer
 	}
 	return database.InTx(ctx, s.db, func(q database.Querier) error {
 		if ok, err := lockUnpurged(ctx, q, req.ID); err != nil || !ok {
@@ -711,7 +729,7 @@ const reviewLockKey = "identity_proofing_review:"
 // decision's own writes on other connections never wait for. A second
 // decision waits, then finds the request decided.
 func (s *RequestStore) LockReview(ctx context.Context, id uuid.UUID) (func(), error) {
-	release, _, err := advisoryLock(ctx, s.db, reviewLockKey, id, true)
+	release, _, err := advisoryLock(ctx, s.locks, reviewLockKey, id, true)
 	return release, err
 }
 
@@ -829,7 +847,7 @@ func (s *RequestStore) GetBySession(ctx context.Context, sessionID string) (Requ
 
 // Get returns one of the org's requests, or ErrRequestNotFound.
 func (s *RequestStore) Get(ctx context.Context, orgID, id uuid.UUID) (Request, error) {
-	query := `SELECT ` + requestColumns + requestFrom + ` WHERE r.id = $1 AND r.organization_id = $2`
+	query := `SELECT ` + requestColumns + requestFrom + ` WHERE r.id = $1 AND r.organization_id = $2 AND ` + inOrgMode
 	req, err := s.scanRequest(s.db.QueryRow(ctx, query, id, orgID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Request{}, ErrRequestNotFound
@@ -840,9 +858,24 @@ func (s *RequestStore) Get(ctx context.Context, orgID, id uuid.UUID) (Request, e
 	return req, nil
 }
 
+// Reread reads req again whatever mode its org is in now, so a step under way
+// finishes on the request it holds; Get is for a caller looking one up.
+func (s *RequestStore) Reread(ctx context.Context, req Request) (Request, error) {
+	query := `SELECT ` + requestColumns + requestFrom + ` WHERE r.id = $1 AND r.organization_id = $2`
+	out, err := s.scanRequest(s.db.QueryRow(ctx, query, req.ID, req.OrganizationID))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Request{}, ErrRequestNotFound
+	}
+	if err != nil {
+		return Request{}, fmt.Errorf("proofing: reread request %s: %w", req.ID, err)
+	}
+	return out, nil
+}
+
 // SubjectKindOf returns whether the org's request went to a member or to an
 // external person, and the flow it runs, or ErrRequestNotFound.
 func (s *RequestStore) SubjectKindOf(ctx context.Context, orgID, id uuid.UUID) (kind SubjectKind, flowID string, err error) {
+	// The subject's page and app read it by link or session: not by the org's mode.
 	err = s.db.QueryRow(ctx, `SELECT subject_kind, flow_id FROM identity_proofing_requests
 		WHERE id = $1 AND organization_id = $2`, id, orgID).Scan(&kind, &flowID)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -858,7 +891,7 @@ func (s *RequestStore) SubjectKindOf(ctx context.Context, orgID, id uuid.UUID) (
 // what an API key reaches.
 func (s *RequestStore) GetExternal(ctx context.Context, orgID, id uuid.UUID) (Request, error) {
 	query := `SELECT ` + requestColumns + requestFrom + `
-		WHERE r.id = $1 AND r.organization_id = $2 AND r.subject_kind = 'external'`
+		WHERE r.id = $1 AND r.organization_id = $2 AND r.subject_kind = 'external' AND ` + inOrgMode
 	req, err := s.scanRequest(s.db.QueryRow(ctx, query, id, orgID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Request{}, ErrRequestNotFound
@@ -897,8 +930,13 @@ func (s *RequestStore) List(ctx context.Context, orgID uuid.UUID, filter Request
 	if filter.ClosedReviews {
 		closed, order = closedReview, closedReviewOrder
 	}
+	waiting := "TRUE"
+	if filter.WaitingReviews {
+		// When it went to review (completed_at), as waitingSince on the page.
+		waiting, order = waitingReview, `COALESCE(r.completed_at, r.created_at), r.created_at`
+	}
 	query := `SELECT ` + requestColumns + requestFrom + `
-		WHERE r.organization_id = $1 AND ($2::uuid IS NULL OR r.requested_by = $2)
+		WHERE r.organization_id = $1 AND ` + inOrgMode + ` AND ($2::uuid IS NULL OR r.requested_by = $2)
 			AND ($4::uuid IS NULL OR r.subject_user_id = $4)
 			AND ($5::text IS NULL OR r.subject_kind = $5)
 			AND ($6::text IS NULL OR r.flow_id = $6)
@@ -906,6 +944,7 @@ func (s *RequestStore) List(ctx context.Context, orgID uuid.UUID, filter Request
 			AND (NOT $8::boolean OR r.flow_kind IN ($9, $10))
 			AND ($11::text IS NULL OR ` + reviewItemMatches("$11", "$12") + `)
 			AND ` + closed + `
+			AND ` + waiting + `
 		ORDER BY ` + order + ` LIMIT $3`
 	rows, err := s.db.Query(ctx, query, orgID, filter.RequestedBy, maxListedRequests, filter.SubjectUserID, filter.SubjectKind,
 		filter.FlowID, filter.Status, filter.DataRequests, string(FlowDataAccess), string(FlowDataErasure), reviewKind, reviewState)
@@ -942,7 +981,7 @@ func (s *RequestStore) ListExternalPage(ctx context.Context, orgID uuid.UUID, af
 		afterAt, afterID = &after.CreatedAt, &after.ID
 	}
 	rows, err := s.db.Query(ctx, `SELECT `+requestColumns+requestFrom+`
-		WHERE r.organization_id = $1 AND r.subject_kind = 'external'
+		WHERE r.organization_id = $1 AND r.subject_kind = 'external' AND `+inOrgMode+`
 			AND ($2::timestamptz IS NULL OR (r.created_at, r.id) < ($2, $3::uuid))
 		ORDER BY r.created_at DESC, r.id DESC LIMIT $4`, orgID, afterAt, afterID, limit)
 	if err != nil {
@@ -1228,10 +1267,10 @@ func (s *RequestStore) Cancel(ctx context.Context, req Request, endSession func(
 		const cancellable = `id = $1 AND cancelled_at IS NULL AND purged_at IS NULL AND ips_session_ended_at IS NULL
 			AND status IN ('pending', 'in_progress')`
 		tag, err := q.Exec(ctx, `UPDATE identity_proofing_requests
-			SET cancelled_at = now(), ips_session_ended_at = COALESCE(ips_session_ended_at, now()),
+			SET cancelled_at = now(), cancelled_by = $3, ips_session_ended_at = COALESCE(ips_session_ended_at, now()),
 				reference_photo_ciphertext = NULL, reference_photo_mime = NULL,
 				expected_birth_date_ciphertext = NULL, updated_at = now()
-			WHERE `+cancellable+` AND ips_session_id IS NOT DISTINCT FROM $2`, req.ID, sessionID)
+			WHERE `+cancellable+` AND ips_session_id IS NOT DISTINCT FROM $2`, req.ID, sessionID, cancelledByOf(ctx))
 		if err != nil {
 			return fmt.Errorf("proofing: cancel request %s: %w", req.ID, err)
 		}
@@ -1261,8 +1300,11 @@ func (s *RequestStore) Cancel(ctx context.Context, req Request, endSession func(
 				req.auditFields(map[string]any{"status": string(StatusCancelled)}))); err != nil {
 			return err
 		}
-		return enqueueRequestWebhook(ctx, q, req, EventSessionCancelled,
-			sessionEventData(req, StatusCancelled))
+		data := sessionEventData(req, StatusCancelled)
+		if by := cancelledByOf(ctx); by != nil {
+			data["cancelledBy"] = string(*by)
+		}
+		return enqueueRequestWebhook(ctx, q, req, EventSessionCancelled, data)
 	})
 	return done, err
 }
@@ -1612,7 +1654,7 @@ func (s *RequestStore) ClearExpiredProofedNames(ctx context.Context) (int64, err
 // needs_review, not erased, its session not ended.
 func (s *RequestStore) ListOpenReviews(ctx context.Context, orgID uuid.UUID) ([]Request, error) {
 	return s.scanAll(ctx, `SELECT `+requestColumns+requestFrom+`
-		WHERE r.organization_id = $1 AND `+openReviewWhere+`
+		WHERE r.organization_id = $1 AND `+inOrgMode+` AND `+openReviewWhere+`
 		ORDER BY r.created_at`, orgID)
 }
 
@@ -1643,7 +1685,7 @@ func (s *RequestStore) scanAll(ctx context.Context, query string, args ...any) (
 // exactly when Request.EffectiveStatus reads it so, and as last reconciled: an outcome the engine holds but no list read picked up yet is not in
 // it.
 func (s *RequestStore) Stats(ctx context.Context, orgID uuid.UUID, requestedBy *uuid.UUID, since time.Time) ([]StatsRow, error) {
-	const query = `SELECT flow_id, count(*),
+	const query = `SELECT r.flow_id, count(*),
 			count(*) FILTER (WHERE status = $4),
 			count(*) FILTER (WHERE status = $5),
 			count(*) FILTER (WHERE status = $6 AND ips_session_ended_at IS NULL),
@@ -1653,11 +1695,11 @@ func (s *RequestStore) Stats(ctx context.Context, orgID uuid.UUID, requestedBy *
 					OR (ips_session_id IS NOT NULL
 						AND (ips_session_expires_at IS NULL OR ips_session_expires_at <= now())))))),
 			count(*) FILTER (WHERE status NOT IN ($4, $5) AND cancelled_at IS NOT NULL)
-		FROM identity_proofing_requests
-		WHERE organization_id = $1 AND subject_kind = 'external'
-			AND ($2::uuid IS NULL OR requested_by = $2) AND created_at >= $3
-		GROUP BY flow_id
-		ORDER BY flow_id`
+		FROM identity_proofing_requests r
+		WHERE r.organization_id = $1 AND r.subject_kind = 'external' AND ` + inOrgMode + `
+			AND ($2::uuid IS NULL OR r.requested_by = $2) AND r.created_at >= $3
+		GROUP BY r.flow_id
+		ORDER BY r.flow_id`
 	rows, err := s.db.Query(ctx, query, orgID, requestedBy, since,
 		StatusApproved, StatusRejected, StatusNeedsReview)
 	if err != nil {
@@ -1672,4 +1714,23 @@ func (s *RequestStore) Stats(ctx context.Context, orgID uuid.UUID, requestedBy *
 		return nil, fmt.Errorf("proofing: stats org %s: %w", orgID, err)
 	}
 	return out, nil
+}
+
+// cancelledByOf is who ctx's actor is as a canceller; nil for none.
+func cancelledByOf(ctx context.Context) *CancelledBy {
+	actor, ok := audit.ActorFromContext(ctx)
+	var by CancelledBy
+	switch {
+	case !ok:
+		return nil
+	case actor.UserID != uuid.Nil:
+		by = CancelledByMember
+	case actor.Label == hostedSubjectActor.Label:
+		by = CancelledBySubject
+	case strings.HasPrefix(actor.Label, APIKeyActorPrefix):
+		by = CancelledByAPIKey
+	default:
+		return nil
+	}
+	return &by
 }

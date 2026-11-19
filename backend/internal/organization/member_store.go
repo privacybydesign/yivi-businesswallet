@@ -179,6 +179,17 @@ func memberOrderBy(sort string, desc bool) string {
 	return strings.Join(parts, ", ")
 }
 
+// MemberStatusTotals counts the org's active members and open invitations, as
+// the member list's own statuses, whatever filter or search the list has.
+func (s *Store) MemberStatusTotals(ctx context.Context, orgID uuid.UUID) (active, invited int, err error) {
+	const totals = `
+SELECT count(*) FILTER (WHERE status = 'active'), count(*) FILTER (WHERE status = 'invited') FROM entries`
+	if err := s.db.QueryRow(ctx, memberEntriesCTE+totals, orgID, "").Scan(&active, &invited); err != nil {
+		return 0, 0, fmt.Errorf("organization: member status totals org %s: %w", orgID, err)
+	}
+	return active, invited, nil
+}
+
 func (s *Store) ListMemberEntries(ctx context.Context, orgID uuid.UUID, p MemberListParams) ([]MemberEntry, int, error) {
 	var pattern *string
 	if p.Search != "" {

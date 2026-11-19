@@ -175,7 +175,7 @@ func TestSummaryKeyAttestation(t *testing.T) {
 			if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 				t.Fatal(err)
 			}
-			if has := got["keyAttestation"] != nil; has != tc.wantSKA {
+			if (got["keyAttestation"] != nil) != tc.wantSKA {
 				t.Errorf("keyAttestation = %v, want present %v", got["keyAttestation"], tc.wantSKA)
 			}
 		})

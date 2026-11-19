@@ -63,8 +63,8 @@ import {
   proofingRejectionReason,
   dataRequestRefusal,
   reasonIn,
-  secondsUntil,
   sessionStage,
+  sessionStep,
   sessionView,
   pollFailedForGood,
   verifyErrorMessage,
@@ -75,6 +75,7 @@ import type {
 } from "../lib/identity-proofing";
 import { useDateFormatter, useMonthFormatter } from "../lib/format-when";
 import { useDebouncedValue } from "../lib/use-debounced-value";
+import { useSecondsLeft } from "../lib/use-seconds-left";
 import { legalReasonIn } from "../lib/legal-retention";
 import {
   PERSON_STEP_TONES,
@@ -108,7 +109,6 @@ const LINK_BUTTON =
 const STEP_HEADING = "text-ink text-[22px] leading-[30px] font-bold";
 
 const QR_SIZE = 240;
-const COUNTDOWN_TICK_MS = 1000;
 
 // Who asks: the org as the steps show it, with its branding.
 export interface VerifyOrg {
@@ -653,101 +653,103 @@ export function Session({
     </div>
   );
 
-  if (askAddress && current.addressUntil !== undefined) {
-    return (
-      <AddressStep
-        target={target}
-        until={current.addressUntil}
-        inReview={inReview}
-        onDone={() => setAddressDone(true)}
-      />
-    );
-  }
   // The statement is still to give, or was just kept on this page.
   const statementAsked =
     employmentMode !== "off" && employmentUntil !== undefined;
   const documentsUntil = current.diplomasUntil ?? employmentUntil;
-  if (askDocuments && documentsUntil !== undefined) {
-    return (
-      <DocumentStep
-        target={target}
-        until={documentsUntil}
-        diplomasAsked={
-          diplomaMode !== "off" && current.diplomasUntil !== undefined
-        }
-        statementAsked={statementAsked}
-        initialDiplomas={diplomas}
-        initialUnchecked={current.uncheckedDiplomas ?? 0}
-        inReview={inReview}
-        settling={documentsDone}
-        onKept={() => setKeptUntil(employmentUntil)}
-        onDone={() => {
-          setDocumentsDone(true);
-          // What was read before the statement is not handed back: a kept
-          // one can open a review, and none rejects the session.
-          if (statementAsked) void progress.refetch();
-        }}
-      />
-    );
-  }
-  if (over) {
-    return <>{renderEnded(current)}</>;
-  }
-  if (showsOutcome) {
-    return (
-      <SessionOutcome
-        progress={current}
-        actions={outcomeActions}
-        dataRequest={dataRequest}
-      />
-    );
-  }
-
-  // The app is chosen first: it gives the QR code, and the ID scan follows.
-  if (chosen === "pending") {
-    return (
-      <MethodChoice
-        methods={methods}
-        yiviPersonalData={yiviPersonalData}
-        picked={picked ?? chosen}
-        onChoose={(app) => {
-          setPicked(app);
-          choose.mutate(app, {
-            onSuccess: (out) => {
-              setAppLink({
-                deepLink: out.deepLink,
-                expiresAt: out.deepLinkExpiresAt,
-              });
-              setLink(out.deepLink);
-              setChosen(app);
-              onMethod?.(app);
-            },
-          });
-        }}
-        starting={choose.isPending}
-        error={
-          choose.isError
-            ? verifyErrorMessage(target, choose.error, t)
-            : undefined
-        }
-      />
-    );
-  }
-
-  // The ID scan follows the app's part, in the browser.
-  if (scanning) {
-    return (
-      <DocumentScanStep target={target} sessionSecondsLeft={secondsLeft} />
-    );
-  }
-
-  // With no app, the photo decides the session: its outcome is on its way.
-  if (chosen === "browser") {
-    return (
-      <p className={`${HINT} text-center`}>
-        {t("identityProofing.onScreen.documentScan.finishing")}
-      </p>
-    );
+  const step = sessionStep({
+    view,
+    status: current.status,
+    method: chosen,
+    scanning,
+  });
+  switch (step) {
+    case "address":
+      return (
+        <AddressStep
+          target={target}
+          // sessionView names this step only once the window is known.
+          until={current.addressUntil ?? ""}
+          inReview={inReview}
+          onDone={() => setAddressDone(true)}
+        />
+      );
+    case "documents":
+      return (
+        <DocumentStep
+          target={target}
+          // sessionView names this step only once a window is known.
+          until={documentsUntil ?? ""}
+          diplomasAsked={
+            diplomaMode !== "off" && current.diplomasUntil !== undefined
+          }
+          statementAsked={statementAsked}
+          initialDiplomas={diplomas}
+          initialUnchecked={current.uncheckedDiplomas ?? 0}
+          inReview={inReview}
+          settling={documentsDone}
+          onKept={() => setKeptUntil(employmentUntil)}
+          onDone={() => {
+            setDocumentsDone(true);
+            // What was read before the statement is not handed back: a kept
+            // one can open a review, and none rejects the session.
+            if (statementAsked) void progress.refetch();
+          }}
+        />
+      );
+    case "ended":
+      return <>{renderEnded(current)}</>;
+    case "outcome":
+      return (
+        <SessionOutcome
+          progress={current}
+          actions={outcomeActions}
+          dataRequest={dataRequest}
+        />
+      );
+    // The app is chosen first: it gives the QR code, and the ID scan follows.
+    case "method":
+      return (
+        <MethodChoice
+          methods={methods}
+          yiviPersonalData={yiviPersonalData}
+          picked={picked ?? chosen}
+          onChoose={(app) => {
+            setPicked(app);
+            choose.mutate(app, {
+              onSuccess: (out) => {
+                setAppLink({
+                  deepLink: out.deepLink,
+                  expiresAt: out.deepLinkExpiresAt,
+                });
+                setLink(out.deepLink);
+                setChosen(app);
+                onMethod?.(app);
+              },
+            });
+          }}
+          starting={choose.isPending}
+          error={
+            choose.isError
+              ? verifyErrorMessage(target, choose.error, t)
+              : undefined
+          }
+        />
+      );
+    // The ID scan follows the app's part, in the browser.
+    case "scan":
+      return (
+        <DocumentScanStep target={target} sessionSecondsLeft={secondsLeft} />
+      );
+    // With no app, the photo decides the session: its outcome is on its way.
+    case "finishing":
+      return (
+        <p className={`${HINT} text-center`}>
+          {t("identityProofing.onScreen.documentScan.finishing")}
+        </p>
+      );
+    case "app":
+      break;
   }
 
   // The page's own link, which lasts the session: the hosted page's view,
@@ -2119,7 +2121,7 @@ function Failed({
   );
 }
 
-function Countdown({
+export function Countdown({
   seconds,
 }: Readonly<{ seconds: number }>): React.JSX.Element {
   const { t } = useTranslation();
@@ -2135,7 +2137,9 @@ function Countdown({
   );
 }
 
-function QrCode({ value }: Readonly<{ value: string }>): React.JSX.Element {
+export function QrCode({
+  value,
+}: Readonly<{ value: string }>): React.JSX.Element {
   const [dataUrl, setDataUrl] = useState("");
   useEffect(() => {
     let cancelled = false;
@@ -2187,15 +2191,4 @@ function QrPlaceholder({
       {label && <span className="text-[13px]">{label}</span>}
     </div>
   );
-}
-
-// Seconds left until expiresAt, re-read every second; 0 without one.
-function useSecondsLeft(expiresAt: string | undefined): number {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (expiresAt === undefined) return;
-    const timer = setInterval(() => setNow(Date.now()), COUNTDOWN_TICK_MS);
-    return () => clearInterval(timer);
-  }, [expiresAt]);
-  return expiresAt === undefined ? 0 : secondsUntil(expiresAt, now);
 }

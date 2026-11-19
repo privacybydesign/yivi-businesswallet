@@ -482,7 +482,10 @@ func TestLoadSensitiveURLsNeedHTTPS(t *testing.T) {
 		"http://proofing.example.org":  false,
 		"http://192.168.1.20:8080":     false,
 	} {
-		for _, key := range []string{envIdentityProofingPublicURL, envRegulaFaceAPIPublicURL, envVogValidatorURL, envIDScanAPIURL} {
+		for _, key := range []string{
+			envIdentityProofingPublicURL, envRegulaFaceAPIPublicURL, envVogValidatorURL, envIDScanAPIURL,
+			envAppBaseURL, envOpenID4VPRequesterPublicURL, envAddressLookupURL, envSigningRedirectURI,
+		} {
 			t.Run(key+"="+raw, func(t *testing.T) {
 				if _, err := loadWith(t, map[string]string{key: raw}); (err == nil) != ok {
 					t.Errorf("%s=%s: %v, want ok %v", key, raw, err, ok)
@@ -497,6 +500,21 @@ func TestLoadSensitiveURLsNeedHTTPS(t *testing.T) {
 			t.Errorf("%v, want it loaded", err)
 		}
 	})
+}
+
+// The switches that allow plain http and private addresses run only on a
+// local stack.
+func TestLoadInsecureHTTPSwitchesNeedDevMode(t *testing.T) {
+	for _, key := range []string{envOpenID4VPPresenterAllowInsecureHTTP, envAttestationHolderAllowInsecureHTTP} {
+		t.Run(key, func(t *testing.T) {
+			if _, err := loadWith(t, map[string]string{key: "true"}); err == nil {
+				t.Errorf("%s=true outside a local stack loaded, want an error", key)
+			}
+			if _, err := loadWith(t, map[string]string{key: "true", envDevMode: "true", envAppBaseURL: localStack}); err != nil {
+				t.Errorf("%s=true on a local stack: %v, want it loaded", key, err)
+			}
+		})
+	}
 }
 
 // The Idem App Link is https with a host and nothing appended, even on a local
@@ -551,6 +569,7 @@ func TestLoadStubsNeedDevMode(t *testing.T) {
 		envDiplomaValidatorProvider:    {envDiplomaValidatorProvider: ProviderStub},
 		envEmploymentValidatorProvider: {envEmploymentValidatorProvider: ProviderStub},
 		envVogValidatorProvider:        {envVogValidatorProvider: ProviderStub},
+		envWalletUnitAttester:          {envWalletUnitAttester: ProviderStub},
 	} {
 		t.Run(name+" without", func(t *testing.T) {
 			if _, err := loadWith(t, env); err == nil {
@@ -588,7 +607,7 @@ func TestLoadWalletUnitAttester(t *testing.T) {
 	if cfg.WalletUnitAttester != WalletUnitAttesterLocal {
 		t.Errorf("default attester = %q, want %q", cfg.WalletUnitAttester, WalletUnitAttesterLocal)
 	}
-	cfg, err = loadWith(t, map[string]string{envWalletUnitAttester: ProviderStub})
+	cfg, err = loadWith(t, map[string]string{envWalletUnitAttester: ProviderStub, envDevMode: "true", envAppBaseURL: localStack})
 	if err != nil {
 		t.Fatalf("Load stub: %v", err)
 	}

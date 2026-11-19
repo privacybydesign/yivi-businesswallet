@@ -18,6 +18,8 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/auth"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/diploma"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/email"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/events"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/idscan"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingprovider"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/ratelimit"
@@ -58,8 +60,9 @@ type Handler struct {
 	// appBranding dresses the hosted page as the Idem app dresses the
 	// session; nil leaves the page the org's own colour only.
 	appBranding *AppBrandingResolver
-	// reviews tells a reviewer's open pages when the org's reviews change.
-	reviews *ReviewFeed
+	// events tells a hosted page when its request moves; nil leaves it to its
+	// own slow polling.
+	events *events.Hub
 	// selfReview is who may decide their own identity check.
 	selfReview auth.SelfReview
 }
@@ -76,9 +79,8 @@ func (h *Handler) SetAppBranding(r *AppBrandingResolver) { h.appBranding = r }
 // subject of.
 func (h *Handler) SetSelfReview(s auth.SelfReview) { h.selfReview = s }
 
-// SetReviewFeed streams the org's review changes from f; without it a stream
-// stays open and quiet.
-func (h *Handler) SetReviewFeed(f *ReviewFeed) { h.reviews = f }
+// SetEvents streams a hosted page's request changes from hub.
+func (h *Handler) SetEvents(hub *events.Hub) { h.events = hub }
 
 func NewHandler(service *Service, requireUser, authorize func(http.Handler) http.Handler) *Handler {
 	return &Handler{
@@ -87,7 +89,6 @@ func NewHandler(service *Service, requireUser, authorize func(http.Handler) http
 		hostedCalls:  ratelimit.New(hostedCallLimit),
 		authFailures: newAuthFailures(), hostedSources: ratelimit.New(hostedSourceLimit),
 		webhookTests: ratelimit.New(webhookTestLimit), staleLinks: ratelimit.New(staleLinkLimit),
-		reviews: NewReviewFeed(),
 	}
 }
 
@@ -127,7 +128,6 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("GET /orgs/{slug}/identity-proofing/overview", member(respond.HandlerFunc(h.overview)))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/requests", member(respond.HandlerFunc(h.createRequest)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/stats", member(respond.HandlerFunc(h.stats)))
-	mux.Handle("GET /orgs/{slug}/identity-proofing/reviews/events", reviewer(respond.HandlerFunc(h.reviewEvents)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/requests/{requestID}", member(respond.HandlerFunc(h.getRequest)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/requests/{requestID}/events", member(respond.HandlerFunc(h.requestEvents)))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/yivi/start", member(respond.HandlerFunc(h.startYivi)))
@@ -144,7 +144,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("GET /orgs/{slug}/identity-proofing/requests/{requestID}/address/lookup", member(respond.HandlerFunc(h.lookUpAddress)))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/review-items/{kind}", reviewer(respond.HandlerFunc(h.decideReviewItem)))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/review-items/{kind}/seal-check", reviewer(respond.HandlerFunc(h.checkSealsAgain)))
-	mux.Handle("GET /orgs/{slug}/identity-proofing/review-items/counts", reviewer(respond.HandlerFunc(h.reviewItemCounts)))
+	mux.Handle("GET /orgs/{slug}/identity-proofing/review-items/counts", member(respond.HandlerFunc(h.reviewItemCounts)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/review-items/closed", reviewer(respond.HandlerFunc(h.closedReviews)))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/review", reviewer(respond.HandlerFunc(h.decideReview)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/requests/{requestID}/result", reviewer(respond.HandlerFunc(h.requestResult)))
@@ -153,10 +153,11 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("GET /orgs/{slug}/identity-proofing/settings", member(respond.HandlerFunc(h.getSettings)))
 	mux.Handle("PATCH /orgs/{slug}/identity-proofing/settings", admin(respond.HandlerFunc(h.updateSettings)))
 	mux.Handle("PUT /orgs/{slug}/identity-proofing/settings/branding", admin(respond.HandlerFunc(h.saveBranding)))
-	mux.Handle("GET /orgs/{slug}/identity-proofing/settings/logo", member(respond.HandlerFunc(h.serveLogo)))
+	mux.Handle("POST /orgs/{slug}/identity-proofing/settings/branding/mail-preview", admin(respond.HandlerFunc(h.previewBrandingMail)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/api-keys", admin(respond.HandlerFunc(h.listAPIKeys)))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/api-keys", admin(respond.HandlerFunc(h.createAPIKey)))
 	mux.Handle("DELETE /orgs/{slug}/identity-proofing/api-keys/{keyID}", admin(respond.HandlerFunc(h.revokeAPIKey)))
+	mux.Handle("GET /orgs/{slug}/identity-proofing/api-keys/{keyID}/secret", admin(respond.HandlerFunc(h.revealAPIKey)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/webhook", admin(respond.HandlerFunc(h.getWebhook)))
 	mux.Handle("PUT /orgs/{slug}/identity-proofing/webhook", admin(respond.HandlerFunc(h.saveWebhook)))
 	mux.Handle("DELETE /orgs/{slug}/identity-proofing/webhook", admin(respond.HandlerFunc(h.removeWebhook)))
@@ -164,11 +165,18 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("POST /orgs/{slug}/identity-proofing/webhook/test", admin(respond.HandlerFunc(h.testWebhook)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/webhook/deliveries", admin(respond.HandlerFunc(h.listWebhookDeliveries)))
 	h.registerPublicAPI(mux)
+	h.registerPublicSetupAPI(mux)
+	h.registerPublicReviewAPI(mux)
+	h.registerReviewLinks(mux)
 	h.registerHosted(mux)
 	h.registerPause(mux)
 }
 
 func orgFromRequest(r *http.Request) Org {
+	// An API key acts for its own org, on the routes it shares with an admin.
+	if caller, ok := r.Context().Value(apiCallerKey{}).(APIKeyCaller); ok {
+		return caller.Org
+	}
 	org := organization.OrgFromContext(r.Context())
 	return Org{ID: org.ID, Name: org.Name}
 }
@@ -401,6 +409,8 @@ type requestResponse struct {
 	// ExpectedSubject is a request for one known person: only subjectName,
 	// born on the date it was sent with, is approved.
 	ExpectedSubject bool `json:"expectedSubject"`
+	// Test is a request made while the org was in test mode.
+	Test bool `json:"test,omitempty"`
 	// ReviewReason is why the kept Verzekeringsbericht went to review
 	// (no_current_employment, current_benefit, current_other_income); absent
 	// otherwise. EmploymentReview is where that review stands, and
@@ -457,7 +467,7 @@ func newRequestResponse(req Request, now time.Time) requestResponse {
 		FlowID: req.FlowID, FlowName: req.FlowName, FlowVersion: req.FlowVersion, Method: string(req.Method), Status: req.EffectiveStatus(now),
 		AssuranceLevel: req.AssuranceLevel, EIDASLevel: req.EIDASLevel, ErrorCode: req.ErrorCode,
 		LinkExpiresAt: req.LinkExpiresAt, CreatedAt: req.CreatedAt, CompletedAt: req.CompletedAt,
-		PurgeAt: req.PurgeAt, PurgedAt: req.PurgedAt, ExpectedSubject: req.ExpectsSubject, DocumentScan: documentScanState(req),
+		PurgeAt: req.PurgeAt, PurgedAt: req.PurgedAt, ExpectedSubject: req.ExpectsSubject, Test: req.Test, DocumentScan: documentScanState(req),
 		AppDone:      req.appDone,
 		ReviewReason: req.ReviewReason, EmploymentReview: req.EmploymentReview, EmploymentReviewedAt: req.EmploymentReviewedAt,
 		DiplomasReview: req.DiplomasReview, DiplomasReviewedAt: req.DiplomasReviewedAt,
@@ -546,8 +556,14 @@ func (h *Handler) listedResponses(ctx context.Context, reqs []Request) ([]reques
 // its proofed name, and without its address, employment and diplomas unless
 // they review that step: deciding a step needs only the step.
 func requestResponseFor(ctx context.Context, req Request, diplomas []Diploma, now time.Time) requestResponse {
+	return requestResponseLimited(req, diplomas, now, onlyStepReviews(ctx, req))
+}
+
+// requestResponseLimited is req's response, holding only its steps' reviews
+// when stepsOnly (requestResponseFor).
+func requestResponseLimited(req Request, diplomas []Diploma, now time.Time, stepsOnly bool) requestResponse {
 	out := newRequestResponse(req, now)
-	if onlyStepReviews(ctx, req) {
+	if stepsOnly {
 		out.ProofedName = ""
 		if req.AddressReview == "" {
 			out.Address = nil
@@ -613,6 +629,7 @@ func requestFilterFrom(query url.Values) (RequestFilter, error) {
 	if err := reviewFilterFrom(query, &filter); err != nil {
 		return RequestFilter{}, err
 	}
+	filter.WaitingReviews = query.Get("waiting") == "true"
 	return filter, nil
 }
 
@@ -641,8 +658,9 @@ func reviewFilterFrom(query url.Values, filter *RequestFilter) error {
 // listsEveryRequest reports whether the caller lists the org's requests whoever
 // sent them: an admin always, a reviewer only a list ReviewScopeReviews holds
 // whole, the requests waiting for review (?status=needs_review) or the data
-// requests (?flowKind=data_request), or the review items of a kind, waiting
-// or decided (?reviewKind=). Any other list is the ones they sent.
+// requests (?flowKind=data_request), the review items of a kind, waiting or
+// decided (?reviewKind=), or everything that waits (?waiting=true). Any other
+// list is the ones they sent.
 func listsEveryRequest(ctx context.Context, filter RequestFilter) bool {
 	if organization.ActsAsAdmin(ctx) {
 		return true
@@ -651,7 +669,7 @@ func listsEveryRequest(ctx context.Context, filter RequestFilter) bool {
 		return false
 	}
 	return filter.DataRequests || (filter.Status != nil && *filter.Status == StatusNeedsReview) ||
-		filter.ReviewKind != nil
+		filter.ReviewKind != nil || filter.WaitingReviews
 }
 
 // reviewScope is the requests the caller reaches on a review route, which
@@ -868,10 +886,21 @@ type reviewItemCountsResponse struct {
 	StepSessions int                `json:"stepSessions"`
 }
 
+// reviewItemCounts is what waits for a reviewer. Every member's page asks, so
+// it need not learn the caller's rights first; who cannot decide is told that
+// nothing waits for them, never the org's numbers.
 func (h *Handler) reviewItemCounts(w http.ResponseWriter, r *http.Request) error {
-	tally, err := h.service.ReviewCounts(r.Context(), orgFromRequest(r).ID)
-	if err != nil {
-		return mapError(err)
+	var tally ReviewTally
+	if organization.MayReview(r.Context()) {
+		var err error
+		if tally, err = h.service.ReviewCounts(r.Context(), orgFromRequest(r).ID); err != nil {
+			return mapError(err)
+		}
+	} else {
+		tally.Kinds = make(map[ReviewKind]int, len(ReviewKinds))
+		for _, kind := range ReviewKinds {
+			tally.Kinds[kind] = 0
+		}
 	}
 	respond.JSON(w, r, http.StatusOK, reviewItemCountsResponse{
 		Counts: tally.Kinds, Sessions: tally.Sessions, StepSessions: tally.StepSessions,
@@ -1127,6 +1156,7 @@ var errorResponses = []struct {
 	{ErrFlowNotFound, respond.APIError{Status: http.StatusUnprocessableEntity, Code: "flow_not_found", Message: "the selected flow does not exist"}},
 	{ErrFlowNotCompletable, respond.APIError{Status: http.StatusUnprocessableEntity, Code: "flow_not_completable", Message: "this flow cannot be finished from the wallet: its face step needs the NFC chip read to compare against and must run in the app"}},
 	{ErrMemberNotFound, respond.APIError{Status: http.StatusUnprocessableEntity, Code: "member_not_found", Message: "that person is not a member of this organization"}},
+	{ErrAPIKeyNotRevealable, respond.APIError{Status: http.StatusConflict, Code: "api_key_not_revealable", Message: "this API key was made before keys could be shown again: only its hash is kept, so create a new one"}},
 	{ErrAPIKeyNotFound, respond.APIError{Status: http.StatusNotFound, Code: "api_key_not_found", Message: "this API key does not exist"}},
 	{ErrRequestNotFound, respond.APIError{Status: http.StatusNotFound, Code: "session_not_found", Message: "this session does not exist"}},
 	{ErrWebhookNotFound, respond.APIError{Status: http.StatusNotFound, Code: "webhook_not_found", Message: "this organization has no webhook endpoint"}},
@@ -1135,10 +1165,13 @@ var errorResponses = []struct {
 	{ErrFlowNotAllowed, respond.APIError{Status: http.StatusUnprocessableEntity, Code: "flow_not_allowed", Message: "your organization's admin has not made this flow available"}},
 	{ErrWrongMethod, respond.APIError{Status: http.StatusConflict, Code: "wrong_method", Message: "this session does not run in that app"}},
 	{ErrNotHosted, respond.APIError{Status: http.StatusConflict, Code: "not_hosted", Message: "create the session with hosted: true to pick its app from your own UI"}},
+	{ErrSessionNotStarted, respond.APIError{Status: http.StatusConflict, Code: "session_not_started", Message: "start the session first: POST /proofing/sessions/{id}/methods/{method}"}},
 	{ErrResultNotReady, respond.APIError{Status: http.StatusConflict, Code: "result_not_ready", Message: "this session has no outcome yet"}},
 	{ErrDeviceActive, respond.APIError{Status: http.StatusConflict, Code: "device_active", Message: "the Idem app still has this session open; carry on there"}},
 	{ErrAppFinished, respond.APIError{Status: http.StatusConflict, Code: "app_finished", Message: "the Idem app already did its part; carry on on this page"}},
 	{ErrSessionOver, respond.APIError{Status: http.StatusConflict, Code: "session_over", Message: "this session has ended"}},
+	{ErrReviewLinkNotFound, respond.APIError{Status: http.StatusNotFound, Code: reviewLinkNotFoundCode, Message: "this review link is unknown or has expired"}},
+	{ErrNothingToReview, respond.APIError{Status: http.StatusConflict, Code: "nothing_to_review", Message: "nothing of this session waits for a review"}},
 	{ErrNotUnderReview, respond.APIError{Status: http.StatusConflict, Code: "not_under_review", Message: "this request is not under review"}},
 	{ErrAddressNotUnderReview, respond.APIError{Status: http.StatusConflict, Code: "address_not_under_review", Message: "this address does not wait for a review"}},
 	{ErrSealUnchecked, respond.APIError{Status: http.StatusConflict, Code: "seal_unchecked", Message: "a document of this step has a seal nobody checked yet: check it again before confirming"}},
@@ -1156,6 +1189,7 @@ var errorResponses = []struct {
 	{ErrReferencePhotoRequired, respond.APIError{Status: http.StatusUnprocessableEntity, Code: "reference_photo_required", Message: "this flow matches the face against your own photo of the person: send it as referencePhoto through the API"}},
 	{ErrDiplomasNeedPage, respond.APIError{Status: http.StatusUnprocessableEntity, Code: "diplomas_need_page", Message: "this flow asks for diplomas, which are uploaded on a page: show the session on screen or send a hosted link"}},
 	{ErrAddressNeedsPage, respond.APIError{Status: http.StatusUnprocessableEntity, Code: "address_needs_page", Message: "this flow asks for the address, which is entered on a page: show the session on screen or send a hosted link"}},
+	{ErrNoDiplomaChecker, respond.APIError{Status: http.StatusConflict, Code: "no_diploma_checker", Message: "this deployment checks no diplomas; set DIPLOMA_VALIDATOR_PROVIDER on the server"}},
 	{ErrNoEmploymentChecker, respond.APIError{Status: http.StatusConflict, Code: "no_employment_checker", Message: "this deployment checks no Verzekeringsbericht; set EMPLOYMENT_VALIDATOR_PROVIDER on the server"}},
 	{diploma.ErrTrustUnavailable, sealCheckUnavailable},
 	{diploma.ErrRevocationUnavailable, sealCheckUnavailable},
@@ -1185,6 +1219,13 @@ func mapError(err error) error {
 	}
 	if errors.Is(err, ErrInvalidInput) {
 		return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_input", Message: strings.TrimPrefix(err.Error(), ErrInvalidInput.Error()+": ")}
+	}
+	var cmErr *idscan.APIError
+	if errors.Is(err, ErrDocumentScanUnavailable) && errors.As(err, &cmErr) {
+		return &respond.APIError{
+			Status: http.StatusBadGateway, Code: "document_scan_unavailable",
+			Message: fmt.Sprintf("the scan service could not give this scan's result (%d: %s): scan again", cmErr.Status, cmErr.Message),
+		}
 	}
 	if errors.Is(err, ErrReasonsMissing) {
 		return &respond.APIError{Status: http.StatusBadRequest, Code: "reasons_missing", Message: strings.TrimPrefix(err.Error(), ErrReasonsMissing.Error()+": ")}
