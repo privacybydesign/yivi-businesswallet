@@ -356,6 +356,10 @@ export function auditActionLabel(action: string, t: TFunction): string {
       return t("auditLog.actions.walletUnitActivated");
     case "wallet.unit_revoked":
       return t("auditLog.actions.walletUnitRevoked");
+    case "wsca.account_activated":
+      return t("auditLog.actions.wscaAccountActivated");
+    case "wsca.account_rotated":
+      return t("auditLog.actions.wscaAccountRotated");
     case "kvk.registration_validated":
       return t("auditLog.actions.kvkRegistrationValidated");
     case "kvk.registration_not_validated":
@@ -593,6 +597,8 @@ export function auditTargetLabel(targetType: string, t: TFunction): string {
       return t("auditLog.targets.walletRepresentation");
     case "wallet_unit":
       return t("auditLog.targets.walletUnit");
+    case "wsca_account":
+      return t("auditLog.targets.wscaAccount");
     case "kvk_registration":
       return t("auditLog.targets.kvkRegistration");
     case "postguard_key":

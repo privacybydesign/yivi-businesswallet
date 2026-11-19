@@ -1,5 +1,4 @@
-import { useEffect, useState } from "react";
-import { useBlocker } from "react-router";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import * as React from "react";
 import {
@@ -18,12 +17,13 @@ import {
 import type { OrgTheme } from "../api/theme";
 import { isHexColor, proofingErrorMessage } from "../lib/identity-proofing";
 import { blockingError } from "../lib/query-state";
-import { Button, Card, ConfirmDialog, Input } from "../ui";
+import { Button, Card, Input } from "../ui";
 import { BrandingPreviews } from "./branding-preview";
 import { ERROR, HINT, LABEL } from "./proofing-branding-fields";
 import { ThemeFields } from "./theme-settings";
 import { useThemeDraft } from "../lib/use-theme-draft";
 import type { ThemeDraft } from "../lib/use-theme-draft";
+import { UnsavedChanges } from "./unsaved-changes";
 
 // Settings › Branding: the org's one look, its wallet theme, which the proofing
 // mail, the hosted page and the Idem app wear too, and what they say besides
@@ -128,8 +128,6 @@ function BrandingForm({
   const saveError = saveTheme.error ?? saveBranding.error;
   const change = (patch: Partial<ProofingBrandingInput>): void =>
     setBranding((b) => ({ ...b, ...patch }));
-  const blocker = useBlocker(dirty && !saving);
-  useLeaveWarning(dirty);
 
   async function submit(event: React.FormEvent): Promise<void> {
     event.preventDefault();
@@ -301,29 +299,7 @@ function BrandingForm({
           },
         }}
       />
-      {blocker.state === "blocked" && (
-        <ConfirmDialog
-          title={t("settings.unsaved.title")}
-          message={t("settings.unsaved.message")}
-          confirmLabel={t("settings.unsaved.leave")}
-          onClose={() => blocker.reset()}
-          onConfirm={() => blocker.proceed()}
-        />
-      )}
+      <UnsavedChanges dirty={dirty && !saving} />
     </div>
   );
-}
-
-// Asks the browser to confirm closing or reloading the page while dirty.
-function useLeaveWarning(dirty: boolean): void {
-  useEffect(() => {
-    if (!dirty) {
-      return;
-    }
-    function warn(event: BeforeUnloadEvent): void {
-      event.preventDefault();
-    }
-    window.addEventListener("beforeunload", warn);
-    return () => window.removeEventListener("beforeunload", warn);
-  }, [dirty]);
 }

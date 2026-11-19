@@ -1501,6 +1501,51 @@ export function sessionView({
   return secondsLeft === 0 && status === "pending" ? "expired" : "running";
 }
 
+// The one thing a verify page's session shows, each state named: the steps
+// after the identity check, the end of a session whose link ran out, the
+// outcome, and what a running session is at. A running one first has its app
+// chosen, then shows the ID scan when it is this page's turn, else waits for
+// the photo's verdict (no app) or shows the app's own session.
+export type SessionStep =
+  | "address"
+  | "documents"
+  | "ended"
+  | "outcome"
+  | "method"
+  | "scan"
+  | "finishing"
+  | "app";
+
+export function sessionStep({
+  view,
+  status,
+  method,
+  scanning,
+}: {
+  view: SessionView;
+  status: string;
+  method: ProofingMethod;
+  scanning: boolean;
+}): SessionStep {
+  if (view === "address" || view === "documents") {
+    return view;
+  }
+  // An expired session ends the page before any outcome shows.
+  if (status === "expired" || view === "expired") {
+    return "ended";
+  }
+  if (view === "outcome") {
+    return "outcome";
+  }
+  if (method === "pending") {
+    return "method";
+  }
+  if (scanning) {
+    return "scan";
+  }
+  return method === "browser" ? "finishing" : "app";
+}
+
 // Where a verify page's session stands, for its stepper: done once it shows
 // the outcome or ended, the app's choice while pending, the document while the
 // ID scan shows or with no app (browser), else the app's session.

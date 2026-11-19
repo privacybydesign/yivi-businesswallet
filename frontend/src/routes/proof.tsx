@@ -15,7 +15,7 @@ import type {
   ProofingMethod,
   ProofingProgress,
 } from "../api/identity-proofing";
-import i18n from "../i18n";
+import i18n, { reportLanguageFailure, showLanguage } from "../i18n";
 import { errorCode } from "../lib/api-error";
 import { useDateFormatter, useWhenFormatter } from "../lib/format-when";
 import { erasureLeft, legalReasonIn } from "../lib/legal-retention";
@@ -187,8 +187,8 @@ function HostedFlow({
         ? []
         : (navigator.languages ?? [navigator.language]);
     // Not changeLanguage: the subject's page must not persist a wallet choice.
-    void i18n.changeLanguage(
-      hostedLanguage(page.language, preferred, page.locales),
+    showLanguage(hostedLanguage(page.language, preferred, page.locales)).catch(
+      reportLanguageFailure,
     );
   }, [page.language, page.locales]);
 

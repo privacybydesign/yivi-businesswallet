@@ -3,6 +3,7 @@ import type { UseMutationResult, UseQueryResult } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { getCscSettings, testCscConnection, updateCscSettings } from "./csc";
 import type { CscInfo, CscSettings, CscSettingsInput } from "./csc";
+import { signingAvailabilityQueryKey } from "./signing.queries";
 import { toast } from "../lib/toast";
 
 export function cscSettingsQueryKey(slug: string): readonly string[] {
@@ -32,6 +33,10 @@ export function useUpdateCscSettingsMutation(
       toast.success(t("toasts.cscSettingsSaved"));
       void queryClient.invalidateQueries({
         queryKey: cscSettingsQueryKey(slug),
+      });
+      // Whether signing is on offer follows the QTSP connection.
+      void queryClient.invalidateQueries({
+        queryKey: signingAvailabilityQueryKey(slug),
       });
     },
   });

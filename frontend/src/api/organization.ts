@@ -177,6 +177,9 @@ export type MemberListEntry = z.infer<typeof memberListEntrySchema>;
 export const memberListPageSchema = z.object({
   entries: z.array(memberListEntrySchema),
   total: z.number(),
+  // The org's totals per status, whatever the list is narrowed to.
+  activeTotal: z.number(),
+  invitedTotal: z.number(),
 });
 
 export type MemberListPage = z.infer<typeof memberListPageSchema>;

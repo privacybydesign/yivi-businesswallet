@@ -56,7 +56,8 @@ func (f fakeRepo) GetMemberAvatar(context.Context, uuid.UUID, uuid.UUID) (user.A
 func (f fakeRepo) ListMemberEntries(context.Context, uuid.UUID, MemberListParams) ([]MemberEntry, int, error) {
 	return nil, 0, nil
 }
-func (f fakeRepo) RevokeInvitation(context.Context, uuid.UUID, uuid.UUID) error { return nil }
+func (f fakeRepo) MemberStatusTotals(context.Context, uuid.UUID) (int, int, error) { return 0, 0, nil }
+func (f fakeRepo) RevokeInvitation(context.Context, uuid.UUID, uuid.UUID) error    { return nil }
 func (f fakeRepo) ResendInvitation(context.Context, uuid.UUID, uuid.UUID) (Invitation, error) {
 	return Invitation{}, nil
 }
@@ -77,6 +78,26 @@ func (f fakeRepo) DeleteDepartment(context.Context, uuid.UUID, uuid.UUID) error 
 
 func (f fakeRepo) ResolveAuthority(context.Context, uuid.UUID, uuid.UUID) (Authority, error) {
 	return f.authority, f.authorityErr
+}
+
+// ResolveAccess answers from the same fields as the three reads it replaces.
+func (f fakeRepo) ResolveAccess(ctx context.Context, slug string, userID uuid.UUID) (Access, error) {
+	org, err := f.GetBySlug(ctx, slug)
+	if err != nil {
+		return Access{}, err
+	}
+	access := Access{Org: org}
+	m, err := f.GetMembership(ctx, userID, org.ID)
+	switch {
+	case err == nil:
+		access.Member = &m
+	case !errors.Is(err, ErrNotMember):
+		return Access{}, err
+	}
+	if access.Authority, err = f.ResolveAuthority(ctx, org.ID, userID); err != nil {
+		return Access{}, err
+	}
+	return access, nil
 }
 
 func (f fakeRepo) ListMandates(context.Context, uuid.UUID) ([]Mandate, error) { return nil, nil }

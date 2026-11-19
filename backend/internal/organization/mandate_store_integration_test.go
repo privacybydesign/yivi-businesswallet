@@ -5,6 +5,7 @@ package organization_test
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 
@@ -271,6 +272,63 @@ func TestResolveAuthority(t *testing.T) {
 		}
 		if got.Withdrawn() {
 			t.Error("Withdrawn() = true for the legal representative")
+		}
+	})
+
+	// The one-query read Authorize uses must agree with the three reads it
+	// replaced, for every caller the subtests above set up.
+	t.Run("ResolveAccess agrees with the separate reads", func(t *testing.T) {
+		rows, err := pool.Query(ctx, `SELECT user_id FROM memberships WHERE organization_id = $1`, org.ID)
+		if err != nil {
+			t.Fatalf("list members: %v", err)
+		}
+		var members []uuid.UUID
+		for rows.Next() {
+			var id uuid.UUID
+			if err := rows.Scan(&id); err != nil {
+				t.Fatalf("scan member: %v", err)
+			}
+			members = append(members, id)
+		}
+		rows.Close()
+		if len(members) < 2 {
+			t.Fatalf("only %d members to compare", len(members))
+		}
+		wantOrg, err := store.GetBySlug(ctx, "acme")
+		if err != nil {
+			t.Fatalf("GetBySlug: %v", err)
+		}
+		for _, u := range members {
+			access, err := store.ResolveAccess(ctx, "acme", u)
+			if err != nil {
+				t.Fatalf("ResolveAccess: %v", err)
+			}
+			wantAuthority, err := store.ResolveAuthority(ctx, org.ID, u)
+			if err != nil {
+				t.Fatalf("ResolveAuthority: %v", err)
+			}
+			wantMember, err := store.GetMembership(ctx, u, org.ID)
+			if err != nil {
+				t.Fatalf("GetMembership: %v", err)
+			}
+			if access.Org != wantOrg {
+				t.Errorf("org = %+v, want %+v", access.Org, wantOrg)
+			}
+			if access.Authority != wantAuthority {
+				t.Errorf("user %s: authority = %+v, want %+v", u, access.Authority, wantAuthority)
+			}
+			if access.Member == nil || !reflect.DeepEqual(*access.Member, wantMember) {
+				t.Errorf("user %s: member = %+v, want %+v", u, access.Member, wantMember)
+			}
+		}
+
+		outsider := createUser(t, pool, "outsider@elsewhere.example")
+		access, err := store.ResolveAccess(ctx, "acme", outsider)
+		if err != nil || access.Member != nil || access.Org.ID != org.ID {
+			t.Errorf("outsider: access = %+v, err = %v; want the org and no membership", access, err)
+		}
+		if _, err := store.ResolveAccess(ctx, "no-such-org", outsider); !errors.Is(err, organization.ErrNotFound) {
+			t.Errorf("unknown slug: err = %v, want ErrNotFound", err)
 		}
 	})
 }

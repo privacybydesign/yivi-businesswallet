@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -72,6 +73,73 @@ func (s *Store) ResolveAuthority(ctx context.Context, orgID, userID uuid.UUID) (
 	}
 	a.Mandated = orgWide > 0
 	a.FullMandate = full > 0
+	return a, nil
+}
+
+// Access is what Authorize needs to know about a caller in one org.
+type Access struct {
+	Org Organization
+	// Member is the caller's membership; nil for someone who is not a member.
+	Member    *Membership
+	Authority Authority
+}
+
+// accessOrg is the org's id inside accessQuery, where the shared authority
+// fragments name it $1.
+const accessOrg = "o.id"
+
+// accessQuery reads the org by slug, the caller's membership and their basis of
+// authority in one row, with the same predicates as GetBySlug, GetMembership
+// and ResolveAuthority.
+var accessQuery = `
+	SELECT ` + orgColumnsQ + `,
+	       m.user_id, m.role, m.job_title, m.department_id, m.can_review,
+	       ` + strings.ReplaceAll(legalRepresentativeExists, "$1", accessOrg) + `,
+	       (SELECT count(*) FROM mandates h WHERE h.organization_id = o.id AND h.grantee_user_id = $2
+	                                          AND h.valid_from <= now()),
+	       (SELECT count(*) FROM mandates h WHERE h.organization_id = o.id AND h.grantee_user_id = $2
+	                                          AND ` + mandateActive + ` AND h.scope = '` + MandateScopeOrganization + `'),
+	       (SELECT count(*) FROM mandates h WHERE h.organization_id = o.id AND h.grantee_user_id = $2
+	                                          AND ` + mandateActive + ` AND h.scope = '` + MandateScopeOrganization + `'
+	                                          AND h.type = '` + MandateFull + `')
+	FROM organizations o
+	LEFT JOIN memberships m ON m.organization_id = o.id AND m.user_id = $2
+	WHERE o.slug = $1`
+
+// ResolveAccess reads the org named slug with the caller's membership and
+// authority in it. Authorize runs it on every org-scoped request, so it is one
+// round trip, read fresh each time: a revoked mandate or a removed member is
+// refused on the next request.
+func (s *Store) ResolveAccess(ctx context.Context, slug string, userID uuid.UUID) (Access, error) {
+	var (
+		a            Access
+		memberID     *uuid.UUID
+		role         *string
+		jobTitle     *string
+		departmentID *uuid.UUID
+		canReview    *bool
+		orgWide      int
+		full         int
+	)
+	o := &a.Org
+	err := s.db.QueryRow(ctx, accessQuery, slug, userID).Scan(
+		&o.ID, &o.Name, &o.Slug, &o.KVKNumber, &o.EUID, &o.DigitalAddress, &o.Status, &o.BootstrappedAt,
+		&memberID, &role, &jobTitle, &departmentID, &canReview,
+		&a.Authority.LegalRepresentative, &a.Authority.Granted, &orgWide, &full)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Access{}, ErrNotFound
+	}
+	if err != nil {
+		return Access{}, fmt.Errorf("organization: resolve access user %s org %q: %w", userID, slug, err)
+	}
+	if memberID != nil && role != nil && canReview != nil {
+		a.Member = &Membership{
+			UserID: *memberID, OrganizationID: o.ID, Role: *role,
+			JobTitle: jobTitle, DepartmentID: departmentID, CanReview: *canReview,
+		}
+	}
+	a.Authority.Mandated = orgWide > 0
+	a.Authority.FullMandate = full > 0
 	return a, nil
 }
 

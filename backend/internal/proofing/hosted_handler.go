@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/email"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/events"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingprovider"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/ratelimit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/respond"
@@ -92,6 +93,7 @@ func (h *Handler) framePolicy(r *http.Request, token string) string {
 func (h *Handler) registerHosted(mux *http.ServeMux) {
 	mux.Handle("GET /proof/{token}", h.limitHosted(h.hostedView))
 	mux.Handle("GET /proof/{token}/status", h.limitHosted(h.hostedStatus))
+	mux.Handle("GET /proof/{token}/events", h.limitHosted(h.hostedEvents))
 	mux.Handle("POST /proof/{token}/start", h.limitHosted(h.hostedStart))
 	mux.Handle("POST /proof/{token}/decline", h.limitHosted(h.hostedDecline))
 	mux.Handle("GET /proof/{token}/logo", h.limitHosted(h.hostedLogo))
@@ -430,6 +432,22 @@ func (h *Handler) hostedStatus(w http.ResponseWriter, r *http.Request) error {
 	}
 	respond.JSON(w, r, http.StatusOK, newHostedProgress(req, time.Now()))
 	return nil
+}
+
+// hostedEvents streams an event each time the link's request, or its session
+// in the engine, moves, so the page re-reads its status then instead of
+// polling. It follows this one request only: an org-wide topic would have
+// every open hosted page re-read on every other page's progress, each read
+// against the org's hosted call budget. The events carry no data.
+func (h *Handler) hostedEvents(w http.ResponseWriter, r *http.Request) error {
+	req, err := h.service.HostedStatus(r.Context(), r.PathValue("token"))
+	if err != nil {
+		return mapError(err)
+	}
+	if h.events == nil {
+		return mapError(ErrRequestNotFound)
+	}
+	return h.events.Serve(w, r, events.Topic(events.ProofingRequest, req.ID))
 }
 
 type hostedStartRequest struct {

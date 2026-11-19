@@ -2963,6 +2963,42 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/events:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+    get:
+      tags: [organizations]
+      summary: Follow what changes in the organisation
+      description: >-
+        Open to every member. A Server-Sent Events stream that sends an event, with no data,
+        each time something a page of the organisation shows changes, so the page re-reads it
+        then instead of polling. The event's name says what changed: `reviews` (a proofing
+        request was created, changed status, had a review item move or was purged),
+        `proofing-progress` (a step of a verify session moved), `webhooks` (a webhook delivery
+        was queued, sent or failed), `qerds` (a QERDS message arrived or moved on) and
+        `signing` (a signing request or one of its signers moved). A comment line keeps the
+        stream open. It carries nothing about what changed: the reads apply the reader's own
+        scope.
+      responses:
+        '200':
+          description: The event stream, open until the page leaves or the server shuts down.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+              examples:
+                changed:
+                  summary: Something changed
+                  value: "event: reviews\ndata: \n\n"
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /api/v1/orgs/{slug}/departments:
     parameters:
       - name: slug
@@ -4475,7 +4511,9 @@ paths:
       tags: [organizations]
       summary: Count members by identity and VOG screening status
       description: >-
-        Requires an administrator role in the organisation. Counts every active
+        Open to every member, so a page need not learn the caller's role first: an
+        administrator gets the organisation's tally, anyone else the same shape with every
+        count 0. Counts every active
         membership by its derived identity status (never, verified, due_soon,
         overdue, requested) and screening status (not_required, none, requested,
         valid, expiring, expired, rejected, recheck_required) under the
@@ -6144,6 +6182,16 @@ paths:
             type: string
             enum: [data_request]
           description: Only the data requests, "See my data" (`data_access`) and "Delete my data" (`data_erasure`).
+        - name: waiting
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: ["true"]
+          description: >-
+            Only what waits for a reviewer, in one list: the requests that read `needs_review`
+            and those with an address, a Verzekeringsbericht or diplomas waiting, the longest in
+            review first. A member with the reviewer right lists them for the whole organisation.
         - name: reviewKind
           in: query
           required: false
@@ -7893,7 +7941,9 @@ paths:
       tags: [identity-proofing-internal]
       summary: Count what waits for review
       description: >-
-        Requires an administrator role in the organisation, or the reviewer right. How many
+        Open to every member, so a page need not learn the caller's rights first: an
+        administrator or a member with the reviewer right gets the organisation's counts,
+        anyone else every count 0. How many
         sessions that are not erased wait for a decision: per kind of review in `counts` (a
         session waiting for its identity and its address counts under both), each once in
         `sessions`, and those waiting for a step (an address, a Verzekeringsbericht) in
@@ -8329,38 +8379,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
-  /api/v1/orgs/{slug}/identity-proofing/reviews/events:
-    parameters:
-      - name: slug
-        in: path
-        required: true
-        schema:
-          type: string
-        description: Organisation slug.
-    get:
-      tags: [identity-proofing-internal]
-      summary: Follow the organisation's reviews
-      description: >-
-        Requires the reviewer right (an administrator has it). A Server-Sent Events stream that
-        sends a `reviews` event, with no data, each time a request of the organisation goes into
-        or out of review, its address review moves, or it is purged, so a page re-reads its
-        lists then. A comment line keeps the stream open. It carries nothing about a request:
-        the lists apply the reader's own scope. A member without the right gets 403.
-      responses:
-        '200':
-          description: The event stream, open until the page leaves or the server shuts down.
-          content:
-            text/event-stream:
-              schema:
-                type: string
-              examples:
-                changed:
-                  summary: The reviews changed
-                  value: "event: reviews\ndata: \n\n"
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
   /api/v1/orgs/{slug}/identity-proofing/requests/{requestID}/events:
     parameters:
       - name: slug
@@ -11294,6 +11312,35 @@ paths:
                 $ref: '#/components/schemas/Error'
         '429':
           $ref: '#/components/responses/HostedTooManyRequests'
+  /api/v1/proof/{token}/events:
+    parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Opaque hosted-link token from the `hostedUrl` of a hosted proofing session.
+    get:
+      tags: [identity-proofing-internal]
+      summary: Follow a hosted proofing link
+      security: []
+      description: >-
+        A Server-Sent Events stream that sends a `proofing-request` event, with no data, each
+        time the link's own session moves, so the page reads `GET /api/v1/proof/{token}/status` then instead of
+        polling it. A comment line keeps the stream open.
+      responses:
+        '200':
+          description: The event stream, open until the page leaves or the server shuts down.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+              examples:
+                changed:
+                  summary: Something changed
+                  value: "event: proofing-request\ndata: \n\n"
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/v1/proof/{token}/status:
     parameters:
       - name: token
@@ -14124,6 +14171,35 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           description: The signed document is not ready yet.
+  /api/v1/signing/external/{token}/events:
+    parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+        description: The external signee's one-time invitation token.
+    get:
+      tags: [signing]
+      summary: Follow the request an external signee must sign
+      description: >-
+        Unauthenticated like `GET /api/v1/signing/external/{token}`. A Server-Sent Events
+        stream that sends a `signing-request` event, with no data, each time the request or
+        one of its signers moves, so the page re-reads its view then instead of polling. A
+        comment line keeps the stream open. 404 when the link is unknown, spent or expired.
+      responses:
+        '200':
+          description: The event stream, open until the page leaves or the server shuts down.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+              examples:
+                changed:
+                  summary: Something changed
+                  value: "event: signing-request\ndata: \n\n"
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/v1/signing/external/{token}:
     parameters:
       - name: token

@@ -706,6 +706,10 @@ type RequestFilter struct {
 	// sessions whose review is over (something decided, nothing waiting) and
 	// the data requests that ended, the latest closed first.
 	ClosedReviews bool
+	// WaitingReviews narrows to what waits for a reviewer, in one read: the
+	// requests that read needs_review and those with an address, a
+	// Verzekeringsbericht or diplomas waiting, the longest in review first.
+	WaitingReviews bool
 }
 
 func (f RequestFilter) reviewState() ReviewState {

@@ -955,6 +955,8 @@ export function getProofingRequests(
     flowKind?: "data_request";
     reviewKind?: ReviewKind;
     reviewState?: AddressReviewState;
+    // Everything that waits for a reviewer, in one list.
+    waiting?: true;
   },
   signal?: AbortSignal,
 ): Promise<ProofingRequest[]> {
@@ -966,6 +968,7 @@ export function getProofingRequests(
   if (filter.flowKind) params.set("flowKind", filter.flowKind);
   if (filter.reviewKind) params.set("reviewKind", filter.reviewKind);
   if (filter.reviewState) params.set("reviewState", filter.reviewState);
+  if (filter.waiting) params.set("waiting", "true");
   const query = params.size > 0 ? `?${params.toString()}` : "";
   return request(`${base(slug)}/requests${query}`, {
     schema: z.array(proofingRequestSchema),
@@ -1005,10 +1008,10 @@ export function getProofingOverview(
   });
 }
 
-// The stream that tells a reviewer's page when the org's reviews change: a
+// The stream that tells a hosted link's page when its session moves: a
 // Server-Sent Events URL, for an EventSource.
-export function reviewEventsUrl(slug: string): string {
-  return absoluteApiUrl(`${base(slug)}/reviews/events`);
+export function hostedEventsUrl(token: string): string {
+  return absoluteApiUrl(`/api/v1/proof/${encodeURIComponent(token)}/events`);
 }
 
 // language is the sender's wallet language: the mail's, and the Idem app's.

@@ -21,12 +21,12 @@ import type {
   QerdsMessageWithEvidence,
   QerdsPollResult,
 } from "./qerds";
+import { useOrgStreamConnected } from "./org-events";
 import { toast } from "../lib/toast";
 
-// Inbound delivery is automatic on the backend (poll worker / webhook push), so
-// the list is re-fetched on an interval to surface a newly received message
-// without a manual "Check inbox". The default `refetchIntervalInBackground:
-// false` pauses this while the tab is hidden, so it costs nothing when unwatched.
+// Inbound delivery is automatic on the backend (poll worker / webhook push) and
+// the org's event stream says when a message arrives. This is the fallback
+// while that stream is down.
 const MESSAGES_REFETCH_INTERVAL_MS = 30_000;
 
 export function qerdsMessagesQueryKey(slug: string): readonly string[] {
@@ -48,11 +48,12 @@ export function useQerdsMessagesQuery(
   slug: string,
   enabled = true,
 ): UseQueryResult<QerdsMessage[], Error> {
+  const streaming = useOrgStreamConnected(slug);
   return useQuery({
     queryKey: qerdsMessagesQueryKey(slug),
     queryFn: ({ signal }) => getQerdsMessages(slug, signal),
     enabled: enabled && slug !== "",
-    refetchInterval: MESSAGES_REFETCH_INTERVAL_MS,
+    refetchInterval: streaming ? false : MESSAGES_REFETCH_INTERVAL_MS,
   });
 }
 

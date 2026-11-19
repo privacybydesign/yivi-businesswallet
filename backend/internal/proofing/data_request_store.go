@@ -175,7 +175,7 @@ const matchingLockKey = "identity_proofing_matching:"
 // TryLockMatching takes the lock on finding data request id's matches, across
 // replicas, until release is called; ok is false while another holds it.
 func (s *DataRequestStore) TryLockMatching(ctx context.Context, id uuid.UUID) (release func(), ok bool, err error) {
-	return advisoryLock(ctx, s.db, matchingLockKey, id, false)
+	return advisoryLock(ctx, s.requests.locks, matchingLockKey, id, false)
 }
 
 // MatchChecks is what req found for each candidate whose identity it read

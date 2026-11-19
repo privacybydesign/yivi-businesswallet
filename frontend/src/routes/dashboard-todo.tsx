@@ -4,7 +4,7 @@ import * as React from "react";
 import { useMemberInsightsQuery } from "../api/organization.queries";
 import {
   useProofingOverviewQuery,
-  useWaitingReviewsQuery,
+  useReviewItemCountsQuery,
 } from "../api/identity-proofing.queries";
 import { accessMessage } from "../lib/access-message";
 import { blockingError } from "../lib/query-state";
@@ -13,7 +13,7 @@ import {
   notIdentifiedCount,
   screeningAttentionCount,
 } from "../lib/member-insights";
-import { reviewPath, waitingOldestFirst } from "../lib/proofing-reviews";
+import { reviewPath, waitingCount } from "../lib/proofing-reviews";
 import { TaskEmpty, TaskRow, TaskSection } from "../ui";
 import { PRIMARY_LINK, SECONDARY_LINK } from "./proofing-review-parts";
 
@@ -68,20 +68,21 @@ export function DashboardTodo({
   canReview: boolean;
 }>): React.JSX.Element {
   const { t } = useTranslation();
-  const insights = useMemberInsightsQuery(slug, isAdmin);
-  const waiting = useWaitingReviewsQuery(slug, { enabled: canReview });
+  // Both are asked with the page, not after the org read says who is asking:
+  // the backend tallies nothing for who may not see it.
+  const insights = useMemberInsightsQuery(slug, true);
+  // The count the sidebar holds too, so the dashboard reads no list for it.
+  const waiting = useReviewItemCountsQuery(slug, { enabled: true });
   const items: Item[] = [];
 
-  // A disabled query keeps its last result, from before the right was
-  // withdrawn too.
-  const held = canReview ? waiting.data : undefined;
-  const reviews = waitingOldestFirst(held?.requests ?? []).length;
+  // A count read while the right was still held does not outlive it.
+  const reviews = canReview && waiting.data ? waitingCount(waiting.data) : 0;
   if (reviews > 0) {
     items.push({
       key: "reviews",
       title: t("dashboard.todo.reviews", {
         count: reviews,
-        number: listedCount(reviews, held?.capped === true, t),
+        number: listedCount(reviews, false, t),
       }),
       detail: t("dashboard.todo.reviewsDetail"),
       to: reviewPath(slug),
@@ -89,9 +90,8 @@ export function DashboardTodo({
     });
   }
 
-  const notIdentified = insights.data
-    ? notIdentifiedCount(insights.data.identity)
-    : 0;
+  const notIdentified =
+    isAdmin && insights.data ? notIdentifiedCount(insights.data.identity) : 0;
   if (notIdentified > 0) {
     items.push({
       key: "notIdentified",
@@ -102,9 +102,10 @@ export function DashboardTodo({
     });
   }
 
-  const vog = insights.data
-    ? screeningAttentionCount(insights.data.screening)
-    : 0;
+  const vog =
+    isAdmin && insights.data
+      ? screeningAttentionCount(insights.data.screening)
+      : 0;
   if (vog > 0) {
     items.push({
       key: "vog",
@@ -115,10 +116,9 @@ export function DashboardTodo({
     });
   }
 
-  const loading =
-    (isAdmin && insights.isPending) || (canReview && waiting.isPending);
+  const loading = insights.isPending || waiting.isPending;
   const insightsError = blockingError(insights);
-  const waitingError = canReview ? blockingError(waiting) : null;
+  const waitingError = blockingError(waiting);
   let failure: string | undefined;
   if (insightsError !== null) {
     failure = t("dashboard.todo.error", {

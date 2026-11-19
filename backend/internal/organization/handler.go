@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -27,9 +28,11 @@ type repository interface {
 	ListForUser(ctx context.Context, userID uuid.UUID) ([]Organization, error)
 	GetMembership(ctx context.Context, userID, orgID uuid.UUID) (Membership, error)
 	ResolveAuthority(ctx context.Context, orgID, userID uuid.UUID) (Authority, error)
+	ResolveAccess(ctx context.Context, slug string, userID uuid.UUID) (Access, error)
 	GetMember(ctx context.Context, orgID, userID uuid.UUID) (Member, error)
 	GetMemberAvatar(ctx context.Context, orgID, userID uuid.UUID) (user.Avatar, error)
 	ListMemberEntries(ctx context.Context, orgID uuid.UUID, p MemberListParams) ([]MemberEntry, int, error)
+	MemberStatusTotals(ctx context.Context, orgID uuid.UUID) (active, invited int, err error)
 	RevokeInvitation(ctx context.Context, orgID, invitationID uuid.UUID) error
 	// ResendInvitation rotates the invite token and extends the expiry, returning
 	// the refreshed invitation (with its new raw Token) so a fresh link can be
@@ -193,7 +196,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("GET /orgs/{slug}", orgScoped(respond.HandlerFunc(h.details)))
 	mux.Handle("PATCH /orgs/{slug}", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.update))))
 	mux.Handle("GET /orgs/{slug}/members", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.members))))
-	mux.Handle("GET /orgs/{slug}/member-insights", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.memberInsights))))
+	mux.Handle("GET /orgs/{slug}/member-insights", orgScoped(respond.HandlerFunc(h.memberInsights)))
 	mux.Handle("GET /orgs/{slug}/members/{userId}", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.member))))
 	mux.Handle("GET /orgs/{slug}/members/{userId}/avatar", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.memberAvatar))))
 	mux.Handle("POST /orgs/{slug}/members", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.invite))))
@@ -340,17 +343,36 @@ func (h *Handler) details(w http.ResponseWriter, r *http.Request) error {
 	ctx := r.Context()
 	org := OrgFromContext(ctx)
 
+	// Every page waits for this read, so its lookups run side by side instead
+	// of one after another.
+	var (
+		wg         sync.WaitGroup
+		address    string
+		hasAddress bool
+		addressErr error
+		identity   *ownIdentityState
+		vog        *ownVogState
+	)
 	// h.defaultAddress is nil only in test setups that don't wire QERDS, mirroring
 	// sendInviteEmail's h.mailer guard; a real deployment always wires it, so a
 	// resolver error here is unexpected and fails the request rather than
 	// falling back to the stale snapshot this replaces.
 	if h.defaultAddress != nil {
-		address, ok, err := h.defaultAddress.DefaultDigitalAddress(ctx, org.ID)
-		if err != nil {
-			return fmt.Errorf("resolving default digital address for org %s: %w", org.ID, err)
+		wg.Go(func() {
+			address, hasAddress, addressErr = h.defaultAddress.DefaultDigitalAddress(ctx, org.ID)
+		})
+	}
+	wg.Go(func() {
+		identity, vog = h.ownStates(ctx, org.ID, auth.UserFromContext(ctx).ID)
+	})
+	wg.Wait()
+
+	if h.defaultAddress != nil {
+		if addressErr != nil {
+			return fmt.Errorf("resolving default digital address for org %s: %w", org.ID, addressErr)
 		}
 		org.DigitalAddress = ""
-		if ok {
+		if hasAddress {
 			org.DigitalAddress = address
 		}
 	}
@@ -359,64 +381,80 @@ func (h *Handler) details(w http.ResponseWriter, r *http.Request) error {
 		Organization: org,
 		Role:         roleFromContext(ctx),
 		CanReview:    MayReview(ctx),
-		Identity:     h.ownIdentity(ctx, org.ID, auth.UserFromContext(ctx).ID),
-		Vog:          h.ownVog(ctx, org.ID, auth.UserFromContext(ctx).ID),
+		Identity:     identity,
+		Vog:          vog,
 	})
 	return nil
 }
 
-// ownIdentity resolves the caller's own identity state, or nil when they have no
-// membership (a platform admin reading someone else's org) or when it cannot be
-// read — the banner is informational, so a failure here logs and disappears
-// rather than failing the whole org detail the app needs to render.
-func (h *Handler) ownIdentity(ctx context.Context, orgID, userID uuid.UUID) *ownIdentityState {
+// ownStates resolves the caller's own identity and VOG state from one read of
+// their member row. Either is nil when they have no membership (a platform
+// admin reading someone else's org) or when it cannot be read: the banners are
+// informational, so a failure here logs and disappears rather than failing the
+// whole org detail the app needs to render.
+func (h *Handler) ownStates(ctx context.Context, orgID, userID uuid.UUID) (*ownIdentityState, *ownVogState) {
 	member, err := h.store.GetMember(ctx, orgID, userID)
 	if errors.Is(err, ErrNotMember) {
-		return nil
+		return nil, nil
 	}
 	if err != nil {
-		slog.ErrorContext(ctx, "resolving own identity state", slog.String("error", err.Error()))
-		return nil
+		slog.ErrorContext(ctx, "resolving own member state", slog.String("error", err.Error()))
+		return nil, nil
 	}
-	lookahead, err := h.identityLookaheadDays(ctx, orgID)
-	if err != nil {
-		slog.ErrorContext(ctx, "resolving identity lookahead", slog.String("error", err.Error()))
-		return nil
-	}
-	member = member.withIdentityStatus(time.Now(), lookahead)
-	return &ownIdentityState{Status: member.IdentityStatus, DueAt: member.IdentityDueAt}
-}
 
-// ownVog resolves the caller's own VOG screening state, mirroring
-// ownIdentity: nil when they have no membership or it cannot be read, since
-// the banner is informational.
-func (h *Handler) ownVog(ctx context.Context, orgID, userID uuid.UUID) *ownVogState {
-	state, err := h.vogState(ctx, orgID, userID)
-	if errors.Is(err, ErrNotMember) {
-		return nil
+	var (
+		wg           sync.WaitGroup
+		lookahead    int
+		lookaheadErr error
+		vog          ownVogState
+		vogErr       error
+	)
+	wg.Go(func() { lookahead, lookaheadErr = h.identityLookaheadDays(ctx, orgID) })
+	wg.Go(func() { vog, vogErr = h.vogStateOf(ctx, orgID, member) })
+	wg.Wait()
+
+	var identity *ownIdentityState
+	if lookaheadErr != nil {
+		slog.ErrorContext(ctx, "resolving identity lookahead", slog.String("error", lookaheadErr.Error()))
+	} else {
+		withStatus := member.withIdentityStatus(time.Now(), lookahead)
+		identity = &ownIdentityState{Status: withStatus.IdentityStatus, DueAt: withStatus.IdentityDueAt}
 	}
-	if err != nil {
-		slog.ErrorContext(ctx, "resolving own vog state", slog.String("error", err.Error()))
-		return nil
+	if vogErr != nil {
+		slog.ErrorContext(ctx, "resolving own vog state", slog.String("error", vogErr.Error()))
+		return identity, nil
 	}
-	return &state
+	return identity, &vog
 }
 
 // vogState is a member's VOG screening status and what their submission page
-// needs to know, shared by the org detail's own state and the VOG link's
-// preview. ErrNotMember when userID is not a member of orgID.
+// needs to know, for the VOG link's preview. ErrNotMember when userID is not a
+// member of orgID.
 func (h *Handler) vogState(ctx context.Context, orgID, userID uuid.UUID) (ownVogState, error) {
 	member, err := h.store.GetMember(ctx, orgID, userID)
 	if err != nil {
 		return ownVogState{}, err
 	}
-	settings, err := h.store.GetScreeningSettings(ctx, orgID)
-	if err != nil {
-		return ownVogState{}, fmt.Errorf("resolving screening settings: %w", err)
+	return h.vogStateOf(ctx, orgID, member)
+}
+
+// vogStateOf is vogState for a member row already read.
+func (h *Handler) vogStateOf(ctx context.Context, orgID uuid.UUID, member Member) (ownVogState, error) {
+	var (
+		wg          sync.WaitGroup
+		settings    ScreeningSettings
+		settingsErr error
+		matchCtx    ScreeningMatchContext
+		matchErr    error
+	)
+	wg.Go(func() { settings, settingsErr = h.store.GetScreeningSettings(ctx, orgID) })
+	wg.Go(func() { matchCtx, matchErr = h.store.ScreeningMatchContext(ctx, orgID, member.UserID) })
+	wg.Wait()
+	if settingsErr != nil {
+		return ownVogState{}, fmt.Errorf("resolving screening settings: %w", settingsErr)
 	}
-	matchCtx, err := h.store.ScreeningMatchContext(ctx, orgID, userID)
-	if err != nil {
-		return ownVogState{}, fmt.Errorf("resolving screening match context: %w", err)
+	if matchErr != nil {
+		return ownVogState{}, fmt.Errorf("resolving screening match context: %w", matchErr)
 	}
 	member = member.withVogStatus(settings, time.Now())
 	return ownVogState{
