@@ -114,6 +114,18 @@ function inlineError(error: Error, t: TFunction): string {
   return error.message;
 }
 
+// The WE BUILD shared identifier object (rb-ownership's EntityIdentifier): an
+// organization credential needs at least one of these.
+const IDENTIFIER_CLAIM = "identifier";
+const IDENTIFIER_FIELDS = ["euid", "lei", "tax", "other"] as const;
+type IdentifierField = (typeof IDENTIFIER_FIELDS)[number];
+const EMPTY_IDENTIFIER: Record<IdentifierField, string> = {
+  euid: "",
+  lei: "",
+  tax: "",
+  other: "",
+};
+
 interface Props {
   slug: string;
   templates: AttestationTemplate[];
@@ -151,6 +163,9 @@ export function AttestationIssueWizard({
   const [memberUserId, setMemberUserId] = useState("");
   const [externalEmail, setExternalEmail] = useState("");
   const [contactAddress, setContactAddress] = useState("");
+  // WE BUILD shared identifier object of an organization-subject credential.
+  const [identifier, setIdentifier] =
+    useState<Record<IdentifierField, string>>(EMPTY_IDENTIFIER);
   const [values, setValues] = useState<Record<string, string>>(
     initialTemplate ? defaultsFor(initialTemplate) : {},
   );
@@ -258,6 +273,7 @@ export function AttestationIssueWizard({
   function selectContact(address: string): void {
     setContactAddress(address);
     const contact = (contacts.data ?? []).find((c) => c.address === address);
+    setIdentifier({ ...EMPTY_IDENTIFIER, euid: contact?.euid ?? "" });
     if (contact && template) {
       setValues((current) =>
         applySubjectSources(current, template, {
@@ -277,6 +293,12 @@ export function AttestationIssueWizard({
   // Organization-subject templates are delivered over QERDS to a contact in the
   // address book; natural-person templates go to a member or external e-mail.
   const isOrganization = template?.subjectType === SUBJECT_ORGANIZATION;
+  // Rulebook claims carry their own identifiers; organization-defined ones get
+  // the shared identifier object.
+  const needsIdentifier = isOrganization && rulebookId === undefined;
+  const identifierMissing = IDENTIFIER_FIELDS.every(
+    (field) => identifier[field].trim() === "",
+  );
 
   const recipientRef = isOrganization
     ? contactAddress
@@ -303,6 +325,13 @@ export function AttestationIssueWizard({
     } else {
       for (const attribute of template.attributes) {
         attributes[attribute.key] = values[attribute.key] ?? "";
+      }
+      if (needsIdentifier) {
+        attributes[IDENTIFIER_CLAIM] = Object.fromEntries(
+          IDENTIFIER_FIELDS.filter(
+            (field) => identifier[field].trim() !== "",
+          ).map((field) => [field, identifier[field].trim()]),
+        );
       }
     }
     const recipient: IssueAttestationInput["recipient"] = isOrganization
@@ -627,6 +656,40 @@ export function AttestationIssueWizard({
               </Field>
             ))
           )}
+          {needsIdentifier && (
+            <fieldset className="border-line flex flex-col gap-3 border-t pt-3">
+              <legend className="text-ink text-[13.5px] font-semibold">
+                {t("attestations.wizard.identifierTitle")}
+              </legend>
+              <p className="text-ink-soft text-[12.5px]">
+                {t("attestations.wizard.identifierHint")}
+              </p>
+              {IDENTIFIER_FIELDS.map((field) => (
+                <Field
+                  key={field}
+                  id={`wizard-identifier-${field}`}
+                  label={t(`attestations.wizard.identifierFields.${field}`)}
+                >
+                  <input
+                    id={`wizard-identifier-${field}`}
+                    className={`${control(attempted && identifierMissing)} h-9`}
+                    value={identifier[field]}
+                    onChange={(event) =>
+                      setIdentifier((current) => ({
+                        ...current,
+                        [field]: event.target.value,
+                      }))
+                    }
+                  />
+                </Field>
+              ))}
+              {attempted && identifierMissing && (
+                <p role="alert" className="text-error text-[12.5px]">
+                  {t("attestations.wizard.identifierRequired")}
+                </p>
+              )}
+            </fieldset>
+          )}
         </div>
       )}
 
@@ -660,6 +723,22 @@ export function AttestationIssueWizard({
                 </span>
               </div>
             ))}
+            {needsIdentifier &&
+              IDENTIFIER_FIELDS.filter(
+                (field) => identifier[field].trim() !== "",
+              ).map((field) => (
+                <div
+                  key={field}
+                  className="flex justify-between gap-4 text-[13px]"
+                >
+                  <span className="text-ink-soft shrink-0">
+                    {t(`attestations.wizard.identifierFields.${field}`)}
+                  </span>
+                  <span className="text-ink min-w-0 truncate font-mono">
+                    {identifier[field].trim()}
+                  </span>
+                </div>
+              ))}
           </div>
           {issue.isError && issue.error && (
             <p
@@ -812,10 +891,12 @@ export function AttestationIssueWizard({
     }
     if (phase === "attributes" && template) {
       setAttempted(true);
-      const missing = template.attributes.some(
-        (attribute) =>
-          attribute.required && (values[attribute.key] ?? "").trim() === "",
-      );
+      const missing =
+        template.attributes.some(
+          (attribute) =>
+            attribute.required && (values[attribute.key] ?? "").trim() === "",
+        ) ||
+        (needsIdentifier && identifierMissing);
       if (!missing) {
         setAttempted(false);
         setPhase("review");
