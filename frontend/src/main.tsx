@@ -45,13 +45,9 @@ function render(): void {
 
 // Render once the language's strings are in. If that chunk fails the app still
 // renders, as an unreadable page beats a blank one.
-async function start(): Promise<void> {
-  try {
-    await i18nReady;
-  } catch (error) {
-    console.error("loading language failed", error);
-  }
-  render();
+try {
+  await i18nReady;
+} catch (error) {
+  console.error("loading language failed", error);
 }
-
-void start();
+render();
