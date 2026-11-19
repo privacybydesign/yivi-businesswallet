@@ -37,6 +37,7 @@ export default function AllOrganizations(): React.JSX.Element {
     [pauses.data],
   );
   const [query, setQuery] = useState("");
+  const [switching, setSwitching] = useState<Organization | null>(null);
 
   function handleDelete(
     event: React.MouseEvent,
@@ -159,7 +160,10 @@ export default function AllOrganizations(): React.JSX.Element {
                         />
                       </Table.Cell>
                       <Table.Cell>
-                        <TestModeCell org={org} />
+                        <TestModeCell
+                          org={org}
+                          onSwitch={() => setSwitching(org)}
+                        />
                       </Table.Cell>
                       <Table.Cell className="text-right">
                         <Button
@@ -177,6 +181,9 @@ export default function AllOrganizations(): React.JSX.Element {
               </Table.Body>
             </Table>
           </Card>
+        )}
+        {switching && (
+          <TestModeDialog org={switching} onClose={() => setSwitching(null)} />
         )}
       </div>
     </>
@@ -269,56 +276,65 @@ function ProofingPauseCell({
 }
 
 // Whether an org runs in test mode, and the platform admin's switch for it.
-// Both ways are confirmed: the org's proofing lists change with its mode.
 function TestModeCell({
   org,
-}: Readonly<{ org: Organization }>): React.JSX.Element {
+  onSwitch,
+}: Readonly<{ org: Organization; onSwitch: () => void }>): React.JSX.Element {
   const { t } = useTranslation();
-  const set = useSetTestModeMutation();
-  const [confirming, setConfirming] = useState(false);
-  const next = !org.testMode;
   return (
-    <div
-      className="flex flex-wrap items-center gap-2"
-      // The row opens the org; this cell's button must not.
-      onClick={(event) => event.stopPropagation()}
-    >
+    <div className="flex flex-wrap items-center gap-2">
       {org.testMode ? (
         <Tag tone="amber">{t("testMode.label")}</Tag>
       ) : (
         <Tag tone="green">{t("testMode.live")}</Tag>
       )}
-      <Button size="sm" variant="secondary" onClick={() => setConfirming(true)}>
-        {next ? t("testMode.switchToTest") : t("testMode.switchToLive")}
+      <Button
+        size="sm"
+        variant="secondary"
+        onClick={(event) => {
+          // The row opens the org; this button must not.
+          event.stopPropagation();
+          onSwitch();
+        }}
+      >
+        {org.testMode ? t("testMode.switchToLive") : t("testMode.switchToTest")}
       </Button>
-      {confirming && (
-        <ConfirmDialog
-          title={
-            next
-              ? t("testMode.confirmTestTitle", { name: org.name })
-              : t("testMode.confirmLiveTitle", { name: org.name })
-          }
-          message={
-            next
-              ? t("testMode.confirmTestMessage")
-              : t("testMode.confirmLiveMessage")
-          }
-          confirmLabel={
-            next ? t("testMode.switchToTest") : t("testMode.switchToLive")
-          }
-          busy={set.isPending}
-          onConfirm={() =>
-            set.mutate(
-              { id: org.id, testMode: next },
-              { onSuccess: () => setConfirming(false) },
-            )
-          }
-          onClose={() => {
-            set.reset();
-            setConfirming(false);
-          }}
-        />
-      )}
     </div>
+  );
+}
+
+// Confirms switching org's mode: its proofing lists change with it. Rendered
+// outside the table, so a click in it does not open the org's row.
+function TestModeDialog({
+  org,
+  onClose,
+}: Readonly<{ org: Organization; onClose: () => void }>): React.JSX.Element {
+  const { t } = useTranslation();
+  const set = useSetTestModeMutation();
+  const next = !org.testMode;
+  return (
+    <ConfirmDialog
+      title={
+        next
+          ? t("testMode.confirmTestTitle", { name: org.name })
+          : t("testMode.confirmLiveTitle", { name: org.name })
+      }
+      message={
+        next
+          ? t("testMode.confirmTestMessage")
+          : t("testMode.confirmLiveMessage")
+      }
+      confirmLabel={
+        next ? t("testMode.switchToTest") : t("testMode.switchToLive")
+      }
+      busy={set.isPending}
+      onConfirm={() =>
+        set.mutate({ id: org.id, testMode: next }, { onSuccess: onClose })
+      }
+      onClose={() => {
+        set.reset();
+        onClose();
+      }}
+    />
   );
 }

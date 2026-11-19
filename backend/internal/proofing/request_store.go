@@ -866,8 +866,9 @@ func (s *RequestStore) Reread(ctx context.Context, req Request) (Request, error)
 // SubjectKindOf returns whether the org's request went to a member or to an
 // external person, and the flow it runs, or ErrRequestNotFound.
 func (s *RequestStore) SubjectKindOf(ctx context.Context, orgID, id uuid.UUID) (kind SubjectKind, flowID string, err error) {
-	err = s.db.QueryRow(ctx, `SELECT r.subject_kind, r.flow_id FROM identity_proofing_requests r
-		WHERE r.id = $1 AND r.organization_id = $2 AND `+inOrgMode, id, orgID).Scan(&kind, &flowID)
+	// The subject's page and app read it by link or session: not by the org's mode.
+	err = s.db.QueryRow(ctx, `SELECT subject_kind, flow_id FROM identity_proofing_requests
+		WHERE id = $1 AND organization_id = $2`, id, orgID).Scan(&kind, &flowID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", "", ErrRequestNotFound
 	}

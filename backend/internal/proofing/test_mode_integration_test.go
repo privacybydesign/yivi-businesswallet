@@ -25,11 +25,11 @@ func TestTestModeKeepsRequestsApart(t *testing.T) {
 	ctx := context.Background()
 	running := time.Now().Add(SessionTTL)
 
-	real := createdRequest(t, store, hostedRequestIn(t, orgID, sam, running))
+	realReq := createdRequest(t, store, hostedRequestIn(t, orgID, sam, running))
 	setTestMode(t, pool, orgID, true)
-	test := createdRequest(t, store, hostedRequestIn(t, orgID, sam, running))
-	if real.Test || !test.Test {
-		t.Fatalf("test flags = %v, %v; want false, true", real.Test, test.Test)
+	testReq := createdRequest(t, store, hostedRequestIn(t, orgID, sam, running))
+	if realReq.Test || !testReq.Test {
+		t.Fatalf("test flags = %v, %v; want false, true", realReq.Test, testReq.Test)
 	}
 
 	sees := func(mode string, shown, hidden Request) {
@@ -45,6 +45,9 @@ func TestTestModeKeepsRequestsApart(t *testing.T) {
 		}
 		if got, err := store.Reread(ctx, hidden); err != nil || got.ID != hidden.ID {
 			t.Errorf("%s: Reread hidden = %v; a step under way finishes on it", mode, err)
+		}
+		if _, _, err := store.SubjectKindOf(ctx, orgID, hidden.ID); err != nil {
+			t.Errorf("%s: SubjectKindOf hidden = %v; its subject's page still opens", mode, err)
 		}
 		list, err := store.List(ctx, orgID, RequestFilter{})
 		if err != nil {
@@ -66,9 +69,9 @@ func TestTestModeKeepsRequestsApart(t *testing.T) {
 			t.Errorf("%s: Stats = %+v, %v; want one session", mode, stats, err)
 		}
 	}
-	sees("test", test, real)
+	sees("test", testReq, realReq)
 	setTestMode(t, pool, orgID, false)
-	sees("live", real, test)
+	sees("live", realReq, testReq)
 }
 
 // A test session's webhooks say so; a real one's do not.
@@ -83,11 +86,11 @@ func TestTestModeMarksWebhooks(t *testing.T) {
 	if _, _, err := webhooks.Save(ctx, orgID, "https://hooks.example.org/x", []string{EventSessionReviewOpened}); err != nil {
 		t.Fatalf("Save webhook: %v", err)
 	}
-	real := storeInReview(t, requests, newStoredRequest(orgID, sam, externalSubject("anna@example.org")), "s-real")
+	realReq := storeInReview(t, requests, newStoredRequest(orgID, sam, externalSubject("anna@example.org")), "s-real")
 	setTestMode(t, pool, orgID, true)
-	test := storeInReview(t, requests, newStoredRequest(orgID, sam, externalSubject("bob@example.org")), "s-test")
+	testReq := storeInReview(t, requests, newStoredRequest(orgID, sam, externalSubject("bob@example.org")), "s-test")
 
-	for req, want := range map[uuid.UUID]bool{real.ID: false, test.ID: true} {
+	for req, want := range map[uuid.UUID]bool{realReq.ID: false, testReq.ID: true} {
 		var n int
 		var marked bool
 		if err := pool.QueryRow(ctx, `SELECT count(*), COALESCE(bool_and(payload->>'test' = 'true'), false)
@@ -106,11 +109,11 @@ func TestTestModeMarksAuditEvents(t *testing.T) {
 	requests := NewRequestStore(pool, audit.NewDBRecorder(), newTestCipher(t))
 	orgID := makeOrg(t, pool, "acme")
 	sam := makeUser(t, pool, "sam@example.org")
-	real := storeInReview(t, requests, newStoredRequest(orgID, sam, externalSubject("anna@example.org")), "s-real")
+	realReq := storeInReview(t, requests, newStoredRequest(orgID, sam, externalSubject("anna@example.org")), "s-real")
 	setTestMode(t, pool, orgID, true)
-	test := storeInReview(t, requests, newStoredRequest(orgID, sam, externalSubject("bob@example.org")), "s-test")
+	testReq := storeInReview(t, requests, newStoredRequest(orgID, sam, externalSubject("bob@example.org")), "s-test")
 
-	for req, want := range map[uuid.UUID]bool{real.ID: false, test.ID: true} {
+	for req, want := range map[uuid.UUID]bool{realReq.ID: false, testReq.ID: true} {
 		var n int
 		var marked bool
 		if err := pool.QueryRow(context.Background(), `SELECT count(*), COALESCE(bool_and(test), false) FROM audit_events

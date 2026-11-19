@@ -257,7 +257,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) error {
 func (h *Handler) get(w http.ResponseWriter, r *http.Request) error {
 	id, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
-		return badRequest("invalid_id", "invalid id")
+		return badRequest("invalid_id", msgInvalidID)
 	}
 
 	org, err := h.store.GetByID(r.Context(), id)
@@ -275,7 +275,7 @@ func (h *Handler) get(w http.ResponseWriter, r *http.Request) error {
 func (h *Handler) delete(w http.ResponseWriter, r *http.Request) error {
 	id, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
-		return badRequest("invalid_id", "invalid id")
+		return badRequest("invalid_id", msgInvalidID)
 	}
 
 	if err := h.store.Delete(r.Context(), id); errors.Is(err, ErrNotFound) {
@@ -288,6 +288,9 @@ func (h *Handler) delete(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
+// msgInvalidID answers an organization id that is not a UUID.
+const msgInvalidID = "invalid id"
+
 type testModeRequest struct {
 	TestMode *bool `json:"testMode"`
 }
@@ -295,7 +298,7 @@ type testModeRequest struct {
 func (h *Handler) setTestMode(w http.ResponseWriter, r *http.Request) error {
 	id, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
-		return badRequest("invalid_id", "invalid id")
+		return badRequest("invalid_id", msgInvalidID)
 	}
 	var req testModeRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {

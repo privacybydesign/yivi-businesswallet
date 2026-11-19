@@ -121,12 +121,9 @@ export default function Root(): React.JSX.Element | null {
           />
           <main className="min-w-0 flex-1">
             {activeOrg?.testMode && (
-              <p
-                role="status"
-                className="bg-warning-bg text-warning-fg px-4 py-2 text-[13px] font-semibold sm:px-8"
-              >
+              <output className="bg-warning-bg text-warning-fg block px-4 py-2 text-[13px] font-semibold sm:px-8">
                 {t("testMode.banner")}
-              </p>
+              </output>
             )}
             <Outlet />
           </main>
