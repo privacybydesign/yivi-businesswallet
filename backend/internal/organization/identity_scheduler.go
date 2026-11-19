@@ -2,12 +2,13 @@ package organization
 
 import (
 	"context"
-	"errors"
 	"log/slog"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/database"
 )
 
 const (
@@ -41,28 +42,15 @@ func NewIdentityScheduler(store *Store, mailer identityMailer, appBaseURL string
 	return &IdentityScheduler{store: store, mailer: mailer, appBaseURL: strings.TrimRight(appBaseURL, "/")}
 }
 
-// Start runs one sweep per tick until ctx is cancelled. It returns immediately;
-// the first sweep is one interval away; a restart does not immediately re-sweep
-// (the day-granularity deadline makes that unnecessary), mirroring
-// provisioning.Scheduler's rationale.
-func (s *IdentityScheduler) Start(ctx context.Context, interval time.Duration) {
+// Start sweeps whenever a sweep is due, a day after the last one by any
+// replica, until ctx is cancelled. It returns immediately. The last sweep is
+// kept in the database: counting from process start instead, replicas that are
+// redeployed more often than the interval never sent a reminder.
+func (s *IdentityScheduler) Start(ctx context.Context, runs database.Querier, interval time.Duration) {
 	if interval <= 0 {
 		interval = DefaultIdentityScheduleInterval
 	}
-	ticker := time.NewTicker(interval)
-	go func() {
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				if err := s.SweepAll(ctx); err != nil && !errors.Is(err, context.Canceled) {
-					slog.ErrorContext(ctx, "identity: reminder sweep failed", slog.String("error", err.Error()))
-				}
-			}
-		}
-	}()
+	database.Periodic{Name: "identity-reminders", Interval: interval, Runs: runs}.Start(ctx, s.SweepAll)
 }
 
 // SweepAll runs one pass over every organisation. Organisations are swept one
@@ -140,7 +128,9 @@ func (s *IdentityScheduler) remind(ctx context.Context, org Organization, c Remi
 		return false
 	}
 
-	if err := s.store.RecordIdentityReminderSent(ctx, org.ID, c.UserID, c.Email, c.Overdue); err != nil {
+	// The mail is out, so the send is recorded even when a shutdown has just
+	// cancelled ctx: unrecorded, the next sweep would mail the member again.
+	if err := s.store.RecordIdentityReminderSent(context.WithoutCancel(ctx), org.ID, c.UserID, c.Email, c.Overdue); err != nil {
 		slog.ErrorContext(ctx, "identity: record reminder sent failed",
 			slog.String("organizationId", org.ID.String()), slog.String("userId", c.UserID.String()), slog.String("error", err.Error()))
 		return false

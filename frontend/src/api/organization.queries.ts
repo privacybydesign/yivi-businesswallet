@@ -6,9 +6,12 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import type {
+  QueryClient,
+  QueryKey,
   InfiniteData,
   UseInfiniteQueryResult,
   UseMutationResult,
+  UseQueryOptions,
   UseQueryResult,
 } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
@@ -64,6 +67,7 @@ import type {
   ScreeningSettingsInput,
   UploadVogResult,
 } from "./organization";
+import { RARELY_CHANGING_STALE_TIME_MS } from "./stale-time";
 import { toast } from "../lib/toast";
 
 export const organizationsQueryKey = ["organizations"] as const;
@@ -73,13 +77,38 @@ export function organizationQueryKey(slug: string): readonly string[] {
   return ["organizations", "detail", slug];
 }
 
+// Position of the resource name in ["organizations", "detail", slug, resource].
+const ORG_RESOURCE_KEY_INDEX = 3;
+
+// Matches the named resources of every org, for a change that is not tied to
+// one slug. Use it instead of invalidating the whole organizations prefix.
+export function orgResourceQueries(
+  ...resources: readonly string[]
+): (query: { queryKey: QueryKey }) => boolean {
+  return ({ queryKey }) =>
+    queryKey[0] === organizationsQueryKey[0] &&
+    typeof queryKey[ORG_RESOURCE_KEY_INDEX] === "string" &&
+    resources.includes(queryKey[ORG_RESOURCE_KEY_INDEX]);
+}
+
+// The org lists (all and mine) without the per-org queries under the prefix.
+export function invalidateOrganizationLists(
+  queryClient: QueryClient,
+): Promise<void[]> {
+  return Promise.all([
+    queryClient.invalidateQueries({
+      queryKey: organizationsQueryKey,
+      exact: true,
+    }),
+    queryClient.invalidateQueries({ queryKey: myOrganizationsQueryKey }),
+  ]);
+}
+
 export function organizationMembersQueryKey(slug: string): readonly string[] {
   return ["organizations", "detail", slug, "members"];
 }
 
-// Nested under organizationQueryKey(slug) on purpose: every mutation that can
-// move a member's identity or VOG status already invalidates that prefix, so
-// the insights refresh with the rest of the org detail.
+// A mutation that moves a member's identity or VOG status invalidates this key.
 export function memberInsightsQueryKey(slug: string): readonly string[] {
   return ["organizations", "detail", slug, "member-insights"];
 }
@@ -165,8 +194,7 @@ export function useDeleteOrganizationMutation(): UseMutationResult<
     meta: { suppressErrorToast: true },
     onSuccess: () => {
       toast.success(t("toasts.organizationDeleted"));
-      void queryClient.invalidateQueries({ queryKey: organizationsQueryKey });
-      void queryClient.invalidateQueries({ queryKey: myOrganizationsQueryKey });
+      void invalidateOrganizationLists(queryClient);
     },
   });
 }
@@ -185,7 +213,17 @@ export function useUpdateOrganizationMutation(
         queryKey: organizationAuditEventsQueryKey(slug),
       });
       // Returned so a caller's onSuccess runs once the new name has loaded.
-      return queryClient.invalidateQueries({ queryKey: organizationsQueryKey });
+      return Promise.all([
+        invalidateOrganizationLists(queryClient),
+        queryClient.invalidateQueries({
+          queryKey: organizationQueryKey(slug),
+          exact: true,
+        }),
+        // The proofing mail preview is rendered with the org's name.
+        queryClient.invalidateQueries({
+          queryKey: [...organizationQueryKey(slug), "identity-proofing"],
+        }),
+      ]).then(() => undefined);
     },
   });
 }
@@ -197,17 +235,24 @@ export function useMyOrganizationsQuery(
     queryKey: myOrganizationsQueryKey,
     queryFn: ({ signal }) => getMyOrganizations(signal),
     enabled,
+    staleTime: RARELY_CHANGING_STALE_TIME_MS,
   });
+}
+
+// Shared by the hook and the route loader, so a prefetch fills the same entry.
+export function organizationQueryOptions(
+  slug: string,
+): UseQueryOptions<OrganizationDetail> {
+  return {
+    queryKey: organizationQueryKey(slug),
+    queryFn: ({ signal }) => getOrganization(slug, signal),
+  };
 }
 
 export function useOrganizationQuery(
   slug: string,
 ): UseQueryResult<OrganizationDetail, Error> {
-  return useQuery({
-    queryKey: organizationQueryKey(slug),
-    queryFn: ({ signal }) => getOrganization(slug, signal),
-    enabled: slug !== "",
-  });
+  return useQuery({ ...organizationQueryOptions(slug), enabled: slug !== "" });
 }
 
 export function useOrganizationMembersQuery(
@@ -673,7 +718,12 @@ export function useUploadVogMutation(
         queryKey: screeningHistoryQueryKey(slug, userId),
       });
       void queryClient.invalidateQueries({
+        queryKey: memberInsightsQueryKey(slug),
+      });
+      // The caller's own VOG state rides on the org detail.
+      void queryClient.invalidateQueries({
         queryKey: organizationQueryKey(slug),
+        exact: true,
       });
       void queryClient.invalidateQueries({
         queryKey: organizationAuditEventsQueryKey(slug),

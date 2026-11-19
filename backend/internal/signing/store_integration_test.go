@@ -527,3 +527,49 @@ func TestDeclineSignerRefusesAnAlreadySignedSigner(t *testing.T) {
 		t.Fatalf("decline of an already-signed signer = %v, want ErrAlreadySigned", err)
 	}
 }
+
+// A completed request whose delivery is still pending long after it should
+// have gone out was lost with its process; a fresh one is still on its way.
+func TestListStalledDeliveries(t *testing.T) {
+	store, pool := newStore(t)
+	ctx := context.Background()
+	orgID := makeOrg(t, pool, "acme")
+	alice := makeUser(t, pool, "alice@acme.example")
+
+	newCompleted := func(filename string) uuid.UUID {
+		t.Helper()
+		id, _, err := store.CreateRequest(ctx, orgID, alice, filename, []byte(samplePDF), ModeSequential,
+			[]SignerInput{{Kind: KindInternal, UserID: alice, Order: 1}},
+			RecipientInput{Channel: ChannelEmail, Address: "recipient@example.org", Name: "Recipient"})
+		if err != nil {
+			t.Fatalf("CreateRequest: %v", err)
+		}
+		if err := store.CompleteRequest(ctx, orgID, id); err != nil {
+			t.Fatalf("CompleteRequest: %v", err)
+		}
+		return id
+	}
+	lost := newCompleted("lost.pdf")
+	fresh := newCompleted("fresh.pdf")
+	delivered := newCompleted("delivered.pdf")
+	if _, err := pool.Exec(ctx, `UPDATE signing_requests SET updated_at = now() - interval '1 hour' WHERE id = ANY($1)`,
+		[]uuid.UUID{lost, delivered}); err != nil {
+		t.Fatalf("age requests: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE signing_requests SET delivery_status = $2 WHERE id = $1`, delivered, DeliveryDelivered); err != nil {
+		t.Fatalf("mark delivered: %v", err)
+	}
+
+	stalled, err := store.ListStalledDeliveries(ctx, 10*time.Minute)
+	if err != nil {
+		t.Fatalf("ListStalledDeliveries: %v", err)
+	}
+	if len(stalled) != 1 || stalled[0].RequestID != lost || stalled[0].OrgID != orgID {
+		t.Fatalf("stalled = %+v, want only %s (not the fresh %s)", stalled, lost, fresh)
+	}
+
+	// Completing again changes nothing: the guard matches no row.
+	if err := store.CompleteRequest(ctx, orgID, lost); err != nil {
+		t.Fatalf("CompleteRequest twice: %v", err)
+	}
+}

@@ -1,7 +1,9 @@
 package server
 
 import (
+	"compress/gzip"
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -164,5 +166,73 @@ func TestSPAFeatureHeadersScoped(t *testing.T) {
 		if got := rec.Header().Get("Content-Security-Policy"); got != want {
 			t.Errorf("%s: CSP = %q, want %q", path, got, want)
 		}
+	}
+}
+
+func TestSPA_CachesHashedAssetsForGood(t *testing.T) {
+	h := New(stubPinger{}, writeStaticSite(t))
+
+	asset := httptest.NewRecorder()
+	h.ServeHTTP(asset, httptest.NewRequest(http.MethodGet, "/assets/app.js", nil))
+	if got := asset.Header().Get("Cache-Control"); got != immutableCache {
+		t.Fatalf("asset Cache-Control = %q, want %q", got, immutableCache)
+	}
+
+	index := httptest.NewRecorder()
+	h.ServeHTTP(index, httptest.NewRequest(http.MethodGet, "/orgs/acme", nil))
+	if got := index.Header().Get("Cache-Control"); got != revalidateCache {
+		t.Fatalf("index Cache-Control = %q, want %q", got, revalidateCache)
+	}
+}
+
+func TestSPA_GzipsAssetWhenAccepted(t *testing.T) {
+	h := New(stubPinger{}, writeStaticSite(t))
+
+	// Twice: the second answer comes from the cache and must be the same.
+	for range 2 {
+		req := httptest.NewRequest(http.MethodGet, "/assets/app.js", nil)
+		req.Header.Set("Accept-Encoding", "gzip, br")
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+
+		if got := rec.Header().Get("Content-Encoding"); got != "gzip" {
+			t.Fatalf("Content-Encoding = %q, want gzip", got)
+		}
+		zr, err := gzip.NewReader(rec.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, err := io.ReadAll(zr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(body) != "console.log(1)" {
+			t.Fatalf("unzipped body = %q", body)
+		}
+	}
+}
+
+func TestSPA_RangeRequestIsNotGzipped(t *testing.T) {
+	h := New(stubPinger{}, writeStaticSite(t))
+
+	req := httptest.NewRequest(http.MethodGet, "/assets/app.js", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+	req.Header.Set("Range", "bytes=0-6")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Header().Get("Content-Encoding") != "" || rec.Body.String() != "console" {
+		t.Fatalf("range answer: encoding %q body %q", rec.Header().Get("Content-Encoding"), rec.Body.String())
+	}
+}
+
+func TestSPA_MissingHashedAssetIsNotFound(t *testing.T) {
+	h := New(stubPinger{}, writeStaticSite(t))
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/assets/old-chunk.js", nil))
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("missing asset: status %d, want 404 and not the index document", rec.Code)
 	}
 }

@@ -1569,22 +1569,29 @@ decides, of a `kind` (`identity`, `address`, `employment`, `data_request`) in a
   (`reviewReason`) goes first.
 
 **Live updates, no polling.**
-- A trigger on `identity_proofing_requests` (migration `20261029100000`) sends
-  `pg_notify('identity_proofing_reviews', organization_id)` when `status`,
-  `purged_at` or `ips_session_ended_at` changes, whoever writes the row. One on
-  `identity_proofing_review_items` sends it on every insert, update and delete.
-- `proofing.ReviewFeed` holds one LISTEN per API process (`database.Listen`) and
-  tells that org's subscribers. Each (re)connect of the LISTEN tells all of them.
-- `GET .../identity-proofing/reviews/events` (reviewer route) is a Server-Sent
-  Events stream: a `reviews` event with no data per change, and a comment every
-  25 s so a proxy keeps it open. It ends on `RegisterOnShutdown(feed.Stop)`.
-- The sidebar mounts `useReviewEvents` for a reader who may review: every event,
-  and every (re)open of the stream, invalidates the requests key, so the count,
-  the Reviews tabs, Closed and the Overview re-read at once.
-- The tabs of one browser share one stream (`api/review-events.ts`): over
+- The wallet's Observer is `internal/events`. Triggers call
+  `notify_wallet_event(kind, id column)` (migrations `20261118150100` and on),
+  which sends `pg_notify('wallet_events', '<kind>:<id>')`, whoever writes the
+  row. `identity_proofing_requests` sends `reviews` for its org on insert and
+  when `status`, `purged_at` or `ips_session_ended_at` changes, and
+  `proofing-request` (its own id) and `proofing-progress` (its org) on any
+  update. `identity_proofing_review_items` sends `reviews`,
+  `identity_proofing_sessions` `proofing-progress`,
+  `identity_proofing_webhook_deliveries` `webhooks`.
+- `events.Hub` holds one LISTEN per API process (`database.Listen`) and tells
+  the subscribers of each topic. Each (re)connect of the LISTEN tells all of them.
+- `GET /orgs/{slug}/events` (member route) is a Server-Sent Events stream: an
+  event named after its kind, with no data, per change, and a comment every
+  25 s so a proxy keeps it open. It ends on `RegisterOnShutdown(hub.Stop)`. A
+  hosted page has no session, so it follows `GET /proof/{token}/events`.
+- The sidebar mounts `useOrgEvents` (`api/org-events.queries.ts`) for every
+  member: each event re-reads what its kind names (`REREADS`), and every
+  (re)open of the stream re-reads all of it. A read that follows the stream
+  polls only while `useOrgStreamConnected` is false.
+- The tabs of one browser share one stream (`api/org-events.ts`): over
   HTTP/1.1 a browser holds at most six connections per host for all its tabs,
   so a stream per tab left other requests queued until they timed out. The tab
-  holding the Web Lock `review-events:{slug}` opens it and passes each change to
+  holding the Web Lock `org-events:{slug}` opens it and passes each event to
   the others over a `BroadcastChannel`; the next tab takes over when it closes. A row opens its review page, `reviews/{requestId}`: for an identity check
 (`identity-check-review.tsx`) why it waits, the checks the engine ran, the data
 from the chip (an audited result read) and the decision; for a data request §15.

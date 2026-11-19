@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/wsca"
 )
 
@@ -14,7 +15,7 @@ import (
 // operation reports ErrNotConfigured before touching the database.
 func TestStoreNotConfigured(t *testing.T) {
 	t.Parallel()
-	s := wsca.NewStore(nil, nil)
+	s := wsca.NewStore(nil, nil, audit.NopRecorder{})
 	ctx := context.Background()
 	org := uuid.New()
 

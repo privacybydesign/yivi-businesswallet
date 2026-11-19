@@ -23,13 +23,23 @@ import (
 // RequestStore persists proofing requests. The engine session token is sealed
 // with the same deployment key as the org's API key.
 type RequestStore struct {
-	db     database.DB
+	db database.DB
+	// locks is where advisoryLock's long-held transactions run; db unless
+	// UseLockPool set a pool of their own.
+	locks  database.DB
 	audit  audit.Recorder
 	cipher *crypto.Cipher
 }
 
 func NewRequestStore(db database.DB, recorder audit.Recorder, cipher *crypto.Cipher) *RequestStore {
-	return &RequestStore{db: db, audit: recorder, cipher: cipher}
+	return &RequestStore{db: db, locks: db, audit: recorder, cipher: cipher}
+}
+
+// UseLockPool moves the locks held across a whole operation onto locks. Their
+// holder does its work on db, so sharing one pool lets enough holders starve
+// each other of the second connection they all wait for.
+func (s *RequestStore) UseLockPool(locks database.DB) {
+	s.locks = locks
 }
 
 // requestColumns is the SELECT list scanRequest reads, over requestFrom.
@@ -716,7 +726,7 @@ const reviewLockKey = "identity_proofing_review:"
 // decision's own writes on other connections never wait for. A second
 // decision waits, then finds the request decided.
 func (s *RequestStore) LockReview(ctx context.Context, id uuid.UUID) (func(), error) {
-	release, _, err := advisoryLock(ctx, s.db, reviewLockKey, id, true)
+	release, _, err := advisoryLock(ctx, s.locks, reviewLockKey, id, true)
 	return release, err
 }
 
@@ -902,6 +912,11 @@ func (s *RequestStore) List(ctx context.Context, orgID uuid.UUID, filter Request
 	if filter.ClosedReviews {
 		closed, order = closedReview, closedReviewOrder
 	}
+	waiting := "TRUE"
+	if filter.WaitingReviews {
+		// When it went to review (completed_at), as waitingSince on the page.
+		waiting, order = waitingReview, `COALESCE(r.completed_at, r.created_at), r.created_at`
+	}
 	query := `SELECT ` + requestColumns + requestFrom + `
 		WHERE r.organization_id = $1 AND ($2::uuid IS NULL OR r.requested_by = $2)
 			AND ($4::uuid IS NULL OR r.subject_user_id = $4)
@@ -911,6 +926,7 @@ func (s *RequestStore) List(ctx context.Context, orgID uuid.UUID, filter Request
 			AND (NOT $8::boolean OR r.flow_kind IN ($9, $10))
 			AND ($11::text IS NULL OR ` + reviewItemMatches("$11", "$12") + `)
 			AND ` + closed + `
+			AND ` + waiting + `
 		ORDER BY ` + order + ` LIMIT $3`
 	rows, err := s.db.Query(ctx, query, orgID, filter.RequestedBy, maxListedRequests, filter.SubjectUserID, filter.SubjectKind,
 		filter.FlowID, filter.Status, filter.DataRequests, string(FlowDataAccess), string(FlowDataErasure), reviewKind, reviewState)

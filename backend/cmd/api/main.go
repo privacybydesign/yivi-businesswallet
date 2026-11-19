@@ -31,6 +31,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/emailchannel"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/employment"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/eudiholder"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/events"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/idscan"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/issuersettings"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/logging"
@@ -651,13 +652,25 @@ func run() error {
 	startupCtx, cancel := context.WithTimeout(ctx, pingTimeout)
 	defer cancel()
 
-	pool, err := database.New(startupCtx, cfg.DatabaseDSN)
+	pool, err := database.NewWithOptions(startupCtx, cfg.DatabaseDSN, database.Options{
+		MaxConns: cfg.DatabaseMaxConns, StatementTimeout: cfg.DatabaseStatementTimeout,
+	})
 	if err != nil {
 		return err
 	}
 	defer pool.Close()
+	// No statement timeout here: a lock is waited for, then held idle.
+	lockPool, err := database.NewWithOptions(startupCtx, cfg.DatabaseDSN, database.Options{MaxConns: cfg.DatabaseLockMaxConns, HoldsLocks: true})
+	if err != nil {
+		return err
+	}
+	defer lockPool.Close()
 
-	w := &wiring{cfg: cfg, pool: pool}
+	// One LISTEN tells every open page what changed, so none polls for it.
+	hub := events.NewHub()
+	go hub.Run(ctx, pool)
+
+	w := &wiring{cfg: cfg, pool: pool, lockPool: lockPool, events: hub}
 	defer w.close()
 	for _, build := range []func(context.Context) error{
 		w.buildAuth,
@@ -678,9 +691,12 @@ func run() error {
 // wiring holds what run builds, stage by stage: each stage reads what the
 // earlier ones left here. closers are released, last first, when run returns.
 type wiring struct {
-	cfg     config.Config
-	pool    *pgxpool.Pool
-	closers []func()
+	cfg  config.Config
+	pool *pgxpool.Pool
+	// lockPool carries the locks held across a whole operation.
+	lockPool *pgxpool.Pool
+	events   *events.Hub
+	closers  []func()
 
 	verifier           *openid4vpverifier.Client
 	notificationStore  *notifications.Store
@@ -700,7 +716,6 @@ type wiring struct {
 	qerdsStore         *qerds.Store
 	qerdsService       *qerds.Service
 	proofingEngine     *proofingengine.Engine
-	proofingReviews    *proofing.ReviewFeed
 	selfReview         auth.SelfReview
 
 	authHandler           *auth.Handler
@@ -853,11 +868,11 @@ func (w *wiring) buildOrganizations(ctx context.Context) error {
 
 	// Daily re-identification reminder sweep (#240 §6): mails members whose
 	// identity is due soon or overdue, per each org's own policy.
-	organization.NewIdentityScheduler(w.orgStore, w.emailService, cfg.AppBaseURL).Start(ctx, organization.DefaultIdentityScheduleInterval)
+	organization.NewIdentityScheduler(w.orgStore, w.emailService, cfg.AppBaseURL).Start(ctx, w.pool, organization.DefaultIdentityScheduleInterval)
 
 	// Daily VOG reminder sweep (#242 §6): mails members whose VOG is expiring
 	// soon or has expired, per each org's own screening policy.
-	organization.NewScreeningScheduler(w.orgStore, w.emailService, cfg.AppBaseURL).Start(ctx, organization.DefaultScreeningScheduleInterval)
+	organization.NewScreeningScheduler(w.orgStore, w.emailService, cfg.AppBaseURL).Start(ctx, w.pool, organization.DefaultScreeningScheduleInterval)
 	return nil
 }
 
@@ -969,7 +984,7 @@ func (w *wiring) buildAttestations(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	wscaStore := wsca.NewStore(w.pool, wscaCipher)
+	wscaStore := wsca.NewStore(w.pool, wscaCipher, w.recorder)
 
 	w.themeSettingsHandler = themesettings.NewHandler(w.themeSettingsStore, w.requireUser, w.orgHandler.Authorize)
 
@@ -1191,7 +1206,7 @@ func (w *wiring) buildIntegrations(ctx context.Context) error {
 	provisioningService := provisioning.NewService(provisioningStore, provisioningOrgStore, provisioningOrgStore, w.emailService, cfg.AppBaseURL)
 	provisioningService.Register(provisioner.NewEntra(&http.Client{Timeout: provisioningHTTPTimeout}))
 	w.provisioningHandler = provisioning.NewHandler(provisioningStore, provisioningService, w.requireUser, w.orgHandler.Authorize)
-	provisioning.NewScheduler(provisioningStore, provisioningService).Start(ctx, provisioning.DefaultSyncInterval)
+	provisioning.NewScheduler(provisioningStore, provisioningService).Start(ctx, w.pool, provisioning.DefaultSyncInterval)
 
 	// Per-org CSC signing-provider settings (a remote QTSP driven over the CSC API
 	// v2). Settings + a connection test only for now; the signing ceremony is a
@@ -1215,9 +1230,11 @@ func (w *wiring) buildIntegrations(ctx context.Context) error {
 	// SigningRedirectURI is the QTSP-registered OAuth callback; empty falls back to
 	// the localhost default inside NewService (see signing.DefaultRedirectURI). A
 	// hosted deploy sets SIGNING_REDIRECT_URI to its own public callback.
-	w.signingHandler = signing.NewHandler(
-		signing.NewService(signingStore, signingprovider.NewClient(), cscStore, signingMembers{store: w.orgStore}, signingOrgs{store: w.orgStore}, signingDelivery, signingNotify, cfg.SigningRedirectURI, cfg.AppBaseURL, cfg.SigningOAuthIssuerInternal),
-		w.requireUser, w.orgHandler.Authorize)
+	signingService := signing.NewService(signingStore, signingprovider.NewClient(), cscStore, signingMembers{store: w.orgStore}, signingOrgs{store: w.orgStore}, signingDelivery, signingNotify, cfg.SigningRedirectURI, cfg.AppBaseURL, cfg.SigningOAuthIssuerInternal)
+	database.Periodic{Name: "signing-redelivery", Interval: signing.RedeliveryInterval, Runs: w.pool}.
+		Start(ctx, signingService.RedeliverStalled)
+	w.signingHandler = signing.NewHandler(signingService, w.requireUser, w.orgHandler.Authorize)
+	w.signingHandler.SetEvents(w.events)
 	return nil
 }
 
@@ -1248,6 +1265,7 @@ func (w *wiring) buildProofing(ctx context.Context) error {
 		return err
 	}
 	proofingWebhooks := proofing.NewWebhookStore(w.pool, w.recorder, proofingCipher)
+	proofingRequests.UseLockPool(w.lockPool)
 	proofingService := proofing.NewService(
 		proofing.NewStores(w.pool, w.recorder, proofingCipher, proofingRequests, proofingWebhooks),
 		ips, w.verifier, w.emailService)
@@ -1299,10 +1317,7 @@ func (w *wiring) buildProofing(ctx context.Context) error {
 	w.proofingHandler.SetPlatformAdmins(w.platformAdmins)
 	w.proofingHandler.SetSelfReview(w.selfReview)
 	w.proofingHandler.SetAppBranding(brandingResolver)
-	// A reviewer's open pages follow the org's reviews as they change.
-	w.proofingReviews = proofing.NewReviewFeed()
-	go w.proofingReviews.Run(proofingJobs, w.pool)
-	w.proofingHandler.SetReviewFeed(w.proofingReviews)
+	w.proofingHandler.SetEvents(w.events)
 	startPruner(proofingJobs, "identity_proofing_idempotency_keys", cfg.SessionPruneEvery, proofingIdempotency.Prune)
 	startPruner(proofingJobs, "identity_proofing_webhook_deliveries", cfg.SessionPruneEvery, proofingWebhooks.PruneDeliveries)
 	return nil
@@ -1372,6 +1387,7 @@ func (w *wiring) httpServer() *http.Server {
 		w.signingHandler,
 		w.proofingHandler,
 		w.proofingApp,
+		events.NewHandler(w.events, w.requireUser, w.orgHandler.Authorize),
 	)
 	// Outermost, so every route and the SPA's page headers see the client
 	// address the trusted proxies report.
@@ -1389,10 +1405,8 @@ func (w *wiring) httpServer() *http.Server {
 	if w.proofingEngine != nil {
 		httpServer.RegisterOnShutdown(w.proofingEngine.StopWaiting)
 	}
-	// An open review stream ends at once too; the page reconnects elsewhere.
-	if w.proofingReviews != nil {
-		httpServer.RegisterOnShutdown(w.proofingReviews.Stop)
-	}
+	// An open event stream ends at once too; the page reconnects elsewhere.
+	httpServer.RegisterOnShutdown(w.events.Stop)
 	return httpServer
 }
 

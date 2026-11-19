@@ -18,6 +18,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/crypto"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/database"
 )
@@ -44,10 +45,11 @@ type Account struct {
 type Store struct {
 	db     database.DB
 	cipher *crypto.Cipher
+	audit  audit.Recorder
 }
 
-func NewStore(db database.DB, cipher *crypto.Cipher) *Store {
-	return &Store{db: db, cipher: cipher}
+func NewStore(db database.DB, cipher *crypto.Cipher, recorder audit.Recorder) *Store {
+	return &Store{db: db, cipher: cipher, audit: recorder}
 }
 
 // Configured reports whether a WSCA KEK is set (so secrets can be sealed/opened).
@@ -75,7 +77,16 @@ func (s *Store) Activate(ctx context.Context, orgID uuid.UUID, secret, accountID
 			rotated_at = NULL,
 			updated_at = now()
 		RETURNING organization_id, account_id, certificate_id, activated_at, rotated_at`
-	return scanAccount(s.db.QueryRow(ctx, query, orgID, accountID, certificateID, ct))
+	var acc Account
+	err = database.InTx(ctx, s.db, func(q database.Querier) error {
+		var err error
+		if acc, err = scanAccount(q.QueryRow(ctx, query, orgID, accountID, certificateID, ct)); err != nil {
+			return fmt.Errorf("wsca: activate org %s: %w", orgID, err)
+		}
+		return s.audit.Record(ctx, q, audit.WscaAccountActivated, wscaTarget(orgID),
+			audit.Created(map[string]any{"accountId": acc.AccountID, "certificateId": acc.CertificateID}))
+	})
+	return acc, err
 }
 
 // Rotate reseals a new secret for an already-activated org (the account id is
@@ -95,11 +106,28 @@ func (s *Store) Rotate(ctx context.Context, orgID uuid.UUID, newSecret, certific
 			updated_at = now()
 		WHERE organization_id = $1
 		RETURNING organization_id, account_id, certificate_id, activated_at, rotated_at`
-	acc, err := scanAccount(s.db.QueryRow(ctx, query, orgID, certificateID, ct))
-	if errors.Is(err, pgx.ErrNoRows) {
-		return Account{}, ErrNotActivated
-	}
+	var acc Account
+	err = database.InTx(ctx, s.db, func(q database.Querier) error {
+		var before string
+		err := q.QueryRow(ctx, `SELECT certificate_id FROM org_wsca_accounts WHERE organization_id = $1 FOR UPDATE`, orgID).Scan(&before)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotActivated
+		}
+		if err != nil {
+			return fmt.Errorf("wsca: read account org %s: %w", orgID, err)
+		}
+		if acc, err = scanAccount(q.QueryRow(ctx, query, orgID, certificateID, ct)); err != nil {
+			return fmt.Errorf("wsca: rotate org %s: %w", orgID, err)
+		}
+		return s.audit.Record(ctx, q, audit.WscaAccountRotated, wscaTarget(orgID),
+			audit.Updated(map[string]any{"certificateId": before}, map[string]any{"certificateId": acc.CertificateID}))
+	})
 	return acc, err
+}
+
+// wscaTarget is the org's one WSCA account; the sealed secret never enters the log.
+func wscaTarget(orgID uuid.UUID) audit.Target {
+	return audit.Target{Type: audit.TargetWscaAccount, ID: orgID.String(), OrgID: &orgID}
 }
 
 // Secret returns the decrypted activation secret for a sign operation. Callers

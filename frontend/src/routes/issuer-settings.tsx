@@ -9,6 +9,8 @@ import {
 } from "../api/issuer.queries";
 import { Button, Card } from "../ui";
 import { JsonSnippet } from "./json-snippet";
+import { draftChanged } from "../lib/form-draft";
+import { UnsavedChanges } from "./unsaved-changes";
 
 const EYEBROW =
   "text-muted font-label text-[11px] font-medium tracking-[0.06em] uppercase";
@@ -146,8 +148,21 @@ function IssuerForm({
     });
   }
 
+  const dirty =
+    logoFile !== null ||
+    removeLogo ||
+    draftChanged(
+      { instanceName, displayName, enabled },
+      {
+        instanceName: settings.instanceName,
+        displayName: settings.displayName,
+        enabled: settings.enabled,
+      },
+    );
+
   return (
     <Card className="p-7">
+      <UnsavedChanges dirty={dirty && !save.isPending} />
       <h2 className="text-[16px] font-semibold">{t("issuerSettings.title")}</h2>
       <p className="text-ink-soft mt-1 text-[13px]">
         {t("issuerSettings.intro")}

@@ -5,9 +5,14 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import type { UseMutationResult, UseQueryResult } from "@tanstack/react-query";
+import type {
+  UseMutationResult,
+  UseQueryOptions,
+  UseQueryResult,
+} from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { followReviewEvents } from "./review-events";
+import { useEventStream } from "./event-stream";
+import { useOrgStreamConnected } from "./org-events";
 import { DEFAULT_LANGUAGE, isSupportedLanguage } from "../i18n/language";
 import {
   previewBrandingMail,
@@ -64,7 +69,7 @@ import {
   listProofingPauses,
   setPlatformProofingPause,
   getProofingRequestResult,
-  reviewEventsUrl,
+  hostedEventsUrl,
   getProofingYiviDisclosure,
   newProofingClaimLink,
   chooseProofingMethod,
@@ -122,6 +127,7 @@ import {
   type ProofingOverview,
 } from "./identity-proofing";
 import type { AuditEvent } from "./organization";
+import { orgResourceQueries } from "./organization.queries";
 import { toast } from "../lib/toast";
 import type { AddressLookup } from "../lib/identity-proofing";
 import {
@@ -133,9 +139,8 @@ import {
   reviewPollContinues,
 } from "../lib/identity-proofing";
 
-// Both reads reconcile live requests at the proofing service, so a request in
-// flight is re-fetched until it settles. The recipient's own page polls faster:
-// it is watching one phone finish.
+// How often a read of live requests re-fetches. The lists and the overview do
+// so only while the org's event stream is not up (useReviewStreamConnected).
 const REQUESTS_POLL_INTERVAL_MS = 10_000;
 // The on-screen page is watching one phone finish, so it re-reads its request
 // and the Yivi disclosure much sooner.
@@ -427,13 +432,14 @@ export function useExternalRequestsQuery(
   flowId = "",
   enabled = true,
 ): UseQueryResult<ProofingRequest[], Error> {
+  const streaming = useOrgStreamConnected(slug);
   return useQuery({
     queryKey: [...proofingRequestsQueryKey(slug), "external", flowId],
     queryFn: ({ signal }) =>
       getProofingRequests(slug, { subjectKind: "external", flowId }, signal),
     enabled: enabled && slug !== "",
     refetchInterval: (query) =>
-      query.state.data?.some((r) => isProofingLive(r.status))
+      !streaming && query.state.data?.some((r) => isProofingLive(r.status))
         ? REQUESTS_POLL_INTERVAL_MS
         : false,
   });
@@ -443,41 +449,16 @@ export function useExternalRequestsQuery(
 export function useProofingOverviewQuery(
   slug: string,
 ): UseQueryResult<ProofingOverview, Error> {
+  const streaming = useOrgStreamConnected(slug);
   return useQuery({
     queryKey: [...proofingRequestsQueryKey(slug), "overview"],
     queryFn: ({ signal }) => getProofingOverview(slug, signal),
     enabled: slug !== "",
     refetchInterval: (query) =>
-      (query.state.data?.unfinished ?? 0) > 0
+      !streaming && (query.state.data?.unfinished ?? 0) > 0
         ? REQUESTS_POLL_INTERVAL_MS
         : false,
   });
-}
-
-// Re-reads the org's requests each time the backend says its reviews changed,
-// and each time the stream (re)connects, for what changed while it was down:
-// the sidebar's count and the Reviews lists follow at once, with no timer.
-// Mounted once, by the sidebar, for a reader who may review. The browser's
-// tabs share one stream (followReviewEvents).
-export function useReviewEvents(slug: string, enabled: boolean): void {
-  const queryClient = useQueryClient();
-  useEffect(() => {
-    if (!enabled || slug === "") {
-      return;
-    }
-    return followReviewEvents(
-      slug,
-      () =>
-        new EventSource(reviewEventsUrl(slug), {
-          withCredentials: true,
-        }),
-      () => {
-        void queryClient.invalidateQueries({
-          queryKey: proofingRequestsQueryKey(slug),
-        });
-      },
-    );
-  }, [queryClient, slug, enabled]);
 }
 
 // What waits for a reviewer, and whether either read hit its cap, so a count
@@ -499,22 +480,16 @@ export function useWaitingReviewsQuery(
 ): UseQueryResult<WaitingReviews, Error> {
   return useQuery({
     queryKey: [...proofingRequestsQueryKey(slug), "waiting"],
-    // Four reads: the checks and data requests in review, and the addresses,
-    // the Verzekeringsberichten and the diplomas waiting for a reviewer, each
-    // under its own cap.
+    // One read of everything that waits: the checks and data requests in
+    // review, and the addresses, the Verzekeringsberichten and the diplomas
+    // waiting for a reviewer.
     queryFn: async ({ signal }) => {
-      const reads = await Promise.all([
-        getProofingRequests(slug, { status: "needs_review" }, signal),
-        getProofingRequests(slug, { reviewKind: "address" }, signal),
-        getProofingRequests(slug, { reviewKind: "employment" }, signal),
-        getProofingRequests(slug, { reviewKind: "diplomas" }, signal),
-      ]);
-      // A request waits once, whatever more of it waits.
-      const byId = new Map(reads.flat().map((r) => [r.id, r]));
-      return {
-        requests: [...byId.values()],
-        capped: reads.some(requestListCapped),
-      };
+      const requests = await getProofingRequests(
+        slug,
+        { waiting: true },
+        signal,
+      );
+      return { requests, capped: requestListCapped(requests) };
     },
     enabled: options.enabled && slug !== "",
   });
@@ -528,10 +503,19 @@ export function useReviewItemCountsQuery(
   options: { enabled: boolean },
 ): UseQueryResult<ReviewItemCounts, Error> {
   return useQuery({
-    queryKey: [...proofingRequestsQueryKey(slug), "review-counts"],
-    queryFn: ({ signal }) => getReviewItemCounts(slug, signal),
+    ...reviewItemCountsQueryOptions(slug),
     enabled: options.enabled && slug !== "",
   });
+}
+
+// Shared by the hook and the route loader, so a prefetch fills the same entry.
+export function reviewItemCountsQueryOptions(
+  slug: string,
+): UseQueryOptions<ReviewItemCounts> {
+  return {
+    queryKey: [...proofingRequestsQueryKey(slug), "review-counts"],
+    queryFn: ({ signal }) => getReviewItemCounts(slug, signal),
+  };
 }
 
 // What was closed: the sessions whose review is over and the data requests
@@ -676,7 +660,7 @@ function proofingApiKeysQueryKey(slug: string): readonly string[] {
   return [...proofingQueryKey(slug), "api-keys"];
 }
 
-function proofingWebhookQueryKey(slug: string): readonly string[] {
+export function proofingWebhookQueryKey(slug: string): readonly string[] {
   return [...proofingQueryKey(slug), "webhook"];
 }
 
@@ -763,11 +747,15 @@ export function useProofingWebhookQuery(
 export function useWebhookDeliveriesQuery(
   slug: string,
 ): UseQueryResult<WebhookDelivery[], Error> {
+  const streaming = useOrgStreamConnected(slug);
   return useQuery({
     queryKey: [...proofingWebhookQueryKey(slug), "deliveries"],
     queryFn: ({ signal }) => getProofingWebhookDeliveries(slug, signal),
     enabled: slug !== "",
-    refetchInterval: (query) => deliveriesPollInterval(query.state.data),
+    // The org's event stream says when a delivery moves; the poll is the
+    // fallback while that stream is down.
+    refetchInterval: (query) =>
+      streaming ? false : deliveriesPollInterval(query.state.data),
   });
 }
 
@@ -850,13 +838,15 @@ export function useProofingRequestEventsQuery(
   slug: string,
   request: { id: string; status: string },
 ): UseQueryResult<AuditEvent[], Error> {
+  const streaming = useOrgStreamConnected(slug);
   return useQuery({
     queryKey: [...proofingRequestsQueryKey(slug), request.id, "events"],
     queryFn: ({ signal }) => getProofingRequestEvents(slug, request.id, signal),
     enabled: slug !== "" && request.id !== "",
-    refetchInterval: isProofingLive(request.status)
-      ? REQUESTS_POLL_INTERVAL_MS
-      : false,
+    refetchInterval:
+      !streaming && isProofingLive(request.status)
+        ? REQUESTS_POLL_INTERVAL_MS
+        : false,
   });
 }
 
@@ -946,7 +936,9 @@ export function useSetPlatformPauseMutation(): UseMutationResult<
     // The list, and any org's proofing a platform admin has open.
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: PROOFING_PAUSES_KEY });
-      await queryClient.invalidateQueries({ queryKey: ["organizations"] });
+      await queryClient.invalidateQueries({
+        predicate: orgResourceQueries("identity-proofing"),
+      });
     },
   });
 }
@@ -959,22 +951,42 @@ function verifyQueryKey(target: VerifyTarget): readonly unknown[] {
     : ["identity-proofing", "hosted", target.token];
 }
 
-// The progress a verify page follows, polled while the subject can still act.
+// What a hosted link's stream sends (events.ProofingRequest and
+// events.ProofingProgress in the backend).
+const HOSTED_EVENT_KINDS = ["proofing-request", "proofing-progress"] as const;
+
+// The progress a verify page follows while the subject can still act.
 export function useProofingProgressQuery(
   target: VerifyTarget,
 ): UseQueryResult<ProofingProgress, Error> {
+  const queryClient = useQueryClient();
+  const queryKey = [...verifyQueryKey(target), "progress"];
+  // An org's page hears of each step through the org's event stream; a hosted
+  // page, which has no session, follows its own link's stream.
+  const orgStreaming = useOrgStreamConnected(
+    target.kind === "request" ? target.slug : "",
+  );
+  const hostedStreaming = useEventStream(
+    target.kind === "hosted" ? hostedEventsUrl(target.token) : null,
+    HOSTED_EVENT_KINDS,
+    () => void queryClient.invalidateQueries({ queryKey }),
+  );
+  const streaming = orgStreaming || hostedStreaming;
   return useQuery<ProofingProgress>({
-    queryKey: [...verifyQueryKey(target), "progress"],
+    queryKey,
     queryFn: ({ signal }) =>
       target.kind === "request"
         ? getProofingRequest(target.slug, target.requestId, signal)
         : getHostedProofingStatus(target.token, signal),
+    // The fallback while no stream is up.
     refetchInterval: (query) =>
-      progressPollContinues(query.state.data, query.state.error)
-        ? ON_SCREEN_POLL_INTERVAL_MS
-        : reviewPollContinues(query.state.data, query.state.error)
-          ? REVIEW_POLL_INTERVAL_MS
-          : false,
+      streaming
+        ? false
+        : progressPollContinues(query.state.data, query.state.error)
+          ? ON_SCREEN_POLL_INTERVAL_MS
+          : reviewPollContinues(query.state.data, query.state.error)
+            ? REVIEW_POLL_INTERVAL_MS
+            : false,
   });
 }
 
@@ -1017,19 +1029,22 @@ export function useFinishDocumentScanMutation(
   });
 }
 
-// Where an on-screen Idem request's phone is, polled while its session runs;
+// Where an on-screen Idem request's phone is, re-read while its session runs;
 // each read asks the engine live.
 export function useProofingAppQuery(
   slug: string,
   requestId: string,
   enabled: boolean,
 ): UseQueryResult<ProofingApp, Error> {
+  const streaming = useOrgStreamConnected(slug);
   return useQuery({
     queryKey: [...proofingRequestsQueryKey(slug), requestId, "app"],
     queryFn: async ({ signal }) =>
       (await getProofingApp(slug, requestId, signal)).app,
     enabled,
-    refetchInterval: enabled ? ON_SCREEN_POLL_INTERVAL_MS : false,
+    // The org's event stream says when the phone moves on; the poll is the
+    // fallback while that stream is down.
+    refetchInterval: enabled && !streaming ? ON_SCREEN_POLL_INTERVAL_MS : false,
   });
 }
 

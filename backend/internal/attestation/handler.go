@@ -12,6 +12,7 @@ import (
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/auth"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/lifecycle"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/respond"
 )
@@ -917,6 +918,9 @@ func (h *Handler) setKeyStatus(w http.ResponseWriter, r *http.Request, status, a
 	key, err := h.keys.SetKeyStatus(r.Context(), org.ID, id, status, action)
 	if errors.Is(err, ErrKeyNotFound) {
 		return notFound("key_not_found", "key not found")
+	}
+	if errors.Is(err, lifecycle.ErrTransition) {
+		return &respond.APIError{Status: http.StatusConflict, Code: "status_transition_not_allowed", Message: "the key cannot move to that status from its current one"}
 	}
 	if err != nil {
 		return fmt.Errorf("updating attestation key: %w", err)

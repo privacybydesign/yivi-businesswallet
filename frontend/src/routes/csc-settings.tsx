@@ -10,6 +10,8 @@ import type { CscSettings } from "../api/csc";
 import { ApiError } from "../api/http";
 import { Button, Card, Input, Select } from "../ui";
 import * as React from "react";
+import { draftChanged } from "../lib/form-draft";
+import { UnsavedChanges } from "./unsaved-changes";
 
 const CONFLICT_STATUS = 409;
 const BAD_GATEWAY_STATUS = 502;
@@ -125,8 +127,20 @@ function ConfigForm({
     });
   }
 
+  const dirty = draftChanged(
+    { providerKind, baseUrl, clientId, clientSecret, enabled },
+    {
+      providerKind: initial.providerKind,
+      baseUrl: initial.baseUrl,
+      clientId: initial.clientId,
+      clientSecret: "",
+      enabled: initial.enabled,
+    },
+  );
+
   return (
     <Card className="max-w-2xl p-7">
+      <UnsavedChanges dirty={dirty && !save.isPending} />
       <h2 className="text-[16px] font-semibold">{t("cscSettings.heading")}</h2>
       <p className="text-ink-soft mt-1 text-[13px]">
         {t("cscSettings.description")}

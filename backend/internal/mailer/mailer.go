@@ -22,7 +22,12 @@ import (
 	"time"
 )
 
-const dialTimeout = 15 * time.Second
+const (
+	dialTimeout = 15 * time.Second
+	// sendTimeout bounds everything after the dial. It leaves room for a signed
+	// PDF going to a slow relay, and stays under signing.DeliverTimeout.
+	sendTimeout = 100 * time.Second
+)
 
 // AuthMechanism selects how a send authenticates to the SMTP server.
 type AuthMechanism string
@@ -150,16 +155,26 @@ type Sender interface {
 }
 
 // SMTPSender is the real net/smtp-backed sender.
-type SMTPSender struct{}
+type SMTPSender struct {
+	// Timeout bounds one send after the dial; zero is sendTimeout.
+	Timeout time.Duration
+}
 
 func New() SMTPSender { return SMTPSender{} }
+
+func (s SMTPSender) timeout() time.Duration {
+	if s.Timeout > 0 {
+		return s.Timeout
+	}
+	return sendTimeout
+}
 
 // Send delivers the message. It uses STARTTLS when the server offers it and
 // authenticates with PLAIN when a username is set; a MailHog-style open relay
 // (no auth, no TLS) works with an empty username. With AuthXOAuth2 it
 // authenticates with the config's bearer token instead, and then STARTTLS is
 // required rather than opportunistic.
-func (SMTPSender) Send(cfg Config, msg Message) error {
+func (s SMTPSender) Send(cfg Config, msg Message) error {
 	if err := cfg.validate(); err != nil {
 		return err
 	}
@@ -168,6 +183,14 @@ func (SMTPSender) Send(cfg Config, msg Message) error {
 	conn, err := net.DialTimeout("tcp", addr, dialTimeout)
 	if err != nil {
 		return fmt.Errorf("mailer: dial %s: %w", addr, err)
+	}
+
+	// One deadline for the whole exchange: without it a server that accepts the
+	// connection and then goes quiet holds the caller for ever. It survives
+	// STARTTLS, which wraps this same connection.
+	if err := conn.SetDeadline(time.Now().Add(s.timeout())); err != nil {
+		_ = conn.Close()
+		return fmt.Errorf("mailer: set deadline: %w", err)
 	}
 
 	client, err := smtp.NewClient(conn, cfg.Host)

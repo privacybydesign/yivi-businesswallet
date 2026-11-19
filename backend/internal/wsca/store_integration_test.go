@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/crypto"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/testdb"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/wsca"
@@ -39,7 +40,7 @@ func TestStoreActivateSecretRotate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cipher: %v", err)
 	}
-	s := wsca.NewStore(pool, cipher)
+	s := wsca.NewStore(pool, cipher, audit.NopRecorder{})
 
 	// Not activated yet.
 	if _, err := s.Get(ctx, org); !errors.Is(err, wsca.ErrNotActivated) {
