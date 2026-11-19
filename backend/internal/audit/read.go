@@ -48,6 +48,8 @@ type Event struct {
 	// ActorLabel, TargetID and Metadata are withheld, so who acted, on whom and
 	// what changed is visible to admins only.
 	DetailHidden bool `json:"detailHidden,omitempty"`
+	// Test is an event about a test proofing session.
+	Test bool `json:"test,omitempty"`
 }
 
 // HideDetail withholds who acted, the target's id and what changed from each
@@ -185,7 +187,7 @@ func (r *Reader) page(ctx context.Context, filter string, filterArgs []any, afte
 	q := fmt.Sprintf(`
 		SELECT a.id, a.occurred_at, a.action, a.target_type, a.target_id, a.metadata,
 		       u.id, u.preferred_name, u.given_names, u.last_name,
-		       u.avatar_bytes IS NOT NULL, u.avatar_updated_at, a.actor_label
+		       u.avatar_bytes IS NOT NULL, u.avatar_updated_at, a.actor_label, a.test
 		FROM audit_events a
 		LEFT JOIN users u ON u.id = a.actor_user_id
 		WHERE %s
@@ -211,7 +213,7 @@ func (r *Reader) page(ctx context.Context, filter string, filterArgs []any, afte
 			avatarUpdate *time.Time
 		)
 		if err := rows.Scan(&e.ID, &e.OccurredAt, &e.Action, &e.TargetType, &e.TargetID, &meta,
-			&actorID, &preferred, &given, &last, &hasAvatar, &avatarUpdate, &e.ActorLabel); err != nil {
+			&actorID, &preferred, &given, &last, &hasAvatar, &avatarUpdate, &e.ActorLabel, &e.Test); err != nil {
 			return Page{}, fmt.Errorf("audit: list events scan: %w", err)
 		}
 		e.Metadata = meta

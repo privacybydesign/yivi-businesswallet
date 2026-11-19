@@ -689,6 +689,8 @@ export const en = {
       employmentNotAsked: "This check does not ask for a Verzekeringsbericht.",
       noEmploymentChecker:
         "This server checks no Verzekeringsbericht. Ask your administrator to set EMPLOYMENT_VALIDATOR_PROVIDER.",
+      noDiplomaChecker:
+        "This server checks no diplomas. Ask your administrator to set DIPLOMA_VALIDATOR_PROVIDER.",
       flowNoIdentity:
         "A data request flow must read the name and date of birth: the person's sessions are found by them.",
       dataFlowForMember:
@@ -1316,17 +1318,11 @@ export const en = {
       privacyUrl: "Privacy statement URL",
       privacyPlaceholder: "https://example.nl/privacy",
       hidePoweredBy: "Leave the “Powered by Yivi” line off the hosted page",
+      showTheme: "Show this look in the Idem app and on the hosted page",
+      showThemeHint:
+        "Off: they keep their own look. The proofing mail always uses it.",
       discard: "Discard",
       save: "Save branding",
-      preview: {
-        caption: "Preview · proofing mail",
-        heading: "{{name}} asks you to verify your identity",
-        body: "{{name}} asked you to verify your identity with your passport or identity card and your face, in the Idem app on your phone.",
-        button: "Open in the Idem app",
-        support: "Questions about this request? Contact {{contact}}.",
-        privacy: "How your data is handled: {{url}}",
-        footer: "Identity check by Yivi",
-      },
     },
     legalRetention: {
       title: "Legal retention",
@@ -1697,6 +1693,10 @@ export const en = {
       subtitle:
         "Everything in the Business Wallet works without setup. Come here only to do the same from your own software: mint a token to call the API, and add an endpoint that receives results.",
       adminOnly: "Only an administrator can see this page.",
+      signingApi: {
+        title: "Signing API",
+        note: "The same API tokens also open the signing API at {{path}}: create a signing request with a PDF and its signers, get each signee's signing link, read the status and download the signed PDF.",
+      },
     },
     apiKeys: {
       title: "API tokens",
@@ -1768,6 +1768,12 @@ export const en = {
       secretHint:
         "Copy it now and store it with your receiver: it is not shown again. Check the Yivi-Signature header with it.",
       recent: "Recent deliveries",
+      columns: {
+        event: "Event",
+        session: "Session",
+        response: "Response",
+        sent: "Sent",
+      },
       defaultBody:
         "No events are sent. Results show on each flow's People tab, through the API and in the audit log.",
       defaultHint:
@@ -1837,9 +1843,33 @@ export const en = {
         caption: "Preview",
         mail: "Proofing mail",
         app: "Idem app",
-        start: "Start",
+        hosted: "Hosted page",
         appNote:
-          "How the Idem app shows this flow's name, logo and colour when the person opens the request.",
+          "The first screen of the Idem app when the person opens the request.",
+        idem: {
+          title: "Request",
+          heading: "{{party}} wants to verify your identity",
+          requestedBy: "Requested by {{org}}",
+          expiresIn_one: "This request expires in {{count}} minute.",
+          expiresIn_other: "This request expires in {{count}} minutes.",
+          theyWillReceive: "They will receive",
+          stepByStep:
+            "Your details go to the verification service step by step, so you can continue on another device. {{party}} only receives them when you finish. If you stop, they are deleted when this request expires.",
+          continue: "Continue",
+          decline: "Decline",
+          items: {
+            documentIdentity:
+              "Document identity (name, date of birth, document number, expiry)",
+            additionalDetails:
+              "Additional personal details (personal number, place of birth)",
+            facePhoto: "Your face photo from the document chip",
+            chipChecks: "Document authenticity checks",
+            biometrics: "Face verification result",
+            ageOver: "Whether you are {{age}} or older",
+            ageCheck: "Whether you are old enough",
+            everything: "Everything the app reads from your document",
+          },
+        },
       },
       dropConfirm: {
         title: "Use the organisation's branding?",
@@ -2162,6 +2192,13 @@ export const en = {
       },
     },
   },
+  reviewLink: {
+    reviewingAs: "Reviewing as {{name}} · link valid until {{until}}",
+    done: "Nothing of this session waits for you any more. You can close this page.",
+    invalid:
+      "This review link is unknown or has expired. Ask for a new one in your own system.",
+    error: "The review could not be loaded. Try again in a moment.",
+  },
   proofLink: {
     notFound: "This link does not exist, or it was removed.",
     decline: "Decline",
@@ -2363,6 +2400,8 @@ export const en = {
     vogRequested_other: "VOG requested from {{count}} members",
     organizationUpdated: "Organization updated",
     organizationDeleted: "Organization deleted",
+    testModeOn: "{{name}} is now in test mode",
+    testModeOff: "{{name}} is now live",
     departmentAdded: "Department added",
     departmentRenamed: "Department renamed",
     departmentDeleted: "Department deleted",
@@ -2387,6 +2426,7 @@ export const en = {
     postguardFileSent: "Encrypted file sent",
     postguardNotificationsSaved: "Notification settings saved",
     attestationSchemaCreated: "Schema created",
+    attestationRulebookImported: "Rulebook imported",
     attestationSchemaUpdated: "Schema updated",
     attestationSchemaDeleted: "Schema deleted",
     attestationTemplateCreated: "Template created",
@@ -2533,6 +2573,7 @@ export const en = {
     system: "System",
     apiKeyActor: "API token {{prefix}}…",
     hostedLinkActor: "Subject, through a hosted link",
+    reviewLinkActor: "Review link of API token {{prefix}}…",
     adminActor: "An admin",
     columns: {
       when: "When",
@@ -2563,6 +2604,7 @@ export const en = {
       qerdsContact: "Contact",
       walletInstance: "Wallet",
       walletUnit: "Wallet unit",
+      wscaAccount: "Holder wallet",
       walletRepresentation: "Representation",
       kvkRegistration: "KVK registration",
       postguardKey: "PostGuard API key",
@@ -2605,6 +2647,7 @@ export const en = {
       orgCreated: "Created organization",
       orgUpdated: "Updated organization",
       orgDeleted: "Deleted organization",
+      orgTestModeChanged: "Changed test mode",
       memberInvited: "Invited member",
       inviteResent: "Resent invitation",
       inviteRevoked: "Revoked invitation",
@@ -2662,6 +2705,8 @@ export const en = {
       representationRevoked: "Revoked representation",
       walletUnitActivated: "Activated wallet unit",
       walletUnitRevoked: "Revoked wallet unit",
+      wscaAccountActivated: "Activated the holder wallet",
+      wscaAccountRotated: "Rotated the wallet secret",
       kvkRegistrationValidated: "KVK validated registration",
       kvkRegistrationNotValidated: "KVK rejected registration",
       attestationSchemaCreated: "Created attestation schema",
@@ -2674,6 +2719,7 @@ export const en = {
       attestationClaimed: "Claimed attestation",
       attestationRevoked: "Revoked attestation",
       attestationOfferCancelled: "Cancelled attestation offer",
+      attestationDeclined: "Recipient declined an attestation offer",
       attestationKeyAdded: "Added attestation key",
       attestationKeySuspended: "Suspended attestation key",
       attestationKeyRevoked: "Revoked attestation key",
@@ -2770,6 +2816,7 @@ export const en = {
       identityProofingAddressAdded: "Entered an address",
       identityProofingAddressReviewed: "Reviewed an address",
       identityProofingReviewItemDecided: "Decided a review",
+      identityProofingReviewLinkCreated: "Made a review link",
       identityProofingFlowEmploymentConfigured:
         "Changed whether a flow asks for the Verzekeringsbericht",
       identityProofingEmploymentAdded: "Added a Verzekeringsbericht",
@@ -2858,14 +2905,6 @@ export const en = {
     requestIdentificationHint:
       "Asks this member to re-confirm their identity now. They get an e-mail with a link.",
     identityRequested: "Identification requested",
-    proofing: {
-      flow: "Identity proofing flow",
-      send: "Send identity proofing",
-      hint: "Mails this member a QR code and a link for the Idem app. The session starts when the mail is sent and runs for 10 minutes; after that, send a new request.",
-      noFlows:
-        "No flow is available to members yet. Create one and tick it under",
-      lastRequest: "Last proofing:",
-    },
     vogValidUntil: "VOG valid until",
     vogNone: "No VOG on file",
     requestVog: "Request VOG",
@@ -2920,10 +2959,10 @@ export const en = {
   },
   signing: {
     title: "Sign documents",
-    subtitle: "Qualified electronic signatures via your CSC signing provider",
+    subtitle: "Electronic signatures via your organization's signing provider",
     credentialTitle: "Signing credential",
     credentialDescription:
-      "Your qualified signing certificate is fetched once and reused for each signature. Linking opens your wallet to authorize it.",
+      "Your signing certificate is fetched once and reused for each signature. To link it, you identify with your wallet app.",
     credentialIdLabel: "Credential ID",
     keyAlgoLabel: "Key algorithm",
     notLinked: "No signing credential is linked yet.",
@@ -2933,7 +2972,7 @@ export const en = {
     linkFailedToast: "Linking the signing credential was not completed.",
     credentialLoadError: "Could not load your signing credential.",
     walletHint:
-      "You will be redirected to the signing provider to authorize with your wallet, then returned here.",
+      "You will be redirected to the signing provider to identify with your wallet app, then returned here.",
     signTitle: "Sign a document",
     signDescription:
       "Upload a PDF. Its hash is authorized with your wallet, signed by the provider, and the signed PDF is returned to you.",
@@ -3051,6 +3090,7 @@ export const en = {
     toSignEmpty: "No documents are waiting for your signature.",
     toSignError: "Could not load documents awaiting your signature.",
     requestedBy: "Requested by {{name}}",
+    requestedViaApi: "Requested through the API",
     alreadySigned: "You have already signed this document.",
     notYourTurn: "An earlier signer must sign first.",
     signInProgress: "Another signature is in progress; try again shortly.",
@@ -3103,7 +3143,7 @@ export const en = {
       progress: "{{signed}} of {{total}}",
       reviewDocument: "Open the document",
       needsCredential:
-        "Link a signing certificate first. This opens your wallet once; after that you can sign.",
+        "Link your signing certificate first. You identify with your wallet app once; after that you can sign.",
       linkButton: "Link signing certificate",
       signButton: "Sign document",
       declineButton: "Decline",
@@ -3130,7 +3170,47 @@ export const en = {
       errorTitle: "Something went wrong",
       errorHint: "Could not load this signing request. Try again later.",
       walletHint:
-        "You will be sent to the signing provider to authorize with your wallet, then returned here.",
+        "You will be sent to the signing provider to identify with your wallet app, then returned here.",
+      returnTo: "Return to {{host}}",
+    },
+    authorize: {
+      link: {
+        title: "Identify yourself to get your signing certificate",
+        choose:
+          "In the Yivi app you choose what to share: your passport, identity card or residence permit, or your registered personal data (BRP).",
+        name: "The name you share is the name on your signature.",
+      },
+      sign: {
+        title: "Approve signing {{document}}",
+        titleUnnamed: "Approve signing this document",
+        intro: "Approve this signature in the Yivi app.",
+        sourceMrtd:
+          "Share your passport, identity card or residence permit. It has to be the same one your signing certificate was issued with.",
+        sourceBrp:
+          "Share your registered personal data (BRP). It has to be the same data your signing certificate was issued with.",
+      },
+      scanHint:
+        "Scan the QR code with the Yivi app, or open the app on this device.",
+      openYivi: "Open the Yivi app",
+      cancelError: "Could not cancel. Try again.",
+      leaving: "Taking you back…",
+      denied: {
+        title: "Not approved",
+        identityMismatch:
+          "The identity you shared is not the one your signing certificate was issued to.",
+        identityIncomplete:
+          "What you shared carried no name or date of birth, so it cannot be used to sign.",
+        generic: "This was not approved.",
+        continue: "Continue",
+      },
+      expired: {
+        title: "This authorization has expired",
+        message: "Start again from the signing page.",
+      },
+      error: {
+        title: "Something went wrong",
+        message: "Could not load this authorization. Try again later.",
+      },
     },
   },
   signedDocuments: {
@@ -3158,7 +3238,6 @@ export const en = {
     tabScreening: "Screening (VOG)",
     tabBranding: "Branding",
     tabPrivacy: "Data and privacy",
-    tabTheme: "Wallet theme",
     tabCommunication: "Communication",
     tabEmail: "E-mail",
     tabMailTemplates: "Mail templates",
@@ -3170,6 +3249,17 @@ export const en = {
     tabSigning: "Signing",
     tabPostguard: "PostGuard",
     tabWallets: "Wallets",
+    brandingWallet: "Look",
+    brandingWalletHint:
+      "One look for the business wallet, the proofing mail, the hosted page and the Idem app.",
+    brandingExternal: "Name and contact",
+    brandingExternalHint:
+      "What the proofing mail, the hosted page and the Idem app say to a person outside the organisation.",
+    unsaved: {
+      title: "Leave without saving?",
+      message: "Your changes to the branding are not saved.",
+      leave: "Leave",
+    },
     adminOnly: "Only organisation admins can manage settings.",
     discard: "Discard",
     organisation: {
@@ -3783,14 +3873,19 @@ export const en = {
     loadError: "Could not load the signing provider settings: {{message}}",
     heading: "CSC signing provider",
     description:
-      "Connect to a remote QTSP over the Cloud Signature Consortium (CSC) API v2 to create qualified signatures. This sets up the connection; the signing flow itself is added separately.",
+      "Documents are signed through a signing provider that speaks the Cloud Signature Consortium (CSC) API v2. The built-in signing service works without setup; connect a remote QTSP instead to create qualified signatures.",
     providerKind: "Provider",
     kinds: {
+      yivi: "Built-in signing service (recommended)",
       sample: "Sample QTSP (self-hosted)",
       custom: "Custom CSC endpoint",
     },
     sampleHint:
       "The sample provider is the bundled reference QTSP. Run it with `docker compose --profile signer up`; it listens on http://localhost:8085.",
+    builtInHint:
+      "The wallet's own signing service, and the default. Signers identify with the Yivi app, using their passport, identity card, residence permit or registered personal data (BRP), and sign with an advanced electronic signature. There is nothing to configure.",
+    builtInUnavailable:
+      "This deployment does not run the built-in signing service. Choose another provider.",
     baseUrl: "CSC base URL",
     baseUrlPlaceholder: "https://qtsp.example.org",
     clientId: "OAuth client ID",
@@ -3934,6 +4029,22 @@ export const en = {
       organizationsHint: "Total in this deployment",
     },
     viewAll: "View all organizations",
+  },
+  testMode: {
+    banner:
+      "Test mode: identity checks in this organization are test sessions, kept apart from its real ones.",
+    label: "Test",
+    live: "Live",
+    hostedNotice: "Test session: {{organization}} is testing this check.",
+    column: "Mode",
+    switchToTest: "Switch to test",
+    switchToLive: "Switch to live",
+    confirmTestTitle: "Put {{name}} in test mode?",
+    confirmTestMessage:
+      "Its new identity checks become test sessions. Its real sessions are hidden until it is live again; nothing is deleted.",
+    confirmLiveTitle: "Make {{name}} live?",
+    confirmLiveMessage:
+      "Its new identity checks are real again. Its test sessions are hidden, and shown again if it goes back to test mode; retention still deletes them on schedule.",
   },
   allOrganizations: {
     title: "Organizations",
@@ -4368,6 +4479,9 @@ export const en = {
         attributes: "Attributes",
         noAttributes: "This credential discloses no attributes.",
         doesNotExpire: "Does not expire",
+        rulebookMatch: "Matches the WE BUILD {{rulebook}} rulebook.",
+        rulebookMismatch:
+          "Does not match the WE BUILD {{rulebook}} rulebook. Other WE BUILD wallets may refuse it.",
       },
     },
     schemas: {
@@ -4375,6 +4489,20 @@ export const en = {
       newAction: "New schema",
       delete: "Delete schema",
       confirmDelete: "Delete schema “{{name}}”?",
+    },
+    rulebooks: {
+      openAction: "Import from WE BUILD",
+      title: "Import a WE BUILD rulebook",
+      intro:
+        "A rulebook schema follows the WE BUILD attestation rulebook exactly. Its type and attributes are fixed, and every credential issued from it is checked against the rulebook.",
+      import: "Import",
+      imported: "Imported",
+      importError: "Could not import the rulebook: {{message}}",
+      aboutOrganization: "About an organization",
+      aboutPerson: "About a person",
+      attributeCount_one: "{{count}} attribute",
+      attributeCount_other: "{{count}} attributes",
+      tag: "WE BUILD",
     },
     keys: {
       empty: "No keys yet.",
@@ -4423,6 +4551,8 @@ export const en = {
       status: "Status",
       qualified: "Qualified credential",
       attributes: "Attributes",
+      rulebookFixed:
+        "WE BUILD fixes the attributes and subject of this schema. They cannot be changed here.",
       addAttribute: "Add attribute",
       attributesRequired: "Add at least one attribute.",
       attrKey: "Key",
@@ -4530,6 +4660,15 @@ export const en = {
       unknownAttribute:
         "One of the attributes is not part of this template's schema.",
       missingAttribute: "A required attribute is missing.",
+      invalidClaims: "The claims do not match the rulebook. {{message}}",
+      rulebookClaimsIntro:
+        "This template follows a WE BUILD rulebook. Edit the claims as JSON. They start from the rulebook's example and are checked against the rulebook when you issue.",
+      rulebookClaimsLabel: "Claims (JSON)",
+      rulebookClaimsReset: "Start again from the example",
+      claims: {
+        invalidJson: "This is not valid JSON.",
+        notAnObject: "The claims must be a JSON object.",
+      },
     },
   },
   postguard: {

@@ -32,6 +32,7 @@ func TestAPIKeyScopesDefaultToEvery(t *testing.T) {
 	for _, want := range []string{
 		"sessions:write", "sessions:read", "results:read", "flows:read",
 		"flows:write", "settings:read", "settings:write", "webhooks:write",
+		"reviews:read", "reviews:write", "signing:read", "signing:write",
 	} {
 		if !slices.Contains(scopes, want) {
 			t.Errorf("scopes = %v, missing %s", scopes, want)
@@ -75,7 +76,8 @@ func TestAPIKeyScopesUpgradeExistingKeys(t *testing.T) {
 	}
 	want := []string{
 		"sessions:write", "sessions:read", "results:read", "flows:read", "flows:write",
-		"settings:read", "settings:write", "webhooks:write",
+		"settings:read", "settings:write", "webhooks:write", "reviews:read", "reviews:write",
+		"signing:read", "signing:write",
 	}
 	if !slices.Equal(scopes, want) {
 		t.Errorf("scopes = %v, want %v", scopes, want)

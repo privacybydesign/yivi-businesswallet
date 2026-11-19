@@ -79,32 +79,21 @@ const defaultDataRetentionDays = 7
 // the default and the longest.
 var SessionTTLOptions = []time.Duration{2 * time.Minute, 5 * time.Minute, SessionTTL}
 
-// Branding is how the proofing mail to external people and the hosted pages
-// look: DisplayName signs the mail ("" is the org's name), PrimaryColor colours
-// it ("" is the org's), and SupportContact and PrivacyURL are added to it ("" leaves
-// each out). HasLogo reports a stored logo, read with OrgSettingsStore.Logo.
-// SecondaryColor (the Idem app's second colour), the other colours and
-// FontFamily are the rest of its white-label, the same as the org theme's: any
-// one set is a look of its own, and "" in it keeps the design's, not the org's
-// (see AppBrandingResolver); TopbarColor is the app's header.
+// Branding is what the proofing mail to external people, the hosted pages and
+// the Idem app say besides the org's wallet theme, which is their one look:
+// DisplayName signs them ("" is the org's name), SupportContact and PrivacyURL
+// are added ("" leaves each out), HidePoweredBy leaves the "powered by" line
+// off the hosted pages, and ShowTheme puts the theme on the Idem app and the
+// hosted page (off keeps their own look). PrimaryColor and HasLogo are a flow's
+// own colour and logo over the theme's (FlowBranding); an org's are never set.
 type Branding struct {
 	DisplayName    string
 	PrimaryColor   string
-	SecondaryColor string
-	TextColor      string
-	SurfaceColor   string
-	BorderColor    string
-	LinkColor      string
-	SuccessColor   string
-	WarningColor   string
-	ErrorColor     string
-	TopbarColor    string
-	FontFamily     string
 	SupportContact string
 	PrivacyURL     string
 	HasLogo        bool
-	// HidePoweredBy leaves the "powered by" line off the hosted pages.
-	HidePoweredBy bool
+	HidePoweredBy  bool
+	ShowTheme      bool
 }
 
 // Logo is the org's logo image for its proofing mail and hosted pages, sniffed
@@ -123,12 +112,8 @@ type LogoChange struct {
 
 func (b Branding) auditFields() map[string]any {
 	return map[string]any{
-		"displayName": b.DisplayName, "primaryColor": b.PrimaryColor, "secondaryColor": b.SecondaryColor,
-		"textColor": b.TextColor, "surfaceColor": b.SurfaceColor, "borderColor": b.BorderColor,
-		"linkColor": b.LinkColor, "successColor": b.SuccessColor, "warningColor": b.WarningColor,
-		"errorColor": b.ErrorColor, "topbarColor": b.TopbarColor, "fontFamily": b.FontFamily,
-		"supportContact": b.SupportContact, "privacyUrl": b.PrivacyURL, "hasLogo": b.HasLogo,
-		"hidePoweredBy": b.HidePoweredBy,
+		"displayName": b.DisplayName, "supportContact": b.SupportContact, "privacyUrl": b.PrivacyURL,
+		"hidePoweredBy": b.HidePoweredBy, "showTheme": b.ShowTheme,
 	}
 }
 
@@ -225,6 +210,7 @@ func defaultSettings(orgID uuid.UUID) Settings {
 		Session: SessionSettings{
 			SessionTTL: SessionTTL, DataRetentionDays: defaultDataRetentionDays, ErasureHandling: ErasureReview,
 		},
+		Branding: Branding{ShowTheme: true},
 	}
 }
 
@@ -331,6 +317,8 @@ type Request struct {
 	// Hosted is a request its subject opens from a link (ChannelHosted): its
 	// engine session is created only when the subject starts.
 	Hosted bool
+	// Test is a request made while its org was in test mode.
+	Test bool
 	// FlowKind is what the session is for: an identity check, or a person
 	// asking for their data (FlowDataAccess) or its erasure (FlowDataErasure),
 	// which goes to review once the person is proven (see data_request.go).
@@ -720,6 +708,10 @@ type RequestFilter struct {
 	// sessions whose review is over (something decided, nothing waiting) and
 	// the data requests that ended, the latest closed first.
 	ClosedReviews bool
+	// WaitingReviews narrows to what waits for a reviewer, in one read: the
+	// requests that read needs_review and those with an address, a
+	// Verzekeringsbericht or diplomas waiting, the longest in review first.
+	WaitingReviews bool
 }
 
 func (f RequestFilter) reviewState() ReviewState {
@@ -1111,6 +1103,12 @@ func takesDocumentPhoto(f proofingprovider.Flow) bool {
 // scansFace reports whether f checks the face in the document scan.
 func scansFace(f proofingprovider.Flow) bool {
 	return f.FaceProvider == faceProviderIDScan && takesDocumentPhoto(f)
+}
+
+// keepsFacePhotos reports whether f keeps the face photos, so the printed
+// portrait stays visible on its document photos.
+func keepsFacePhotos(f proofingprovider.Flow) bool {
+	return f.KeepFacePhotos != nil && *f.KeepFacePhotos
 }
 
 // redactsDocumentBSN reports whether f's document photo has its BSN covered:

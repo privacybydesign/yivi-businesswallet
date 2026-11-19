@@ -40,6 +40,7 @@ import {
   WALLET_REVIEW_REASONS,
   walletReviewReason,
   checkReviewReason,
+  reviewSteps,
 } from "./proofing-reviews";
 
 const t = i18n.getFixedT("en");
@@ -625,6 +626,51 @@ describe("waitingParts", () => {
     expect(
       stepReviewOf(request({ status: "approved", diplomasReview: "pending" })),
     ).toBe("diplomas");
+  });
+});
+
+describe("reviewSteps", () => {
+  it("lists the decided parts, then those that wait, at the first waiting", () => {
+    expect(
+      reviewSteps(
+        request({ employmentReview: "pending", addressReview: "pending" }),
+      ),
+    ).toEqual({ parts: ["identity", "employment", "address"], current: 0 });
+    expect(
+      reviewSteps(
+        request({
+          status: "approved",
+          identityReviewedAt: "2026-11-06T10:00:00Z",
+          employmentReview: "rejected",
+          addressReview: "pending",
+        }),
+      ),
+    ).toEqual({ parts: ["identity", "employment", "address"], current: 2 });
+  });
+
+  it("leaves out an identity the engine decided", () => {
+    expect(
+      reviewSteps(request({ status: "approved", addressReview: "pending" })),
+    ).toEqual({ parts: ["address"], current: 0 });
+  });
+
+  it("marks every part done once nothing waits", () => {
+    expect(
+      reviewSteps(
+        request({
+          status: "approved",
+          identityReviewedAt: "2026-11-06T10:00:00Z",
+          addressReview: "confirmed",
+        }),
+      ),
+    ).toEqual({ parts: ["identity", "address"], current: 2 });
+  });
+
+  it("has no steps for a data request", () => {
+    expect(reviewSteps(request({ flowKind: "data_access" }))).toEqual({
+      parts: [],
+      current: 0,
+    });
   });
 });
 

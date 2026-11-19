@@ -1,5 +1,7 @@
 import type { TFunction } from "i18next";
+import type { SigningRequest } from "../api/signing";
 import {
+  CREATED_VIA,
   DELIVERY_STATUS,
   RECIPIENT_CHANNEL,
   SIGNER_KIND,
@@ -21,6 +23,17 @@ export function modeLabel(t: TFunction, mode: string): string {
     default:
       return mode;
   }
+}
+
+// Who asked for a request. One made over the signing API has no creator, so it
+// names the API instead of an empty name.
+export function requestedByLabel(
+  t: TFunction,
+  request: Pick<SigningRequest, "createdVia" | "createdByName">,
+): string {
+  return request.createdVia === CREATED_VIA.api
+    ? t("signing.requestedViaApi")
+    : t("signing.requestedBy", { name: request.createdByName });
 }
 
 export function signerStatusLabel(t: TFunction, status: string): string {

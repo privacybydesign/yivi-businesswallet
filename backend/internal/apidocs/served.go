@@ -14,14 +14,24 @@ import (
 // as the one API an integrator uses.
 const internalProofingTag = "identity-proofing-internal"
 
+// platformAdminTag marks the wallet operator's routes over every organisation,
+// which no user of an organisation can call. The docs leave them out.
+const platformAdminTag = "platform-admin"
+
+// hiddenTags are the tags whose operations the docs leave out.
+var hiddenTags = []string{internalProofingTag, platformAdminTag}
+
 // served is the document the docs page reads: spec without the operations
-// tagged internalProofingTag.
+// tagged with one of hiddenTags.
 var served = mustServed(spec)
 
 func mustServed(full []byte) []byte {
-	out, err := withoutTag(full, internalProofingTag)
-	if err != nil {
-		panic(fmt.Sprintf("apidocs: served spec: %v", err))
+	out := full
+	for _, tag := range hiddenTags {
+		var err error
+		if out, err = withoutTag(out, tag); err != nil {
+			panic(fmt.Sprintf("apidocs: served spec: %v", err))
+		}
 	}
 	return out
 }

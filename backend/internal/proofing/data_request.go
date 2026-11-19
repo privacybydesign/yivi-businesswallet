@@ -460,7 +460,7 @@ func (s *Service) decideDataRequest(ctx context.Context, req Request, reviewer s
 		return Request{}, err
 	}
 
-	if err := s.requests.RecordReviewDecision(ctx, req, decided, in.Reason, code); err != nil {
+	if err := s.requests.RecordReviewDecision(ctx, req, decided, in.Reason, code, in.APIReviewer); err != nil {
 		return Request{}, err
 	}
 
@@ -471,7 +471,7 @@ func (s *Service) decideDataRequest(ctx context.Context, req Request, reviewer s
 		return Request{}, err
 	}
 
-	out, err := s.requests.Get(ctx, req.OrganizationID, req.ID)
+	out, err := s.requests.Reread(ctx, req)
 	if err != nil {
 		return Request{}, err
 	}
@@ -480,7 +480,7 @@ func (s *Service) decideDataRequest(ctx context.Context, req Request, reviewer s
 		if err := s.purge(ctx, out); err != nil {
 			return Request{}, err
 		}
-		return s.requests.Get(ctx, req.OrganizationID, req.ID)
+		return s.requests.Reread(ctx, req)
 	}
 
 	return out, nil
@@ -510,7 +510,7 @@ func (s *Service) handleErasure(ctx context.Context, req Request) (Request, erro
 		return req, err
 	}
 	defer release()
-	fresh, err := s.requests.Get(ctx, req.OrganizationID, req.ID)
+	fresh, err := s.requests.Reread(ctx, req)
 	if err != nil {
 		return req, err
 	}
@@ -541,7 +541,7 @@ func (s *Service) handleErasure(ctx context.Context, req Request) (Request, erro
 	if err := s.purgeMatches(ctx, fresh, sure); err != nil {
 		return fresh, err
 	}
-	return s.requests.Get(ctx, fresh.OrganizationID, fresh.ID)
+	return s.requests.Reread(ctx, fresh)
 }
 
 // declineHeldErasure declines a proven "delete my data" request at once when
@@ -565,7 +565,7 @@ func (s *Service) declineHeldErasure(ctx context.Context, req Request) (Request,
 		return req, err
 	}
 	defer release()
-	fresh, err := s.requests.Get(ctx, req.OrganizationID, req.ID)
+	fresh, err := s.requests.Reread(ctx, req)
 	if err != nil {
 		return req, err
 	}

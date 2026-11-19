@@ -1,6 +1,7 @@
 package proofing
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -51,6 +52,8 @@ type decisionFields struct {
 	State     string `json:"state"`
 	Reason    string `json:"reason"`
 	ErrorCode string `json:"errorCode"`
+	// Reviewer is who an API key or review link named as deciding.
+	Reviewer string `json:"reviewer"`
 }
 
 // RequestDecisions is every reviewer decision on request id, oldest first.
@@ -89,7 +92,7 @@ func (s *Service) RequestDecisions(ctx context.Context, orgID, id uuid.UUID) ([]
 		}
 		out = append(out, Decision{
 			Kind: kind, Outcome: outcome, Reason: meta.After.Reason, ErrorCode: meta.After.ErrorCode,
-			DecidedBy: actorName(e.Actor), DecidedAt: e.OccurredAt,
+			DecidedBy: cmp.Or(actorName(e.Actor), meta.After.Reviewer), DecidedAt: e.OccurredAt,
 		})
 	}
 	return out, nil

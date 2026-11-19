@@ -2,6 +2,9 @@ package main
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"net/http"
 	"net/url"
 	"strings"
 
@@ -9,10 +12,42 @@ import (
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/email"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofing"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/qerds"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/qerdsprovider"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/respond"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/signing"
 )
+
+// signingAPIAuth adapts the org's API keys to signing.APIAuth. The keys are the
+// proofing slice's (the ones on the Developers page), so the signing API is one
+// more thing a key opens rather than a second set of keys to manage.
+type signingAPIAuth struct {
+	keys *proofing.Handler
+	orgs *organization.Store
+}
+
+func (a signingAPIAuth) RequireRead(next respond.HandlerFunc) http.Handler {
+	return a.keys.RequireAPIKey(proofing.ScopeSigningRead, next)
+}
+
+func (a signingAPIAuth) RequireWrite(next respond.HandlerFunc) http.Handler {
+	return a.keys.RequireAPIKey(proofing.ScopeSigningWrite, next)
+}
+
+// Caller resolves the org's slug too: the key knows only the org's id and name,
+// and a member signer's mail links to the org's own signing page.
+func (a signingAPIAuth) Caller(ctx context.Context) (signing.APICaller, error) {
+	caller, ok := proofing.APICallerFromContext(ctx)
+	if !ok {
+		return signing.APICaller{}, errors.New("signing api: request carries no API key caller")
+	}
+	org, err := a.orgs.GetByID(ctx, caller.Org.ID)
+	if err != nil {
+		return signing.APICaller{}, fmt.Errorf("signing api: resolve org: %w", err)
+	}
+	return signing.APICaller{OrgID: org.ID, Slug: org.Slug, KeyID: caller.KeyID}, nil
+}
 
 // signingMembers adapts organization.Store to signing.memberDirectory, mapping the
 // full member record to the minimal (id, name, email) view the signing slice needs

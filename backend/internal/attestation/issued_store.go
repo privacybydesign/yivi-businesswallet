@@ -29,7 +29,7 @@ func scanIssued(row rowScanner) (Issued, error) {
 	); err != nil {
 		return Issued{}, err
 	}
-	attrs, err := unmarshalStringMap(attrsRaw)
+	attrs, err := unmarshalValueMap(attrsRaw)
 	if err != nil {
 		return Issued{}, err
 	}
@@ -182,6 +182,31 @@ func (s *Store) MarkClaimed(ctx context.Context, orgID, id uuid.UUID, credential
 		return s.audit.Record(ctx, q, audit.AttestationClaimed,
 			audit.Target{Type: audit.TargetIssuedAttestation, ID: out.ID.String(), OrgID: &orgID},
 			audit.Updated(nil, map[string]any{"status": out.Status}))
+	})
+	return out, err
+}
+
+// MarkDeclined marks the open offer whose deeplink hashes to offerHash declined,
+// and audits, in one tx. Only the receiver saw the deeplink, so the hash is what
+// ties the decline to it. Returns ErrIssuedNotFound when no open offer matches.
+func (s *Store) MarkDeclined(ctx context.Context, orgID uuid.UUID, offerHash, sender string) (Issued, error) {
+	var out Issued
+	err := database.InTx(ctx, s.db, func(q database.Querier) error {
+		const update = `UPDATE issued_attestations SET status = $3, updated_at = now()
+			WHERE organization_id = $1 AND status = $4 AND offer_uri <> ''
+				AND encode(sha256(convert_to(offer_uri, 'UTF8')), 'hex') = $2
+			RETURNING ` + issuedColumns
+		var err error
+		out, err = scanIssued(q.QueryRow(ctx, update, orgID, offerHash, StatusDeclined, StatusOffered))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrIssuedNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("attestation: mark declined org %s: %w", orgID, err)
+		}
+		return s.audit.Record(ctx, q, audit.AttestationDeclined,
+			audit.Target{Type: audit.TargetIssuedAttestation, ID: out.ID.String(), OrgID: &orgID},
+			audit.Updated(nil, map[string]any{"status": out.Status, "sender": sender}))
 	})
 	return out, err
 }

@@ -170,6 +170,10 @@ func (stubQerdsNotifier) SendCredentialOffer(_ context.Context, _ uuid.UUID, _, 
 	return nil
 }
 
+func (stubQerdsNotifier) SendOfferDeclined(_ context.Context, _ uuid.UUID, _, _, _ string) error {
+	return nil
+}
+
 type meBody struct {
 	ID              uuid.UUID `json:"id"`
 	Email           string    `json:"email"`
@@ -254,7 +258,7 @@ func newTestEnv(t *testing.T, mode presenterMode, platformAdmins ...string) *tes
 		stubEmailNotifier{}, stubQerdsNotifier{}, attestationStore, attestationStore, eudiholder.NewStubHolder(), "http://app.test",
 	)
 	orgService.SetOnboardingIssuer(attestation.NewOnboardingIssuer(attestationStore, attestationService))
-	attestationHandler := attestation.NewHandler(attestationStore, attestationStore, attestationStore, attestationStore, attestationService, issuerSettingsStore, attestationStore, orgStore, "", requireUser, orgHandler.Authorize)
+	attestationHandler := attestation.NewHandler(attestationStore, attestationService, issuerSettingsStore, orgStore, "", requireUser, orgHandler.Authorize)
 
 	// Inbound OpenID4VP under the dev posture the Compose stack runs with: plain
 	// http to the in-process fake verifier, request objects signed by a relying
@@ -307,6 +311,7 @@ func newTestEnv(t *testing.T, mode presenterMode, platformAdmins ...string) *tes
 		proofingWebhooks,
 	), proofingStub, fake, nil)
 	proofingService.SetHostedBaseURL("http://wallet.test/p/")
+	proofingService.SetReviewBaseURL("http://wallet.test/r/")
 	proofingHandler := proofing.NewHandler(proofingService, requireUser, orgHandler.Authorize)
 	proofingHandler.SetPlatformAdmins(admins)
 	proofingHandler.SetIdempotencyStore(proofing.NewIdempotencyStore(pool, proofingCipher))

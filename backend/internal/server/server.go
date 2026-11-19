@@ -80,7 +80,7 @@ func New(db Pinger, staticDir string, features ...Registerer) http.Handler {
 	// The SPA catches every path not matched by a more specific pattern above.
 	// ServeMux precedence guarantees /api/v1/, /livez and /readyz still win.
 	if staticDir != "" {
-		root.Handle(rootPath, spaHandler{staticPath: staticDir, indexPath: spaIndex, pageHeaderers: pageHeaderers})
+		root.Handle(rootPath, newSPAHandler(staticDir, pageHeaderers))
 	}
 
 	return root

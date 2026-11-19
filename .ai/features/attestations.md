@@ -27,6 +27,14 @@ recipient step and the delivery route. On issue, the created offer is persisted
   UI :8025); the seeder points the demo org's SMTP at it. Managed in Org Settings.
 - **organization → QERDS.** The offer is sent as a QERDS message to the recipient's
   digital address, picked from the QERDS **address book** (`qerds_contacts`).
+  - The recipient accepts in its own wallet, often another deployment, and sends
+    nothing back. Listing the Issued tab (`Service.ListIssued`) asks the issuer
+    about each open offer and marks it `claimed` once collected.
+  - The stub issuer keeps such an offer (`AwaitRedeem`) pending until the stub
+    holder redeems it.
+  - A decline is sent back over QERDS (`eaa-credential-offer-declined/v1`).
+    `DeclineReceiver` marks the issued row `declined`.
+    - It carries the offer's SHA-256, never the offer: the deeplink is a bearer token.
 - Both link to a **public claim page** (`GET /api/v1/attestations/claim/{token}`,
   unauthenticated, opaque-token-keyed) that renders the QR + open-wallet link and
   polls to `claimed`. Delivery failures are non-fatal (the issuing UI still shows the
@@ -88,6 +96,31 @@ recipient step and the delivery route. On issue, the created offer is persisted
 - **Holder side (irmago + `held_attestations`) is NOT built** — deferred to a v2 plan
   (§6.5, open Qs 6–8). No Held tab; the KVK attestation does not yet surface here.
 - Chained-attestation `linked_schema_ids` column exists; no wizard step (§7).
+
+**WE BUILD rulebook schemas (YIV-530):**
+- `internal/attestation/rulebook` vendors the WE BUILD SD-JWT JSON schemas and samples
+  (EUCC, EU-PoA, VAT-ID, UBO) at a pinned upstream commit.
+  - `TestVendoredFilesUnchanged` checks their sha256. A new upstream version means
+    replacing the files and the hashes together.
+  - LEI has no upstream JSON schema. `lei-sd-jwt.json` is ours, written from `rb-lei`.
+    Like the upstream EUCC, EU-PoA and UBO schemas it refuses claims the rulebook does not define.
+- `attestation_schemas.rulebook` marks an imported schema
+  (`POST .../attestations/rulebooks/{id}/import`).
+  - Its vct, subject type and attributes are fixed (`keepRulebookFields`).
+  - A rulebook's vct is only available through the import: creating a normal schema
+    with it is refused (`vct_rulebook`).
+  - Issued claims are any JSON and are validated against the rulebook schema
+    (`invalid_claims`). Organization-defined schemas still take string values only.
+- Validation leaves out what the issuer sets:
+  - Protocol claims (`iss`, `iat`, `exp`, `cnf`, …) are not required before issuance.
+  - `status` accepts any shape. EUCC, EU-PoA, UBO and LEI define a W3C-style status
+    object, but our issuer emits the IETF Token Status List shape (which VAT-ID uses).
+- The issuer config lists every nested claim path, with `null` for array elements.
+  LEI claims are `sd: never`, as its rulebook says.
+- Holder: nested claim labels come back as `nestedLabels`. The held detail view says
+  whether a rulebook-type credential matches its rulebook (`rulebookViolations`).
+- Real issuance needs each rulebook's credential config (`we-build-<id>`) on the Veramo
+  instance, through the generated GitOps bundle. Until then only the stub issuer issues them.
 **Regulation:** COM(2025) 838 Art 5(1)(a), (f), (g), (h), Art 6(1)(a), (b), (k), (l),
 Art 8; eIDAS (EU 910/2014) Art 3(16), 45a–45f (EAA), Art 5(1)(d)/(h) qualified
 sign/seal. See `regulation/FEATURE_LIST.md`, `regulation/COM_2025_838_act.md`.

@@ -4,10 +4,7 @@ import type { IconName } from "./icon";
 import type { Me } from "../api/auth";
 import type { Organization } from "../api/organization";
 import { useOrganizationQuery } from "../api/organization.queries";
-import {
-  useReviewEvents,
-  useReviewItemCountsQuery,
-} from "../api/identity-proofing.queries";
+import { useReviewItemCountsQuery } from "../api/identity-proofing.queries";
 import { waitingCount } from "../lib/proofing-reviews";
 import { listedCount } from "../lib/identity-proofing";
 import { useSigningAvailabilityQuery } from "../api/signing.queries";
@@ -17,6 +14,7 @@ import { Avatar } from "./avatar";
 import { Logo } from "./logo";
 import { OrgSwitcher } from "./org-switcher";
 import * as React from "react";
+import { useOrgEvents } from "../api/org-events.queries";
 
 type NavLabelKey =
   | "nav.dashboard"
@@ -220,12 +218,15 @@ export function Sidebar({
   // for the org currently in the URL.
   const activeOrg = useOrganizationQuery(activeSlug ?? "");
   const isOrgAdmin = activeOrg.data?.role === ORG_ADMIN_ROLE;
-  // Only who can decide counts what waits.
   const canReview = activeOrg.data?.canReview === true;
+  // Asked with the page, not after the org read: the backend counts nothing
+  // for who cannot decide.
   const waiting = useReviewItemCountsQuery(activeSlug ?? "", {
-    enabled: activeSlug !== undefined && canReview,
+    enabled: activeSlug !== undefined,
   });
-  useReviewEvents(activeSlug ?? "", activeSlug !== undefined && canReview);
+  // Every member follows what changes in the org, once the org is known to be
+  // theirs to read.
+  useOrgEvents(activeSlug ?? "", activeOrg.data !== undefined);
   const navItems = activeSlug
     ? orgNavItems(activeSlug, {
         signing: showSigning,

@@ -41,6 +41,10 @@ const (
 	// fieldSignature is the holder's signature as redactFields names it,
 	// covered with the BSN.
 	fieldSignature = "signature"
+	// fieldPortrait is the holder's printed portrait as redactFields names it,
+	// fieldGhostPortrait its smaller, lighter copy.
+	fieldPortrait      = "portrait"
+	fieldGhostPortrait = "ghost_portrait"
 
 	// stateCompleted is a transaction's and a task's state once it is done.
 	stateCompleted = "completed"
@@ -188,6 +192,9 @@ type ScanOptions struct {
 	// RedactBSN covers the personal number (a Dutch document's BSN), the MRZ
 	// and the signature in the photos.
 	RedactBSN bool
+	// RedactPortrait covers the printed portrait and its ghost copy in the
+	// photos.
+	RedactPortrait bool
 	// MinimumAge, when above 0, has ID Scan refuse a holder younger than it.
 	MinimumAge int
 	// Face adds the face checks: a liveness check of the person, and a match
@@ -234,6 +241,9 @@ func (c *Client) CreateTransaction(ctx context.Context, locale string, opts Scan
 	}
 	if opts.RedactBSN {
 		settings.RedactFields = []string{fieldPersonalNumber, fieldMRZ, fieldSignature}
+	}
+	if opts.RedactPortrait {
+		settings.RedactFields = append(settings.RedactFields, fieldPortrait, fieldGhostPortrait)
 	}
 	if opts.MinimumAge > 0 {
 		settings.MinimumAge = &opts.MinimumAge

@@ -248,9 +248,10 @@ func (s *WebhookStore) SendTest(ctx context.Context, orgID uuid.UUID) error {
 func (s *WebhookStore) Deliveries(ctx context.Context, orgID uuid.UUID) ([]Delivery, error) {
 	rows, err := s.db.Query(ctx, `SELECT id, event, request_id, endpoint_url, status, attempts, last_status_code,
 			COALESCE(last_error, ''), last_attempt_at, delivered_at, created_at
-		FROM identity_proofing_webhook_deliveries
-		WHERE organization_id = $1
-		ORDER BY created_at DESC, id LIMIT $2`, orgID, maxListedDeliveries)
+		FROM identity_proofing_webhook_deliveries d
+		WHERE d.organization_id = $1 AND (d.request_id IS NULL OR EXISTS (
+			SELECT 1 FROM identity_proofing_requests r WHERE r.id = d.request_id AND `+inOrgMode+`))
+		ORDER BY d.created_at DESC, d.id LIMIT $2`, orgID, maxListedDeliveries)
 	if err != nil {
 		return nil, fmt.Errorf("proofing: list deliveries org %s: %w", orgID, err)
 	}

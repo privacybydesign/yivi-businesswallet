@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/crypto"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/wsca"
 )
@@ -20,7 +21,7 @@ func configuredStore(t *testing.T) *wsca.Store {
 		t.Fatalf("cipher: %v", err)
 	}
 	// nil db is fine: these tests exercise paths that fail before any DB access.
-	return wsca.NewStore(nil, cipher)
+	return wsca.NewStore(nil, cipher, audit.NopRecorder{})
 }
 
 // fakeWallet is an in-memory WalletClient for testing the Activator without a
@@ -75,7 +76,7 @@ func TestActivateNotConfigured(t *testing.T) {
 // TestActivateNotConfiguredNoKEK: enabled but no KEK is also not configured.
 func TestActivateNotConfiguredNoKEK(t *testing.T) {
 	t.Parallel()
-	a := NewActivator(true, func(uuid.UUID) (WalletClient, error) { return &fakeWallet{}, nil }, wsca.NewStore(nil, nil))
+	a := NewActivator(true, func(uuid.UUID) (WalletClient, error) { return &fakeWallet{}, nil }, wsca.NewStore(nil, nil, audit.NopRecorder{}))
 	if a.Configured() {
 		t.Fatal("expected Configured() == false with a nil-cipher store")
 	}

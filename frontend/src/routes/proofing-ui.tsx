@@ -8,6 +8,7 @@ import type {
   WebhookHealth,
 } from "../api/identity-proofing";
 import { absoluteApiUrl } from "../api/http";
+import { safeImageUrl } from "../lib/safe-image-url";
 import { useWhenFormatter } from "../lib/format-when";
 import {
   isHexColor,
@@ -46,6 +47,10 @@ function markColor(name: string): string {
   return MARK_PALETTE[Math.abs(hash) % MARK_PALETTE.length];
 }
 
+// A logo address already absolute: the settings preview's, a picked file's
+// blob: or the wallet theme's.
+const ABSOLUTE_URL = /^(https?:|blob:|data:)/;
+
 // The mark of a name as the branding shows it: its logo, else its initial on
 // its primary colour (or a colour picked by the name).
 export function BrandMark({
@@ -62,7 +67,11 @@ export function BrandMark({
   if (branding.logoUri && !failed) {
     return (
       <img
-        src={absoluteApiUrl(branding.logoUri)}
+        src={safeImageUrl(
+          ABSOLUTE_URL.test(branding.logoUri)
+            ? branding.logoUri
+            : absoluteApiUrl(branding.logoUri),
+        )}
         alt=""
         onError={() => setFailed(true)}
         className={`bg-surface-3 shrink-0 object-contain ${MARK_SIZES[size]}`}

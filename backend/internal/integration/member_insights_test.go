@@ -59,11 +59,28 @@ func TestMemberInsightsCountsTheWholeOrg(t *testing.T) {
 		t.Error("an empty status is missing from the tally; every status must be reported")
 	}
 
-	// A plain member may not read the overview.
+	// A plain member's page asks too, without knowing its role yet: it gets the
+	// shape with nothing in it, never the org's numbers.
 	env.loginAs("bob@example.test")
-	forbidden := env.do(http.MethodGet, "/api/v1/orgs/acme/member-insights", nil)
-	_ = forbidden.Body.Close()
-	if forbidden.StatusCode != http.StatusForbidden {
-		t.Errorf("member-insights as a plain member = %d, want 403", forbidden.StatusCode)
+	asMember := env.do(http.MethodGet, "/api/v1/orgs/acme/member-insights", nil)
+	if asMember.StatusCode != http.StatusOK {
+		_ = asMember.Body.Close()
+		t.Fatalf("member-insights as a plain member = %d, want 200", asMember.StatusCode)
+	}
+	empty := decodeJSON[memberInsightsBody](t, asMember)
+	if empty.Members != 0 {
+		t.Errorf("a plain member read %d members, want 0", empty.Members)
+	}
+	wantAllZero(t, "identity", empty.Identity)
+	wantAllZero(t, "screening", empty.Screening)
+}
+
+// wantAllZero fails for each status of a tally that counts someone.
+func wantAllZero(t *testing.T, what string, tally map[string]int) {
+	t.Helper()
+	for status, n := range tally {
+		if n != 0 {
+			t.Errorf("a plain member read %s %s = %d, want 0", what, status, n)
+		}
 	}
 }

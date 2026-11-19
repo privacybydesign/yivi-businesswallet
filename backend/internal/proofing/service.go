@@ -21,7 +21,6 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/openid4vpverifier"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingprovider"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/safehttp"
-	"github.com/privacybydesign/yivi-businesswallet/backend/internal/themesettings"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
 )
 
@@ -87,12 +86,13 @@ type requestStore interface {
 	Stats(ctx context.Context, orgID uuid.UUID, requestedBy *uuid.UUID, since time.Time) ([]StatsRow, error)
 	GetExternal(ctx context.Context, orgID, id uuid.UUID) (Request, error)
 	Get(ctx context.Context, orgID, id uuid.UUID) (Request, error)
+	Reread(ctx context.Context, req Request) (Request, error)
 	ListDue(ctx context.Context, now time.Time, limit int) ([]Request, error)
 	NextDeadline(ctx context.Context, now time.Time) (time.Time, error)
 	GetBySession(ctx context.Context, sessionID string) (Request, error)
 	GetByLinkToken(ctx context.Context, hash []byte) (Request, error)
 	LapseLinks(ctx context.Context, now time.Time, limit int) (int, error)
-	RecordReviewDecision(ctx context.Context, req Request, decided Status, reason, errorCode string) error
+	RecordReviewDecision(ctx context.Context, req Request, decided Status, reason, errorCode, apiReviewer string) error
 	RecordHandover(ctx context.Context, req Request, expiresAt time.Time) error
 	ListPurgeDue(ctx context.Context, limit int) ([]Request, error)
 	DeferPurge(ctx context.Context, id uuid.UUID) error
@@ -105,7 +105,7 @@ type requestStore interface {
 	AddEmployment(ctx context.Context, req Request, emp Employment) (bool, error)
 	RecordEmploymentRejected(ctx context.Context, req Request, reason, failedCheck string) error
 	SetRegisteredAddress(ctx context.Context, req Request, addr *Address) error
-	DecideStepReview(ctx context.Context, req Request, kind ReviewKind, reviewerID uuid.UUID, decided ReviewState, reason string) (*time.Time, error)
+	DecideStepReviewBy(ctx context.Context, req Request, kind ReviewKind, by stepDecider, decided ReviewState, reason string) (*time.Time, error)
 	RejectPendingReviewItems(ctx context.Context, orgID uuid.UUID, code, reason string) error
 	LapseReviewItems(ctx context.Context, now time.Time, limit int) (int, error)
 	NextReviewItemDue(ctx context.Context) (time.Time, error)
@@ -140,11 +140,10 @@ type apiKeyStore interface {
 type orgSettingsStore interface {
 	Get(ctx context.Context, orgID uuid.UUID) (Settings, error)
 	Save(ctx context.Context, orgID uuid.UUID, change SessionSettingsChange, legal *LegalRetention, origins *[]string) (Settings, error)
-	SaveBranding(ctx context.Context, orgID uuid.UUID, b Branding, logo LogoChange) (Settings, error)
+	SaveBranding(ctx context.Context, orgID uuid.UUID, b Branding) (Settings, error)
 	SyncEngineRetention(ctx context.Context, orgID uuid.UUID, sync func(context.Context, Settings) error) error
 	MarkEngineRetentionStale(ctx context.Context, orgID uuid.UUID) error
 	StaleEngineRetention(ctx context.Context) ([]uuid.UUID, error)
-	Logo(ctx context.Context, orgID uuid.UUID) (Logo, error)
 }
 
 type pauseStore interface {
@@ -193,6 +192,11 @@ type Service struct {
 	// unchecked keeps the files whose seal could not be checked at upload;
 	// nil fails such an upload.
 	unchecked uncheckedDocumentStore
+	// reviewLinks holds the links to the hosted review page.
+	reviewLinks reviewLinkStore
+	// reviewBaseURL is the hosted review page a review link's token is
+	// appended to.
+	reviewBaseURL string
 	// sealRetryDelay is the wait between tries of an unreachable seal check.
 	sealRetryDelay time.Duration
 	// flowAddressSettings is each flow's AddressMode; nil asks for none.
@@ -250,6 +254,8 @@ type Stores struct {
 	// DataRequests holds each flow's kind and a data request's matches; nil
 	// makes every flow an identity check.
 	DataRequests dataRequestStore
+	// ReviewLinks holds the links to the hosted review page; nil makes none.
+	ReviewLinks reviewLinkStore
 }
 
 // NewService builds the proofing service. A nil mailer skips the e-mail (tests).
@@ -259,7 +265,7 @@ func NewService(stores Stores, ips Provider, verifier verifier, mailer Mailer) *
 		webhooks: stores.Webhooks, events: stores.Events, pauses: stores.Pauses, flowHostedSettings: stores.FlowHosted,
 		flowBrandings:       stores.FlowBranding,
 		flowDiplomaSettings: stores.FlowDiplomas, diplomas: stores.Diplomas, dataRequests: stores.DataRequests,
-		unchecked: stores.Unchecked, sealRetryDelay: sealCheckRetryDelay,
+		unchecked: stores.Unchecked, sealRetryDelay: sealCheckRetryDelay, reviewLinks: stores.ReviewLinks,
 		flowAddressSettings: stores.FlowAddresses, flowEmploymentSettings: stores.FlowEmployment,
 		ips: ips, verifier: verifier, mailer: mailer, now: time.Now,
 		readChecks: newReadThrottle(readReconcileEvery),
@@ -1373,7 +1379,7 @@ type mailSend struct {
 // proofingMail is the mail a request sends. A member's is the org's; an
 // external person's is signed with and styled as the flow's branding over the
 // org's, with its support contact and privacy statement. A logo that cannot be
-// read is left out (the wordmark shows): a cosmetic loss must not block the
+// read is left out (the org's shows): a cosmetic loss must not block the
 // send. A flow's branding that cannot be read blocks it, since the mail would
 // otherwise go out in another look than the admin set.
 func (s *Service) proofingMail(ctx context.Context, org Org, settings *Settings, send mailSend) (email.ProofingMail, error) {
@@ -1657,7 +1663,7 @@ func (s *Service) matchDataRequest(ctx context.Context, tenant proofingprovider.
 	}
 	// Another reconcile may have finished between this one's read
 	// and the lock.
-	fresh, err := s.requests.Get(ctx, req.OrganizationID, req.ID)
+	fresh, err := s.requests.Reread(ctx, req)
 	if err != nil {
 		release()
 		slog.WarnContext(ctx, "identity proofing: read the data request to match failed",
@@ -1871,7 +1877,7 @@ func (s *Service) CancelRequest(ctx context.Context, orgID, id uuid.UUID) (Reque
 	if errors.Is(err, errCancelSessionMoved) {
 		// A hosted start raced the cancel; a session is attached once, so the
 		// second read holds the last one.
-		if req, err = s.requests.Get(ctx, req.OrganizationID, req.ID); err != nil {
+		if req, err = s.requests.Reread(ctx, req); err != nil {
 			return Request{}, err
 		}
 		err = s.cancelOnce(ctx, req)
@@ -2080,7 +2086,7 @@ func (s *Service) purge(ctx context.Context, req Request) error {
 	if err := s.purgeOnce(ctx, req); !errors.Is(err, errPurgeSessionMoved) {
 		return err
 	}
-	fresh, err := s.requests.Get(ctx, req.OrganizationID, req.ID)
+	fresh, err := s.requests.Reread(ctx, req)
 	if err != nil {
 		return err
 	}
@@ -2646,34 +2652,20 @@ func (s *Service) Settings(ctx context.Context, orgID uuid.UUID) (Settings, erro
 	return s.orgSettings.Get(ctx, orgID)
 }
 
-// SaveBranding replaces the org's branding. The colour is a #rrggbb hex, the
-// privacy statement an https URL; empty fields fall back.
-func (s *Service) SaveBranding(ctx context.Context, orgID uuid.UUID, b Branding, logo LogoChange) (Settings, error) {
+// SaveBranding replaces what the org's branding says besides its theme. The
+// privacy statement is an https URL; empty fields fall back.
+func (s *Service) SaveBranding(ctx context.Context, orgID uuid.UUID, b Branding) (Settings, error) {
 	b, err := checkBranding(b)
 	if err != nil {
 		return Settings{}, err
 	}
-	return s.orgSettings.SaveBranding(ctx, orgID, b, logo)
+	return s.orgSettings.SaveBranding(ctx, orgID, b)
 }
 
 // checkBranding trims b's fields and refuses one that cannot be saved.
 func checkBranding(b Branding) (Branding, error) {
 	b.DisplayName = strings.TrimSpace(b.DisplayName)
 	b.PrimaryColor = strings.TrimSpace(b.PrimaryColor)
-	b.SecondaryColor = strings.TrimSpace(b.SecondaryColor)
-	b.FontFamily = strings.TrimSpace(b.FontFamily)
-	for name, color := range map[string]*string{
-		"text": &b.TextColor, "surface": &b.SurfaceColor, "border": &b.BorderColor, "link": &b.LinkColor,
-		"success": &b.SuccessColor, "warning": &b.WarningColor, "error": &b.ErrorColor, "top bar": &b.TopbarColor,
-	} {
-		*color = strings.TrimSpace(*color)
-		if *color != "" && !hexColor.MatchString(*color) {
-			return Branding{}, fmt.Errorf("%w: the %s colour must be a hex colour like #1f5b4a", ErrInvalidInput, name)
-		}
-	}
-	if b.FontFamily != "" && !themesettings.ValidFontFamily(b.FontFamily) {
-		return Branding{}, fmt.Errorf("%w: the font must be a comma-separated font-family list", ErrInvalidInput)
-	}
 	b.SupportContact = strings.TrimSpace(b.SupportContact)
 	b.PrivacyURL = strings.TrimSpace(b.PrivacyURL)
 	switch {
@@ -2681,8 +2673,6 @@ func checkBranding(b Branding) (Branding, error) {
 		return Branding{}, fmt.Errorf("%w: the display name is too long", ErrInvalidInput)
 	case b.PrimaryColor != "" && !hexColor.MatchString(b.PrimaryColor):
 		return Branding{}, fmt.Errorf("%w: the primary colour must be a hex colour like #1f5b4a", ErrInvalidInput)
-	case b.SecondaryColor != "" && !hexColor.MatchString(b.SecondaryColor):
-		return Branding{}, fmt.Errorf("%w: the secondary colour must be a hex colour like #1f5b4a", ErrInvalidInput)
 	case len(b.SupportContact) > maxSupportContactLen:
 		return Branding{}, fmt.Errorf("%w: the support contact is too long", ErrInvalidInput)
 	case len(b.PrivacyURL) > maxWebhookURLLength:
@@ -2694,11 +2684,6 @@ func checkBranding(b Branding) (Branding, error) {
 		}
 	}
 	return b, nil
-}
-
-// Logo returns the org's logo, or ErrNoLogo.
-func (s *Service) Logo(ctx context.Context, orgID uuid.UUID) (Logo, error) {
-	return s.orgSettings.Logo(ctx, orgID)
 }
 
 // sessionTTLAllowed is whether a flow may set seconds as its session lifetime:

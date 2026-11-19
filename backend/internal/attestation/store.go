@@ -66,6 +66,18 @@ func unmarshalNames(raw []byte) ([]LocalizedName, error) {
 	return names, nil
 }
 
+// unmarshalValueMap decodes a {key: JSON value} jsonb object.
+func unmarshalValueMap(raw []byte) (map[string]any, error) {
+	m := map[string]any{}
+	if len(raw) == 0 {
+		return m, nil
+	}
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return nil, fmt.Errorf("attestation: decode value map: %w", err)
+	}
+	return m, nil
+}
+
 // unmarshalStringMap decodes a {key: value} jsonb object.
 func unmarshalStringMap(raw []byte) (map[string]string, error) {
 	if len(raw) == 0 {

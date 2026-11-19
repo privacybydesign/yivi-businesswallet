@@ -38,7 +38,6 @@ import {
 import { fullName, personInitials } from "../lib/name";
 import { useWhenFormatter } from "../lib/format-when";
 import { showsReviewTag } from "../lib/review-right";
-import { MemberProofing } from "./member-proofing";
 import { Avatar, Button, Card, Icon, Modal, Tag, TopBar } from "../ui";
 import * as React from "react";
 
@@ -420,7 +419,6 @@ export default function MemberDetail(): React.JSX.Element {
             )}
           </div>
           <div className="border-line flex flex-col gap-2 border-t p-4">
-            <MemberProofing slug={slug} userId={id} />
             {requestableIdentity({
               status: "active",
               identityStatus: member.identityStatus,

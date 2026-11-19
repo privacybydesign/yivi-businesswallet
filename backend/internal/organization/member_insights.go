@@ -115,6 +115,13 @@ func (h *Handler) memberInsights(w http.ResponseWriter, r *http.Request) error {
 	ctx := r.Context()
 	org := OrgFromContext(ctx)
 
+	// Every member's dashboard asks, so it need not learn the caller's role
+	// first; only an admin gets the org's tally, anyone else an empty one.
+	if !ActsAsAdmin(ctx) {
+		respond.JSON(w, r, http.StatusOK, TallyMemberInsights(nil, 0, ScreeningSettings{}, time.Now()))
+		return nil
+	}
+
 	snaps, err := h.store.MemberStatusSnapshots(ctx, org.ID)
 	if err != nil {
 		return fmt.Errorf("reading member status snapshots: %w", err)

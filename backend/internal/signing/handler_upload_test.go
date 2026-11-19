@@ -71,6 +71,10 @@ func (s *recordingService) ExternalView(context.Context, string) (ExternalView, 
 	panic("unused")
 }
 
+func (s *recordingService) ExternalRequestID(context.Context, string) (uuid.UUID, error) {
+	panic("unused")
+}
+
 func (s *recordingService) StartExternalLink(context.Context, string) (Start, error) {
 	panic("unused")
 }

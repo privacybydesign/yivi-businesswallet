@@ -22,41 +22,34 @@ func (h *Handler) Authorize(next http.Handler) http.Handler {
 		ctx := r.Context()
 		u := auth.UserFromContext(ctx)
 
-		org, err := h.store.GetBySlug(ctx, r.PathValue("slug"))
+		access, err := h.store.ResolveAccess(ctx, r.PathValue("slug"), u.ID)
 		if errors.Is(err, ErrNotFound) {
 			respond.Error(w, r, http.StatusNotFound, "org_not_found", "organization not found")
 			return
 		}
 		if err != nil {
-			slog.ErrorContext(ctx, "resolving organization", slog.String("error", err.Error()))
+			if respond.ClientGone(r) {
+				return
+			}
+			slog.ErrorContext(ctx, "resolving access", slog.String("error", err.Error()))
 			respond.Error(w, r, http.StatusInternalServerError, "internal_error", "internal server error")
 			return
 		}
+		org := access.Org
 
 		role := RoleAdmin
 		right := ReviewRightNone
 		platformAdmin := h.admins.Has(u.Email)
 		if !platformAdmin {
-			m, err := h.store.GetMembership(ctx, u.ID, org.ID)
-			if errors.Is(err, ErrNotMember) {
+			if access.Member == nil {
 				respond.Error(w, r, http.StatusForbidden, "forbidden", "forbidden")
 				return
 			}
-			if err != nil {
-				slog.ErrorContext(ctx, "resolving membership", slog.String("error", err.Error()))
-				respond.Error(w, r, http.StatusInternalServerError, "internal_error", "internal server error")
-				return
-			}
-			role = m.Role
-			right = m.ReviewRight()
+			role = access.Member.Role
+			right = access.Member.ReviewRight()
 		}
 
-		authority, err := h.store.ResolveAuthority(ctx, org.ID, u.ID)
-		if err != nil {
-			slog.ErrorContext(ctx, "resolving authority", slog.String("error", err.Error()))
-			respond.Error(w, r, http.StatusInternalServerError, "internal_error", "internal server error")
-			return
-		}
+		authority := access.Authority
 		authority.PlatformAdmin = platformAdmin
 
 		ctx = contextWithReviewRight(contextWithAuthority(contextWithRole(contextWithOrg(ctx, org), role), authority), right)

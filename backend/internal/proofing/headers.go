@@ -10,6 +10,7 @@ const (
 	headerCacheControl       = "Cache-Control"
 	headerCSP                = "Content-Security-Policy"
 	headerIdempotentReplayed = "Idempotent-Replayed"
+	headerTestMode           = "Test-Mode"
 	contentTypeJSON          = "application/json"
 	cacheNoStore             = "no-store"
 )

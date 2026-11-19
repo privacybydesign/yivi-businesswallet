@@ -1,7 +1,7 @@
 import { useTranslation } from "react-i18next";
 import * as React from "react";
-import type { ProofingRequest } from "../api/identity-proofing";
-import { useCheckSealsAgainMutation } from "../api/identity-proofing.queries";
+import type { ProofingRequest, ReviewTarget } from "../api/identity-proofing";
+import { useCheckSealsAgainFor } from "../api/identity-proofing.queries";
 import { proofingErrorMessage } from "../lib/identity-proofing";
 import {
   SEAL_REFUSAL_KEYS,
@@ -24,18 +24,18 @@ const STATE_TONES = {
 // became of it, and while any waits, the reviewer checks them again before
 // the step can be accepted.
 export function UncheckedSeals({
-  slug,
+  target,
   request,
   kind,
   canCheck,
 }: Readonly<{
-  slug: string;
+  target: ReviewTarget;
   request: ProofingRequest;
   kind: "diplomas" | "employment";
   canCheck: boolean;
 }>): React.JSX.Element | null {
   const { t } = useTranslation();
-  const check = useCheckSealsAgainMutation(slug, request.id, kind);
+  const check = useCheckSealsAgainFor(target, request.id, kind);
   const files = sealChecksOf(request, kind);
   const waiting = files.filter(
     (f) => sealCheckState(f.outcome) === "waiting",

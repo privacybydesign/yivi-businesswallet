@@ -88,6 +88,12 @@ func (c *Client) StartProofing(ctx context.Context, req ProofingRequest) (Sessio
 	return c.start(ctx, c.vcts.proofingRequestQuery(req))
 }
 
+// StartSigning creates the presentation request that authorises a signature:
+// the holder's name and date of birth from any one of req's sources.
+func (c *Client) StartSigning(ctx context.Context, req SigningRequest) (Session, error) {
+	return c.start(ctx, c.vcts.signingQuery(req))
+}
+
 func (c *Client) start(ctx context.Context, query dcqlQuery) (Session, error) {
 	nonce, err := randomNonce()
 	if err != nil {

@@ -88,6 +88,9 @@ func testCredential(t *testing.T, id string) signingprovider.Credential {
 
 const samplePDF = "%PDF-1.4 sample"
 
+// testProviderURL is the provider the test credentials are linked at.
+const testProviderURL = "https://qtsp.example"
+
 // A request with one member and one external signee round-trips: both rows persist,
 // each carries its own kind, and only the external one has an address of its own.
 func TestCreateRequestPersistsMixedSigners(t *testing.T) {
@@ -319,18 +322,18 @@ func TestCredentialsAreKeyedPerSubject(t *testing.T) {
 	member := internalSubject(alice)
 	external := externalSubject("Outsider@Example.ORG")
 
-	if _, err := store.GetCredential(ctx, orgID, external); !errors.Is(err, ErrNoCredential) {
+	if _, err := store.GetCredential(ctx, orgID, external, testProviderURL); !errors.Is(err, ErrNoCredential) {
 		t.Errorf("unlinked external subject = %v, want ErrNoCredential", err)
 	}
 
-	if err := store.UpsertCredential(ctx, orgID, member, testCredential(t, "member-cred")); err != nil {
+	if err := store.UpsertCredential(ctx, orgID, member, testProviderURL, testCredential(t, "member-cred")); err != nil {
 		t.Fatalf("UpsertCredential (member): %v", err)
 	}
-	if err := store.UpsertCredential(ctx, orgID, external, testCredential(t, "external-cred")); err != nil {
+	if err := store.UpsertCredential(ctx, orgID, external, testProviderURL, testCredential(t, "external-cred")); err != nil {
 		t.Fatalf("UpsertCredential (external): %v", err)
 	}
 
-	gotMember, err := store.GetCredential(ctx, orgID, member)
+	gotMember, err := store.GetCredential(ctx, orgID, member, testProviderURL)
 	if err != nil {
 		t.Fatalf("GetCredential (member): %v", err)
 	}
@@ -338,7 +341,7 @@ func TestCredentialsAreKeyedPerSubject(t *testing.T) {
 		t.Errorf("member credential = %q, want member-cred", gotMember.ID)
 	}
 	// The address is normalised, so the same signee is one row however it was typed.
-	gotExternal, err := store.GetCredential(ctx, orgID, externalSubject("outsider@example.org"))
+	gotExternal, err := store.GetCredential(ctx, orgID, externalSubject("outsider@example.org"), testProviderURL)
 	if err != nil {
 		t.Fatalf("GetCredential (external): %v", err)
 	}
@@ -346,11 +349,17 @@ func TestCredentialsAreKeyedPerSubject(t *testing.T) {
 		t.Errorf("external credential = %q, want external-cred", gotExternal.ID)
 	}
 
+	// A credential belongs to the provider it was linked at: once the organisation
+	// signs with another, the signer has none there and must link again.
+	if _, err := store.GetCredential(ctx, orgID, member, "https://other-provider.example"); !errors.Is(err, ErrNoCredential) {
+		t.Errorf("credential at another provider = %v, want ErrNoCredential", err)
+	}
+
 	// Re-linking replaces that subject's row rather than adding a second one.
-	if err := store.UpsertCredential(ctx, orgID, external, testCredential(t, "external-cred-2")); err != nil {
+	if err := store.UpsertCredential(ctx, orgID, external, testProviderURL, testCredential(t, "external-cred-2")); err != nil {
 		t.Fatalf("UpsertCredential (relink): %v", err)
 	}
-	relinked, err := store.GetCredential(ctx, orgID, external)
+	relinked, err := store.GetCredential(ctx, orgID, external, testProviderURL)
 	if err != nil {
 		t.Fatalf("GetCredential (relinked): %v", err)
 	}
@@ -525,5 +534,51 @@ func TestDeclineSignerRefusesAnAlreadySignedSigner(t *testing.T) {
 
 	if err := store.DeclineSigner(ctx, orgID, id, created[0].ID, "changed my mind"); !errors.Is(err, ErrAlreadySigned) {
 		t.Fatalf("decline of an already-signed signer = %v, want ErrAlreadySigned", err)
+	}
+}
+
+// A completed request whose delivery is still pending long after it should
+// have gone out was lost with its process; a fresh one is still on its way.
+func TestListStalledDeliveries(t *testing.T) {
+	store, pool := newStore(t)
+	ctx := context.Background()
+	orgID := makeOrg(t, pool, "acme")
+	alice := makeUser(t, pool, "alice@acme.example")
+
+	newCompleted := func(filename string) uuid.UUID {
+		t.Helper()
+		id, _, err := store.CreateRequest(ctx, orgID, alice, filename, []byte(samplePDF), ModeSequential,
+			[]SignerInput{{Kind: KindInternal, UserID: alice, Order: 1}},
+			RecipientInput{Channel: ChannelEmail, Address: "recipient@example.org", Name: "Recipient"})
+		if err != nil {
+			t.Fatalf("CreateRequest: %v", err)
+		}
+		if err := store.CompleteRequest(ctx, orgID, id); err != nil {
+			t.Fatalf("CompleteRequest: %v", err)
+		}
+		return id
+	}
+	lost := newCompleted("lost.pdf")
+	fresh := newCompleted("fresh.pdf")
+	delivered := newCompleted("delivered.pdf")
+	if _, err := pool.Exec(ctx, `UPDATE signing_requests SET updated_at = now() - interval '1 hour' WHERE id = ANY($1)`,
+		[]uuid.UUID{lost, delivered}); err != nil {
+		t.Fatalf("age requests: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE signing_requests SET delivery_status = $2 WHERE id = $1`, delivered, DeliveryDelivered); err != nil {
+		t.Fatalf("mark delivered: %v", err)
+	}
+
+	stalled, err := store.ListStalledDeliveries(ctx, 10*time.Minute)
+	if err != nil {
+		t.Fatalf("ListStalledDeliveries: %v", err)
+	}
+	if len(stalled) != 1 || stalled[0].RequestID != lost || stalled[0].OrgID != orgID {
+		t.Fatalf("stalled = %+v, want only %s (not the fresh %s)", stalled, lost, fresh)
+	}
+
+	// Completing again changes nothing: the guard matches no row.
+	if err := store.CompleteRequest(ctx, orgID, lost); err != nil {
+		t.Fatalf("CompleteRequest twice: %v", err)
 	}
 }

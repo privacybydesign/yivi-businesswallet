@@ -123,6 +123,21 @@ func callerFromContext(ctx context.Context) APIKeyCaller {
 	return c
 }
 
+// RequireAPIKey lets a request through only with one of the org's API keys
+// carrying scope, under the limits every API call is held to. It is exported for
+// the other API the org's keys open, the signing API (internal/signing), which
+// reads the caller back with APICallerFromContext.
+func (h *Handler) RequireAPIKey(scope string, next respond.HandlerFunc) http.Handler {
+	return h.requireAPIKey(scope, next)
+}
+
+// APICallerFromContext returns the API key a request authenticated with; false
+// for a request that passed no RequireAPIKey.
+func APICallerFromContext(ctx context.Context) (APIKeyCaller, bool) {
+	c, ok := ctx.Value(apiCallerKey{}).(APIKeyCaller)
+	return c, ok
+}
+
 const bearerPrefix = "Bearer "
 
 // requireAPIKey authenticates the key in the Authorization header.
@@ -145,6 +160,11 @@ func (h *Handler) requireAPIKey(scope string, next respond.HandlerFunc) http.Han
 
 		if err != nil {
 			return err
+		}
+
+		// Every answer to a key of an org in test mode says so.
+		if caller.TestMode {
+			w.Header().Set(headerTestMode, "true")
 		}
 
 		if err := rateLimited(w, h.apiCalls, caller.Org.ID.String()); err != nil {
@@ -303,6 +323,8 @@ type apiSessionResponse struct {
 	// birthDate: only that name and birth date are approved (IDENTITY_MISMATCH
 	// otherwise).
 	ExpectedSubject bool `json:"expectedSubject"`
+	// Test is a session made while the org was in test mode.
+	Test bool `json:"test,omitempty"`
 	// FlowKind is what the session is for: identity, or data_access /
 	// data_erasure, which goes to the org's review once the person is proven.
 	// DataExportUntil is until when an approved data_access session's data
@@ -321,7 +343,7 @@ func newAPISessionResponse(req Request, now time.Time) apiSessionResponse {
 		ProofedName: req.ProofedName, AssuranceLevel: req.AssuranceLevel, EIDASLevel: req.EIDASLevel,
 		ErrorCode: req.ErrorCode, ExpiresAt: req.LinkExpiresAt, CreatedAt: req.CreatedAt, CompletedAt: req.CompletedAt,
 		CancelledAt: req.CancelledAt, CancelledBy: req.CancelledBy, ExpiryReason: req.ExpiryReason(now), PurgedAt: req.PurgedAt,
-		ExpectedSubject: req.ExpectsSubject, FlowKind: req.FlowKind, DataExportUntil: req.DataExportUntil,
+		ExpectedSubject: req.ExpectsSubject, Test: req.Test, FlowKind: req.FlowKind, DataExportUntil: req.DataExportUntil,
 		AddressReview: req.AddressReview,
 	}
 }
@@ -440,12 +462,21 @@ type apiMethodResponse struct {
 	ExpiresAt  time.Time `json:"expiresAt"`
 }
 
+// apiStartMethods are the methods an integrator starts a session in. Pending
+// is the hosted page's alone: the API has no call to choose the app after it.
+var apiStartMethods = []proofingprovider.Method{
+	proofingprovider.MethodIdem, proofingprovider.MethodYivi, proofingprovider.MethodBrowser,
+}
+
 func (h *Handler) apiStartMethod(w http.ResponseWriter, r *http.Request) error {
 	id, err := apiSessionID(r)
 	if err != nil {
 		return err
 	}
 	method := proofingprovider.Method(r.PathValue("method"))
+	if !slices.Contains(apiStartMethods, method) {
+		return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_input", Message: "method must be idem_app, yivi_app or browser"}
+	}
 	caller := callerFromContext(r.Context())
 	started, err := h.service.StartHeadless(r.Context(), caller.Org.ID, id, method)
 	if err != nil {

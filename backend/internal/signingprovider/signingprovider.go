@@ -63,6 +63,10 @@ type AuthorizeParams struct {
 	NumSignatures    int
 	Hashes           []string // base64 raw digests, credential scope only
 	HashAlgorithmOID string
+	// Description is the CSC `description` parameter: a short name for what is
+	// being signed, which a provider may show the signer. Credential scope only;
+	// empty sends none.
+	Description string
 }
 
 // Token is the OAuth2 token response. The access token is a JWT that (for the

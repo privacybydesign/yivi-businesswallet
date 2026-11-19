@@ -15,7 +15,7 @@ import type {
   ProofingMethod,
   ProofingProgress,
 } from "../api/identity-proofing";
-import i18n from "../i18n";
+import i18n, { reportLanguageFailure, showLanguage } from "../i18n";
 import { errorCode } from "../lib/api-error";
 import { useDateFormatter, useWhenFormatter } from "../lib/format-when";
 import { erasureLeft, legalReasonIn } from "../lib/legal-retention";
@@ -71,37 +71,62 @@ export default function Proof(): React.JSX.Element {
   const page = useHostedProofingQuery(token);
 
   return (
-    // The card sits at the top, 80 px down, on every step, as VF1 to VF5
-    // draw it; "Powered by Yivi" follows it.
+    <HostedLayout>
+      {/* Data first: a background refetch that fails (the tab regaining
+            focus on return from the Idem app) keeps the page it already has
+            rather than replacing the session with an error card. */}
+      {page.data !== undefined ? (
+        <HostedPage token={token} page={page.data} />
+      ) : page.isError ? (
+        <Card className="p-6">
+          <p role="alert" className="text-error text-[13.5px]">
+            {errorCode(page.error) === NOT_FOUND
+              ? t("proofLink.notFound")
+              : hostedErrorMessage(page.error, t)}
+          </p>
+        </Card>
+      ) : (
+        <p className={HINT}>{t("common.loading")}</p>
+      )}
+    </HostedLayout>
+  );
+}
+
+// The page around the card: it sits at the top, 80 px down, on every step,
+// as VF1 to VF5 draw it; "Powered by Yivi" follows it.
+export function HostedLayout({
+  children,
+}: Readonly<{ children: React.ReactNode }>): React.JSX.Element {
+  return (
     <div className="bg-surface-2 flex min-h-screen flex-col items-center px-4 pt-20 pb-10">
       <div
         className={`flex w-full max-w-[560px] flex-col gap-5 ${DOCUMENT_SCAN_WIDE_PAGE}`}
       >
-        {/* Data first: a background refetch that fails (the tab regaining
-            focus on return from the Idem app) keeps the page it already has
-            rather than replacing the session with an error card. */}
-        {page.data !== undefined ? (
-          <>
-            <HostedFlow token={token} page={page.data} />
-            {!page.data.organization.branding.hidePoweredBy && (
-              <p className="text-muted text-center text-[12.5px]">
-                {t("proofLink.poweredBy")}
-              </p>
-            )}
-          </>
-        ) : page.isError ? (
-          <Card className="p-6">
-            <p role="alert" className="text-error text-[13.5px]">
-              {errorCode(page.error) === NOT_FOUND
-                ? t("proofLink.notFound")
-                : hostedErrorMessage(page.error, t)}
-            </p>
-          </Card>
-        ) : (
-          <p className={HINT}>{t("common.loading")}</p>
-        )}
+        {children}
       </div>
     </div>
+  );
+}
+
+// The hosted page itself, under the "powered by" line; the settings preview
+// shows it too.
+export function HostedPage({
+  token,
+  page,
+}: Readonly<{
+  token: string;
+  page: HostedProofing;
+}>): React.JSX.Element {
+  const { t } = useTranslation();
+  return (
+    <>
+      <HostedFlow token={token} page={page} />
+      {!page.organization.branding.hidePoweredBy && (
+        <p className="text-muted text-center text-[12.5px]">
+          {t("proofLink.poweredBy")}
+        </p>
+      )}
+    </>
   );
 }
 
@@ -162,8 +187,8 @@ function HostedFlow({
         ? []
         : (navigator.languages ?? [navigator.language]);
     // Not changeLanguage: the subject's page must not persist a wallet choice.
-    void i18n.changeLanguage(
-      hostedLanguage(page.language, preferred, page.locales),
+    showLanguage(hostedLanguage(page.language, preferred, page.locales)).catch(
+      reportLanguageFailure,
     );
   }, [page.language, page.locales]);
 
@@ -250,13 +275,22 @@ function HostedFlow({
       <div className="bg-topbar text-topbar-fg border-topbar-line flex items-center gap-3 border-b px-6 py-5">
         <BrandMark
           name={organization.name}
-          branding={organization.branding}
+          // The mark wears the page's colour: a flow's own, else the theme's.
+          branding={{
+            ...organization.branding,
+            primaryColor: primaryColor || (theme?.primaryColor ?? ""),
+          }}
           size="lg"
         />
         <span className="font-display text-[16px] font-bold">
           {organization.name}
         </span>
       </div>
+      {page.test && (
+        <output className="bg-warning-bg text-warning-fg block px-6 py-2 text-[13px] font-semibold">
+          {t("testMode.hostedNotice", { organization: organization.name })}
+        </output>
+      )}
       <div className="flex flex-col gap-6 p-6">
         {dataRequest && (
           <p className="text-ink text-[13.5px]">

@@ -1,7 +1,5 @@
 import i18n from "i18next";
 import { initReactI18next } from "react-i18next";
-import { en } from "./locales/en";
-import { nl } from "./locales/nl";
 import {
   DEFAULT_LANGUAGE,
   LANGUAGE_STORAGE_KEY,
@@ -14,7 +12,7 @@ export { DEFAULT_LANGUAGE, SUPPORTED_LANGUAGES } from "./language";
 export type { Language } from "./language";
 
 // To add a language: create `locales/<lng>.ts` (typed against `en`, so the build
-// fails if key sets diverge), register it in `resources` below, and add the tag
+// fails if key sets diverge), register it in `LOCALE_LOADERS` below, and add the tag
 // to `SUPPORTED_LANGUAGES` in `language.ts`.
 
 function readStoredLanguage(): string | null {
@@ -36,15 +34,20 @@ const initialLanguage = resolveInitialLanguage(
   browserPreferences,
 );
 
+const NAMESPACE = "translation";
+
+// Each language is its own chunk: a visitor downloads only the one they read.
+const LOCALE_LOADERS: Record<Language, () => Promise<object>> = {
+  en: () => import("./locales/en").then((m) => m.en),
+  nl: () => import("./locales/nl").then((m) => m.nl),
+};
+
 void i18n.use(initReactI18next).init({
-  resources: {
-    en: { translation: en },
-    nl: { translation: nl },
-  },
+  resources: {},
   lng: initialLanguage,
   fallbackLng: DEFAULT_LANGUAGE,
   supportedLngs: SUPPORTED_LANGUAGES,
-  defaultNS: "translation",
+  defaultNS: NAMESPACE,
   interpolation: {
     escapeValue: false, // React escapes interpolated values against XSS already
   },
@@ -61,6 +64,30 @@ function applyDocumentLanguage(lng: string): void {
 applyDocumentLanguage(i18n.language);
 i18n.on("languageChanged", applyDocumentLanguage);
 
+export async function loadLanguage(lng: Language): Promise<void> {
+  if (!i18n.hasResourceBundle(lng, NAMESPACE)) {
+    i18n.addResourceBundle(lng, NAMESPACE, await LOCALE_LOADERS[lng]());
+  }
+}
+
+// The language asked for last, so a slow download cannot override a newer choice.
+let wanted: Language = initialLanguage;
+
+// Switch language without persisting it (a page that follows its own setting).
+export async function showLanguage(lng: Language): Promise<void> {
+  wanted = lng;
+  await loadLanguage(lng);
+  // A later call may have asked for another language while this one loaded.
+  if (wanted === lng) {
+    await i18n.changeLanguage(lng);
+  }
+}
+
+// Resolves once the initial language's strings are in; render after it. It
+// goes through changeLanguage because i18next only sets resolvedLanguage when
+// the strings are there at the time of the switch.
+export const i18nReady: Promise<void> = showLanguage(initialLanguage);
+
 // Switch language and persist the explicit choice so it survives reloads.
 export function changeLanguage(lng: Language): void {
   try {
@@ -68,7 +95,12 @@ export function changeLanguage(lng: Language): void {
   } catch {
     // Persistence is best-effort; the in-memory switch still applies.
   }
-  void i18n.changeLanguage(lng);
+  showLanguage(lng).catch(reportLanguageFailure);
+}
+
+// A language whose strings cannot be fetched leaves the page as it was.
+export function reportLanguageFailure(error: unknown): void {
+  console.error("loading language failed", error);
 }
 
 export default i18n;

@@ -2,12 +2,13 @@ package organization
 
 import (
 	"context"
-	"errors"
 	"log/slog"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/database"
 )
 
 const (
@@ -38,26 +39,13 @@ func NewScreeningScheduler(store *Store, mailer screeningMailer, appBaseURL stri
 	return &ScreeningScheduler{store: store, mailer: mailer, appBaseURL: strings.TrimRight(appBaseURL, "/")}
 }
 
-// Start runs one sweep per tick until ctx is cancelled. It returns immediately;
-// the first sweep is one interval away, mirroring IdentityScheduler.Start.
-func (s *ScreeningScheduler) Start(ctx context.Context, interval time.Duration) {
+// Start sweeps whenever a sweep is due until ctx is cancelled, mirroring
+// IdentityScheduler.Start.
+func (s *ScreeningScheduler) Start(ctx context.Context, runs database.Querier, interval time.Duration) {
 	if interval <= 0 {
 		interval = DefaultScreeningScheduleInterval
 	}
-	ticker := time.NewTicker(interval)
-	go func() {
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				if err := s.SweepAll(ctx); err != nil && !errors.Is(err, context.Canceled) {
-					slog.ErrorContext(ctx, "screening: reminder sweep failed", slog.String("error", err.Error()))
-				}
-			}
-		}
-	}()
+	database.Periodic{Name: "screening-reminders", Interval: interval, Runs: runs}.Start(ctx, s.SweepAll)
 }
 
 // SweepAll runs one pass over every organisation, mirroring
@@ -132,7 +120,9 @@ func (s *ScreeningScheduler) remind(ctx context.Context, org Organization, c Vog
 		return false
 	}
 
-	if err := s.store.RecordVogReminderSent(ctx, org.ID, c.UserID, c.Email, c.Overdue); err != nil {
+	// The mail is out, so the send is recorded even when a shutdown has just
+	// cancelled ctx: unrecorded, the next sweep would mail the member again.
+	if err := s.store.RecordVogReminderSent(context.WithoutCancel(ctx), org.ID, c.UserID, c.Email, c.Overdue); err != nil {
 		slog.ErrorContext(ctx, "screening: record reminder sent failed",
 			slog.String("organizationId", org.ID.String()), slog.String("userId", c.UserID.String()), slog.String("error", err.Error()))
 		return false

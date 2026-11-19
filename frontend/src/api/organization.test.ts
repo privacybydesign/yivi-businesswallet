@@ -23,6 +23,7 @@ function org(overrides: Partial<Organization>): Organization {
     digitalAddress: "",
     status: "active",
     bootstrappedAt: "",
+    testMode: false,
     ...overrides,
   };
 }

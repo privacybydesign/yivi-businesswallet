@@ -10,7 +10,11 @@ import { IdentityCheckReview } from "./identity-check-review";
 import { AddressReview } from "./address-review";
 import { EmploymentReview } from "./employment-review";
 import { DiplomasReview } from "./diplomas-review";
-import type { ProofingRequest, StepReviewKind } from "../api/identity-proofing";
+import type {
+  ProofingRequest,
+  ReviewTarget,
+  StepReviewKind,
+} from "../api/identity-proofing";
 import { stepReviewOf, waitingParts } from "../lib/proofing-reviews";
 
 // The page of each step a reviewer decides.
@@ -20,26 +24,38 @@ const STEP_REVIEW_PAGES = {
   address: AddressReview,
 } as const satisfies Record<
   StepReviewKind,
-  (props: { slug: string; request: ProofingRequest }) => React.JSX.Element
+  (props: {
+    target: ReviewTarget;
+    request: ProofingRequest;
+  }) => React.JSX.Element
 >;
 
 // A request's review page: the step that waits, else its identity check or
 // data request. A closed session opens as its identity check, with every
-// decision of its review listed together.
-function RequestReview({
-  slug,
+// decision of its review listed together. A review link opens only an
+// identity check.
+export function RequestReview({
+  target,
   request,
-}: Readonly<{ slug: string; request: ProofingRequest }>): React.JSX.Element {
+}: Readonly<{
+  target: ReviewTarget;
+  request: ProofingRequest;
+}>): React.JSX.Element {
   const step =
     waitingParts(request).length === 0 ? undefined : stepReviewOf(request);
   if (step !== undefined) {
     const Page = STEP_REVIEW_PAGES[step];
-    return <Page slug={slug} request={request} />;
+    return <Page target={target} request={request} />;
   }
-  return request.flowKind === "identity" ? (
-    <IdentityCheckReview slug={slug} request={request} />
-  ) : (
-    <DataRequestReview slug={slug} kind={request.flowKind} request={request} />
+  if (request.flowKind === "identity" || target.kind === "link") {
+    return <IdentityCheckReview target={target} request={request} />;
+  }
+  return (
+    <DataRequestReview
+      slug={target.slug}
+      kind={request.flowKind}
+      request={request}
+    />
   );
 }
 
@@ -57,7 +73,9 @@ export default function ProofingReview(): React.JSX.Element {
   const request = useProofingRequestQuery(slug, id, { enabled: canReview });
 
   if (request.data) {
-    return <RequestReview slug={slug} request={request.data} />;
+    return (
+      <RequestReview target={{ kind: "org", slug }} request={request.data} />
+    );
   }
   let message: string;
   if (org.isPending || (canReview && request.isPending)) {

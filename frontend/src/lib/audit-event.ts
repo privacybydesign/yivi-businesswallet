@@ -20,6 +20,7 @@ export const AUDIT_TONE_CLASSES: Record<AuditTone, string> = {
 const ACTION_VISUAL: Record<string, { icon: IconName; tone: AuditTone }> = {
   "organization.created": { icon: "add", tone: "green" },
   "organization.updated": { icon: "edit", tone: "blue" },
+  "organization.test_mode_changed": { icon: "edit", tone: "amber" },
   "membership.invited": { icon: "email", tone: "amber" },
   "membership.invite_resent": { icon: "email", tone: "amber" },
   "membership.invite_revoked": { icon: "close", tone: "red" },
@@ -68,6 +69,7 @@ const ACTION_VISUAL: Record<string, { icon: IconName; tone: AuditTone }> = {
   "attestation.claimed": { icon: "valid", tone: "green" },
   "attestation.revoked": { icon: "close", tone: "red" },
   "attestation.offer_cancelled": { icon: "close", tone: "amber" },
+  "attestation.declined": { icon: "close", tone: "slate" },
   "attestation.key_added": { icon: "add", tone: "green" },
   "attestation.key_suspended": { icon: "warning", tone: "amber" },
   "attestation.key_revoked": { icon: "close", tone: "red" },
@@ -170,6 +172,7 @@ const ACTION_VISUAL: Record<string, { icon: IconName; tone: AuditTone }> = {
   "identity_proofing.address_added": { icon: "add", tone: "green" },
   "identity_proofing.address_reviewed": { icon: "valid", tone: "blue" },
   "identity_proofing.review_item_decided": { icon: "valid", tone: "blue" },
+  "identity_proofing.review_link_created": { icon: "add", tone: "blue" },
   "identity_proofing.flow_employment_configured": {
     icon: "settings",
     tone: "blue",
@@ -193,6 +196,9 @@ export function auditVisual(action: string): {
 }
 
 const API_KEY_ACTOR_PREFIX = "api_key:";
+// ReviewLinkActorPrefix in backend/internal/proofing/review_link.go: a review
+// link the org's API key made, named by that key's prefix.
+const REVIEW_LINK_ACTOR_PREFIX = "review_link:";
 // hostedSubjectActor in backend/internal/proofing/hosted.go: the subject of a
 // hosted link, who has no account.
 const HOSTED_LINK_ACTOR = "hosted_link";
@@ -216,6 +222,11 @@ export function auditActorLabel(
       prefix: label.slice(API_KEY_ACTOR_PREFIX.length),
     });
   }
+  if (label.startsWith(REVIEW_LINK_ACTOR_PREFIX)) {
+    return t("auditLog.reviewLinkActor", {
+      prefix: label.slice(REVIEW_LINK_ACTOR_PREFIX.length),
+    });
+  }
   if (label === HOSTED_LINK_ACTOR) {
     return t("auditLog.hostedLinkActor");
   }
@@ -236,6 +247,8 @@ export function auditActionLabel(action: string, t: TFunction): string {
       return t("auditLog.actions.orgUpdated");
     case "organization.deleted":
       return t("auditLog.actions.orgDeleted");
+    case "organization.test_mode_changed":
+      return t("auditLog.actions.orgTestModeChanged");
     case "membership.invited":
       return t("auditLog.actions.memberInvited");
     case "membership.invite_resent":
@@ -350,6 +363,10 @@ export function auditActionLabel(action: string, t: TFunction): string {
       return t("auditLog.actions.walletUnitActivated");
     case "wallet.unit_revoked":
       return t("auditLog.actions.walletUnitRevoked");
+    case "wsca.account_activated":
+      return t("auditLog.actions.wscaAccountActivated");
+    case "wsca.account_rotated":
+      return t("auditLog.actions.wscaAccountRotated");
     case "kvk.registration_validated":
       return t("auditLog.actions.kvkRegistrationValidated");
     case "kvk.registration_not_validated":
@@ -374,6 +391,8 @@ export function auditActionLabel(action: string, t: TFunction): string {
       return t("auditLog.actions.attestationRevoked");
     case "attestation.offer_cancelled":
       return t("auditLog.actions.attestationOfferCancelled");
+    case "attestation.declined":
+      return t("auditLog.actions.attestationDeclined");
     case "attestation.key_added":
       return t("auditLog.actions.attestationKeyAdded");
     case "attestation.key_suspended":
@@ -550,6 +569,8 @@ export function auditActionLabel(action: string, t: TFunction): string {
       return t("auditLog.actions.identityProofingAddressReviewed");
     case "identity_proofing.review_item_decided":
       return t("auditLog.actions.identityProofingReviewItemDecided");
+    case "identity_proofing.review_link_created":
+      return t("auditLog.actions.identityProofingReviewLinkCreated");
     case "identity_proofing.flow_employment_configured":
       return t("auditLog.actions.identityProofingFlowEmploymentConfigured");
     case "identity_proofing.employment_added":
@@ -591,6 +612,8 @@ export function auditTargetLabel(targetType: string, t: TFunction): string {
       return t("auditLog.targets.walletRepresentation");
     case "wallet_unit":
       return t("auditLog.targets.walletUnit");
+    case "wsca_account":
+      return t("auditLog.targets.wscaAccount");
     case "kvk_registration":
       return t("auditLog.targets.kvkRegistration");
     case "postguard_key":

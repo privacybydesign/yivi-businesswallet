@@ -44,9 +44,33 @@ tags:
   - name: provisioning
     description: Per-organisation user and department provisioning from an identity directory.
   - name: csc
-    description: Per-organisation CSC API v2 signing-provider (remote QTSP) connection settings.
+    description: >-
+      Per-organisation CSC API v2 signing-provider settings: the wallet's own signing
+      service (`yivi`, the default) or a remote provider the organisation connects.
   - name: signing
-    description: Qualified document signing — the RP-centric signing ceremony against a CSC provider.
+    description: Document signing in the wallet — the signing ceremony against the organisation's CSC provider.
+  - name: signing-api
+    description: >-
+      The signing API, for embedding document signing in your own system. Authenticate
+      with one of the organisation's API tokens (the same ones the identity proofing API
+      takes) as a Bearer token; a token made before this API existed has the
+      `signing:read` and `signing:write` scopes too. The flow: `POST
+      /api/v1/signing/requests` with the PDF and its signees; send each signee to their
+      `signingUrl` (a page of the wallet, in a redirect or a frame) or let the wallet mail
+      it; poll `GET /api/v1/signing/requests/{id}` until `status` is `completed`; download
+      the PDF from `…/document`. A signee identifies with the Yivi app on the signing page
+      and signs with a certificate in their own name. With the wallet's own signing
+      service that is an advanced electronic signature, not a qualified one.
+  - name: yivi-csc
+    description: >-
+      The wallet's own signing service: a Cloud Signature Consortium (CSC) API v2 provider
+      and its OAuth 2.0 authorization server, under `/api/v1/yivi-csc`. A signer authorises
+      with a Yivi disclosure over OpenID4VP of their name and date of birth, from a
+      passport, identity card or residence permit or from the registered personal data
+      (BRP). Every organisation signs with it until it connects another provider. Its keys
+      are kept by the deployment and its certificates chain to the deployment's own
+      authority, so its signatures are advanced, not qualified. The wallet's signing
+      ceremony is its one registered client.
   - name: openid4vp
     description: >-
       Inbound OpenID4VP — an external verifier invoking the business wallet as the
@@ -75,7 +99,8 @@ tags:
       ### Before you start
 
       An organisation admin creates an **API key** (`yp_live_…`) once in the wallet, under
-      **Identity proofing › Developers**, where an admin can show it again later. It opens
+      **Identity proofing › Developers**, where an admin can show it again later (a key made
+      before keys could be shown again cannot be: create a new one). It opens
       every route of this API. Everything else can be set up in the wallet or with that key:
       - the **flows** (`POST /proofing/flows`, and the routes under
         `/proofing/flows/{flowID}`). A flow fixes what is checked: which documents and
@@ -203,13 +228,13 @@ tags:
 
       | Event | Sent when |
       |---|---|
-      | `session.created` | the session exists and the person can open it |
+      | `session.created` | the session exists and the person can open it. For a hosted session it comes when the person starts the link, not at `POST /proofing/sessions` |
       | `session.started` | the person's app joined the session |
       | `session.handover` | a running Idem session moved to another phone |
       | `session.verified` | the session is approved; carries `data.result` |
       | `session.failed` | the session is rejected; `data.errorCode` says why |
-      | `session.review_opened` | the session waits for a reviewer; `session.verified` or `session.failed` follows |
-      | `session.expired` | the session ran out before it was finished |
+      | `session.review_opened` | the session waits for a reviewer. `session.verified` or `session.failed` follows, or `session.expired` when the review ends undecided |
+      | `session.expired` | the session ended without an outcome: a hosted link nobody started in time, a session the person did not finish, or a review that ended undecided (`data.expiryReason` says which) |
       | `session.cancelled` | the session was cancelled |
       | `session.purged` | the session's personal data was erased |
       | `session.address_added`, `session.diploma_added`, `session.employment_added` | the person added that extra step's data |
@@ -294,6 +319,20 @@ tags:
       { "name": "Onboarding", "requiredAssuranceLevel": "substantial" }
       ```
 
+      ### Review a session in your own system
+
+      When a session waits for a reviewer (`session.review_opened`, or `status`
+      `needs_review`), either
+      - build the review yourself: `GET /proofing/sessions/{id}/review` reads what waits
+        with the evidence, and `POST /proofing/sessions/{id}/review-items/{kind}` decides each
+        part as the reviewer you name; or
+      - use the wallet's review page: `POST /proofing/sessions/{id}/review-links` answers a
+        link to it for the reviewer you name, to open or show in an iframe on an allowed
+        origin. It posts `proofing.review_completed` to your page once nothing waits.
+
+      Either way the decision is the same as one in the wallet: audited, shown there with the
+      reviewer's name, and sent as the same webhooks.
+
       ### Outcomes and error codes
 
       A session's `status` ends as `approved`, `rejected`, `needs_review` (a reviewer of the
@@ -332,7 +371,7 @@ tags:
 
       A call the API refuses answers `{ "error": "<message>", "code": "<code>" }`: 400 for a
       body or field that is not valid, 401 for a missing or wrong API key, 403 for a key
-      without the scope or while proofing is paused, 404 for a session that is not the
+      without the scope, or for creating or starting a session while proofing is paused, 404 for a session that is not the
       organisation's, 422 `flow_not_found` for a flow that is not, 409 and 422 for a call the
       session or flow does not allow (each route lists its codes), and 429 when you call too
       often. Act on `code`; `error` is for people and may change.
@@ -341,6 +380,11 @@ tags:
       The wallet's own identity proofing routes (flows, settings, API keys, webhook,
       requests) and the hosted page's, called only by the wallet's frontend. Left out of
       the served docs (apidocs.served): an integrator uses the `identity-proofing` API.
+  - name: platform-admin
+    description: >-
+      The wallet operator's own routes over every organisation, called only by the
+      wallet's frontend. Left out of the served docs (apidocs.served): no user of an
+      organisation can call them.
 paths:
   /api/v1/admin/identity-proofing/pauses:
     get:
@@ -427,9 +471,59 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/v1/admin/organizations/{id}/test-mode:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: Organisation id.
+    put:
+      tags: [platform-admin]
+      summary: Put an organisation in or out of test mode (platform admin)
+      description: >-
+        Requires the platform administrator role. Body `{testMode}`. An organisation in test mode
+        works as any other, but each identity proofing session it makes is a test session
+        (`test: true` on the session, its webhooks and its hosted page), and every answer to its
+        API keys carries the header `Test-Mode: true`. It sees only the
+        sessions of the mode it is in: its real ones are hidden while in test mode, its test ones
+        once live again; nothing is deleted, and retention still applies. The organisation's own
+        admins cannot change it. Audited `organization.test_mode_changed` when it changes.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                testMode:
+                  type: boolean
+              required: [testMode]
+            examples:
+              test:
+                summary: Test mode on
+                value:
+                  testMode: true
+      responses:
+        '200':
+          description: The organisation after the change, with `testMode`.
+          content:
+            application/json:
+              schema:
+                description: The organisation.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/v1/admin/identity-reviews:
     get:
-      tags: [organizations]
+      tags: [platform-admin]
       summary: List pending identity reviews (platform admin)
       description: Requires the platform administrator role.
       responses:
@@ -452,7 +546,7 @@ paths:
           type: string
         description: Resource identifier.
     post:
-      tags: [organizations]
+      tags: [platform-admin]
       summary: Approve an identity review (platform admin)
       description: Requires the platform administrator role.
       requestBody:
@@ -486,7 +580,7 @@ paths:
           type: string
         description: Resource identifier.
     post:
-      tags: [organizations]
+      tags: [platform-admin]
       summary: Reject an identity review (platform admin)
       description: Requires the platform administrator role.
       requestBody:
@@ -1725,7 +1819,7 @@ paths:
           $ref: '#/components/responses/Unauthorized'
   /api/v1/organizations:
     get:
-      tags: [organizations]
+      tags: [platform-admin]
       summary: List all organisations (platform admin)
       description: Requires the platform administrator role.
       responses:
@@ -1748,7 +1842,7 @@ paths:
           type: string
         description: Resource identifier.
     get:
-      tags: [organizations]
+      tags: [platform-admin]
       summary: Get an organisation by id (platform admin)
       description: Requires the platform administrator role.
       responses:
@@ -1765,7 +1859,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
     delete:
-      tags: [organizations]
+      tags: [platform-admin]
       summary: Delete an organisation (platform admin)
       description: Requires the platform administrator role.
       responses:
@@ -2310,6 +2404,77 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/attestations/rulebooks:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+    get:
+      tags: [attestation]
+      summary: List the WE BUILD attestation rulebooks
+      description: The rulebooks a schema can be imported from, each with its attributes and a sample of valid claims. Requires an administrator role in the organisation.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/attestations/rulebooks/{id}/import:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Rulebook id (eucc, eu-poa, lei, vat-id, ubo).
+    post:
+      tags: [attestation]
+      summary: Import a WE BUILD rulebook as an attestation schema
+      description: Creates a schema whose vct and attributes are fixed by the rulebook; issued claims are validated against the rulebook's JSON schema. The optional body sets credentialConfigId (default we-build-<id>). Requires an administrator role in the organisation.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              description: JSON request payload; see the endpoint description.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: '`vct_taken`: the organisation already imported this rulebook.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /api/v1/orgs/{slug}/attestations/schemas:
     parameters:
       - name: slug
@@ -2361,6 +2526,12 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: '`vct_taken`: a schema with that vct already exists. `vct_rulebook`: the vct belongs to a WE BUILD rulebook, which has to be imported instead.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /api/v1/orgs/{slug}/attestations/schemas/{id}:
     parameters:
       - name: slug
@@ -2872,6 +3043,42 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/events:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+    get:
+      tags: [organizations]
+      summary: Follow what changes in the organisation
+      description: >-
+        Open to every member. A Server-Sent Events stream that sends an event, with no data,
+        each time something a page of the organisation shows changes, so the page re-reads it
+        then instead of polling. The event's name says what changed: `reviews` (a proofing
+        request was created, changed status, had a review item move or was purged),
+        `proofing-progress` (a step of a verify session moved), `webhooks` (a webhook delivery
+        was queued, sent or failed), `qerds` (a QERDS message arrived or moved on) and
+        `signing` (a signing request or one of its signers moved). A comment line keeps the
+        stream open. It carries nothing about what changed: the reads apply the reader's own
+        scope.
+      responses:
+        '200':
+          description: The event stream, open until the page leaves or the server shuts down.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+              examples:
+                changed:
+                  summary: Something changed
+                  value: "event: reviews\ndata: \n\n"
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /api/v1/orgs/{slug}/departments:
     parameters:
       - name: slug
@@ -4557,7 +4764,9 @@ paths:
       tags: [organizations]
       summary: Count members by identity and VOG screening status
       description: >-
-        Requires an administrator role in the organisation. Counts every active
+        Open to every member, so a page need not learn the caller's role first: an
+        administrator gets the organisation's tally, anyone else the same shape with every
+        count 0. Counts every active
         membership by its derived identity status (never, verified, due_soon,
         overdue, requested) and screening status (not_required, none, requested,
         valid, expiring, expired, rejected, recheck_required) under the
@@ -6226,6 +6435,16 @@ paths:
             type: string
             enum: [data_request]
           description: Only the data requests, "See my data" (`data_access`) and "Delete my data" (`data_erasure`).
+        - name: waiting
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: ["true"]
+          description: >-
+            Only what waits for a reviewer, in one list: the requests that read `needs_review`
+            and those with an address, a Verzekeringsbericht or diplomas waiting, the longest in
+            review first. A member with the reviewer right lists them for the whole organisation.
         - name: reviewKind
           in: query
           required: false
@@ -7952,7 +8171,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: The step's item waits for no decision (`not_under_review`).
+          description: The step's item waits for no decision (`not_under_review`), or the deployment checks no diplomas (`no_diploma_checker`) or no Verzekeringsbericht (`no_employment_checker`).
           content:
             application/json:
               schema:
@@ -7975,7 +8194,9 @@ paths:
       tags: [identity-proofing-internal]
       summary: Count what waits for review
       description: >-
-        Requires an administrator role in the organisation, or the reviewer right. How many
+        Open to every member, so a page need not learn the caller's rights first: an
+        administrator or a member with the reviewer right gets the organisation's counts,
+        anyone else every count 0. How many
         sessions that are not erased wait for a decision: per kind of review in `counts` (a
         session waiting for its identity and its address counts under both), each once in
         `sessions`, and those waiting for a step (an address, a Verzekeringsbericht) in
@@ -8130,7 +8351,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: The request asks for no diplomas (`diplomas_not_asked`), the upload window is closed (`diplomas_closed`), or the request was cancelled or erased (`session_over`).
+          description: The request asks for no diplomas (`diplomas_not_asked`), the upload window is closed (`diplomas_closed`), the request was cancelled or erased (`session_over`), or the deployment checks no diplomas (`no_diploma_checker`).
         '413':
           description: An extract or the upload is too large (`too_large`).
         '503':
@@ -8322,7 +8543,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: The session asks for no document (`documents_not_asked`), the upload window is closed (`diplomas_closed`, `employment_closed`), the session was cancelled or erased (`session_over`), or the deployment checks no Verzekeringsbericht (`no_employment_checker`).
+          description: The session asks for no document (`documents_not_asked`), the upload window is closed (`diplomas_closed`, `employment_closed`), the session was cancelled or erased (`session_over`), or the deployment checks no diplomas (`no_diploma_checker`) or no Verzekeringsbericht (`no_employment_checker`).
           content:
             application/json:
               schema:
@@ -8411,38 +8632,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
-  /api/v1/orgs/{slug}/identity-proofing/reviews/events:
-    parameters:
-      - name: slug
-        in: path
-        required: true
-        schema:
-          type: string
-        description: Organisation slug.
-    get:
-      tags: [identity-proofing-internal]
-      summary: Follow the organisation's reviews
-      description: >-
-        Requires the reviewer right (an administrator has it). A Server-Sent Events stream that
-        sends a `reviews` event, with no data, each time a request of the organisation goes into
-        or out of review, its address review moves, or it is purged, so a page re-reads its
-        lists then. A comment line keeps the stream open. It carries nothing about a request:
-        the lists apply the reader's own scope. A member without the right gets 403.
-      responses:
-        '200':
-          description: The event stream, open until the page leaves or the server shuts down.
-          content:
-            text/event-stream:
-              schema:
-                type: string
-              examples:
-                changed:
-                  summary: The reviews changed
-                  value: "event: reviews\ndata: \n\n"
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
   /api/v1/orgs/{slug}/identity-proofing/requests/{requestID}/events:
     parameters:
       - name: slug
@@ -8590,12 +8779,12 @@ paths:
                       reasonNl: De Wwft verplicht ons het identiteitsbewijs vijf jaar te bewaren.
                     branding:
                       displayName: Acme Verzekeringen
-                      primaryColor: "#1f6feb"
-                      secondaryColor: ""
+                      primaryColor: ""
                       supportContact: support@acme.example
                       privacyUrl: https://acme.example/privacy
-                      logoUri: /api/v1/orgs/acme/identity-proofing/settings/logo?v=1759397400
+                      logoUri: ""
                       hidePoweredBy: false
+                      showTheme: true
                     allowedRedirectOrigins: [https://portal.acme.example]
         '401':
           $ref: '#/components/responses/Unauthorized'
@@ -8677,21 +8866,13 @@ paths:
       tags: [identity-proofing-internal]
       summary: Set the organisation's branding
       description: >-
-        Requires an administrator role in the organisation. A multipart form:
-        `displayName` (the name the proofing mail signs with; empty is the organisation's
-        name), `primaryColor` (`#rrggbb`; empty is the organisation's in the mail),
-        `secondaryColor` (`#rrggbb`, the Idem app's second colour), the rest of the
-        white-label as the organisation theme has it (`textColor`, `surfaceColor`,
-        `borderColor`, `linkColor`, `successColor`, `warningColor`, `errorColor`,
-        `topbarColor` and `fontFamily`; setting any colour or the font gives the organisation's
-        proofing a look of its own in the Idem app and hosted page, where what it leaves empty
-        keeps the design's, not the organisation's; without one they show the organisation's
-        theme), `supportContact` and `privacyUrl` (an https URL), each added to the mail and
-        left out when empty,
-        and a `logo` file (PNG, JPEG, GIF or WebP, at most 512 KiB; mail clients do not
-        render SVG) or `removeLogo=true`. `hidePoweredBy=true` leaves the "powered by" line off
-        the organisation's hosted pages, whose accent colour is `primaryColor`. Returns the
-        settings.
+        Requires an administrator role in the organisation. The organisation's theme is
+        the one look of its proofing mail, hosted page and Idem app; this sets what they say
+        besides it. A multipart form: `displayName` (the name the proofing mail signs with;
+        empty is the organisation's name), `supportContact` and `privacyUrl` (an https URL),
+        each added to the mail and left out when empty, `hidePoweredBy=true` to leave the
+        "powered by" line off the hosted pages, and `showTheme` (`false` keeps the Idem app's
+        and the hosted page's own look; left out keeps it as it is). Returns the settings.
       requestBody:
         required: true
         content:
@@ -8717,7 +8898,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
-  /api/v1/orgs/{slug}/identity-proofing/settings/logo:
+  /api/v1/orgs/{slug}/identity-proofing/settings/branding/mail-preview:
     parameters:
       - name: slug
         in: path
@@ -8725,26 +8906,49 @@ paths:
         schema:
           type: string
         description: Organisation slug.
-    get:
+    post:
       tags: [identity-proofing-internal]
-      summary: Get the organisation's proofing logo
+      summary: Preview the proofing mail of an unsaved branding
       description: >-
-        Requires organisation membership. The logo image, served with a locked-down
-        content security policy. An organisation without a logo is 404 `not_found`.
+        Requires an administrator role in the organisation. The branding form as the
+        organisation's branding save takes it (`displayName`, `supportContact`,
+        `privacyUrl`), or with `flowId` as a flow's (plus `custom`, `primaryColor`, and a
+        `logo` file or `removeLogo=true`). With `theme=true` it renders in an unsaved
+        organisation theme: `themePrimaryColor`, `themeTextColor`, `themeSurfaceColor`,
+        `themeBorderColor`, `themeLinkColor`, `themeFontFamily`, and a `themeLogo` file,
+        `themeRemoveLogo=true`, or neither to keep the saved logo. `locale` is `en` or `nl`
+        (another is the default). Returns the proofing mail an external person would get,
+        rendered as it is sent, with a sample link and its images inline. Nothing is saved.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              additionalProperties: true
       responses:
         '200':
-          description: The logo image.
+          description: The rendered mail.
           content:
-            'image/*':
+            application/json:
               schema:
-                type: string
-                format: binary
+                type: object
+                required: [subject, html]
+                properties:
+                  subject:
+                    type: string
+                  html:
+                    type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/ProofingForbidden'
         '404':
-          description: The organisation has no logo (`not_found`).
+          $ref: '#/components/responses/NotFound'
+        '413':
+          description: The logo is too large (`payload_too_large`).
           content:
             application/json:
               schema:
@@ -8779,7 +8983,7 @@ paths:
                     - id: 5e4d3c2b-1a09-4f8e-8d7c-6b5a49382716
                       name: Production backend
                       prefix: yp_live_3kq7
-                      scopes: [sessions:write, sessions:read, results:read, flows:read, flows:write, settings:read, settings:write, webhooks:write]
+                      scopes: [sessions:write, sessions:read, results:read, flows:read, flows:write, settings:read, settings:write, webhooks:write, reviews:read, reviews:write]
                       createdByName: Sam de Vries
                       createdAt: "2026-09-01T10:05:00Z"
                       lastUsedAt: "2026-10-02T09:30:00Z"
@@ -8799,7 +9003,8 @@ paths:
         erase), `sessions:read`, `results:read` (the verified identity), `flows:read`,
         `flows:write` (create and edit flows, their hosted page and steps, the default flow),
         `settings:read`, `settings:write` (the session settings and the allowed redirect
-        origins) and `webhooks:write` (the webhook endpoint). A
+        origins), `webhooks:write` (the webhook endpoint), `reviews:read` (what waits for a
+        reviewer, with its evidence) and `reviews:write` (decide it, and make a review link). A
         route the key lacks the scope for answers 403 `insufficient_scope`. An empty `name` or
         one over 100 characters is 400 `invalid_input`.
       requestBody:
@@ -8827,7 +9032,7 @@ paths:
                     id: 5e4d3c2b-1a09-4f8e-8d7c-6b5a49382716
                     name: Production backend
                     prefix: yp_live_3kq7
-                    scopes: [sessions:write, sessions:read, results:read, flows:read, flows:write, settings:read, settings:write, webhooks:write]
+                    scopes: [sessions:write, sessions:read, results:read, flows:read, flows:write, settings:read, settings:write, webhooks:write, reviews:read, reviews:write]
                     createdAt: "2026-09-01T10:05:00Z"
                     secret: yp_live_3kq7Vb9xR2mT8nW4cZ6hJ1pL5sD0fG7a
         '400':
@@ -8872,7 +9077,7 @@ paths:
                     id: 5e4d3c2b-1a09-4f8e-8d7c-6b5a49382716
                     name: Production backend
                     prefix: yp_live_3kq7
-                    scopes: [sessions:write, sessions:read, results:read, flows:read, flows:write, settings:read, settings:write, webhooks:write]
+                    scopes: [sessions:write, sessions:read, results:read, flows:read, flows:write, settings:read, settings:write, webhooks:write, reviews:read, reviews:write]
                     createdAt: "2026-09-01T10:05:00Z"
                     lastUsedAt: "2026-10-02T09:30:00Z"
                     revokedAt: "2026-10-02T10:00:00Z"
@@ -9193,7 +9398,7 @@ paths:
       tags: [identity-proofing]
       summary: List your organisation's flows (public API)
       description: >-
-        Authenticated with the organisation's API key as a Bearer token, not a session. Only the
+        Authenticated with the organisation's API key as a Bearer token, with `flows:read`. Only the
         flows of the organisation the API key belongs to, never another organisation's: every
         flow of yours that a person can finish, with the organisation's default
         flow marked (`default`). A session may use any of them. `needsReferencePhoto: true`
@@ -9299,8 +9504,9 @@ paths:
         `drivers_license` and `personal_data` (all four kinds alone is stored as any document);
         a `face.match` threshold is a whole hundredth; `retentionOverrideSeconds` is 0, or 1, 30 or
         90 days; `legalBasis`, `processingPurpose` and `assuranceTiers` are not set; a flow locked
-        to `apps: [yivi]` must be one the Yivi app runs (no face check without `nfc_read`, no level
-        above `low`); `faceProvider: idscan` always requires `face.liveness`. An edit may keep a
+        to `apps: [yivi]` must be one the Yivi app runs (no face check without `nfc_read`), and on
+        `substantial` the Idem app is added to its `apps`; `faceProvider: idscan` always requires
+        `face.liveness`. An edit may keep a
         value the version already has, as the editor does, and leaving out `legalBasis`,
         `processingPurpose` and `assuranceTiers` keeps the version's.
       security:
@@ -9420,13 +9626,188 @@ paths:
           $ref: '#/components/responses/ApiForbidden'
         '429':
           $ref: '#/components/responses/TooManyRequests'
-        '422':
+        '409':
           description: >-
-            The engine refused the flow, for example an unknown country code or a face threshold under 0.75 on `substantial` (`rejected_by_provider`; the message says why).
+            A call with this `Idempotency-Key` is still running or its outcome is unknown
+            (`idempotency_in_flight`).
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+        '413':
+          description: The request body, sent with an `Idempotency-Key`, is over 1 MiB (`body_too_large`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: >-
+            The engine refused the flow, for example for an unknown country code
+            (`rejected_by_provider`; the message says why), or the `Idempotency-Key` was used with
+            another body (`idempotency_key_reused`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/review/{token}:
+    parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+        description: The review link's token, from its `url`.
+    get:
+      tags: [identity-proofing-internal]
+      summary: Open a review link
+      security: []
+      description: >-
+        The hosted review page, unauthenticated: the token is the whole authorization, and the
+        page is rate-limited per client address. Answers the session as the wallet's review
+        pages read it, its result while the identity waits, the reviewer the link is for, when
+        it expires, and the origins that may frame it. Never cached.
+      responses:
+        '200':
+          description: The review page.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProofingReviewLinkPage'
+        '404':
+          description: >-
+            The link is unknown, has expired, or its API key was revoked (`review_link_not_found`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+  /api/v1/review/{token}/items/{kind}:
+    parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+        description: The review link's token, from its `url`.
+      - name: kind
+        in: path
+        required: true
+        schema:
+          type: string
+          enum: [identity, address, employment, diplomas, data_request]
+        description: The part decided, as the review's `waiting` lists it.
+    post:
+      tags: [identity-proofing-internal]
+      summary: Decide a part through a review link
+      security: []
+      description: >-
+        Decides one waiting part as the link's reviewer, as `POST
+        /proofing/sessions/{sessionID}/review-items/{kind}` does, audited with the link
+        (`review_link:<key prefix>`) as actor. Answers the page after the decision.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [decision, reason]
+              properties:
+                decision:
+                  type: string
+                  enum: [confirm, reject]
+                  description: Required. Confirm or reject the part.
+                reason:
+                  type: string
+                  maxLength: 500
+                  description: Required. Why, as the audit log keeps it.
+                errorCode:
+                  type: string
+                  description: Optional, only when rejecting the identity. A reviewer's code, as for the API.
+      responses:
+        '200':
+          description: The review page.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProofingReviewLinkPage'
+        '400':
+          description: >-
+            A field is missing or invalid (`invalid_input`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: >-
+            The link is unknown, has expired, or its API key was revoked (`review_link_not_found`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: >-
+            The part does not wait for a decision (`not_under_review`), or has a seal nobody checked yet (`seal_unchecked`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+  /api/v1/review/{token}/items/{kind}/seal-check:
+    parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+        description: The review link's token, from its `url`.
+      - name: kind
+        in: path
+        required: true
+        schema:
+          type: string
+          enum: [diplomas, employment]
+        description: The step whose files are checked again.
+    post:
+      tags: [identity-proofing-internal]
+      summary: Check a step's seals again through a review link
+      security: []
+      description: >-
+        As `POST /proofing/sessions/{sessionID}/review-items/{kind}/seal-check`, for the link's
+        session. Answers the page after the check.
+      responses:
+        '200':
+          description: The review page.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProofingReviewLinkPage'
+        '400':
+          description: >-
+            The kind has no seal (`invalid_input`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: >-
+            The link is unknown, has expired, or its API key was revoked (`review_link_not_found`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: >-
+            The step does not wait for a decision (`not_under_review`), or the deployment
+            checks no diplomas (`no_diploma_checker`) or no Verzekeringsbericht (`no_employment_checker`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
   /api/v1/proofing/flows/{flowID}/versions:
     parameters:
       - name: flowID
@@ -9625,15 +10006,29 @@ paths:
           $ref: '#/components/responses/ApiForbidden'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '413':
+          description: The request body, sent with an `Idempotency-Key`, is over 1 MiB (`body_too_large`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '422':
           description: >-
-            The flow is not one of the organisation's (`flow_not_found`).
+            The flow is not one of the organisation's (`flow_not_found`). The flow asks for
+            diplomas or the Verzekeringsbericht and the version would not read the name and date
+            of birth (`flow_no_identity`): it must request `dg1` without `age_over`. The engine
+            refused the flow, for example for an unknown country code (`rejected_by_provider`; the
+            message says why). Or the `Idempotency-Key` was used with another body
+            (`idempotency_key_reused`).
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
         '409':
-          description: A data request flow, which cannot be changed (`data_request_flow`).
+          description: >-
+            A data request flow, which cannot be changed (`data_request_flow`), or a call with
+            this `Idempotency-Key` is still running or its outcome is unknown
+            (`idempotency_in_flight`).
           content:
             application/json:
               schema:
@@ -9718,9 +10113,17 @@ paths:
           $ref: '#/components/responses/ApiForbidden'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '409':
+          description: A data request flow, which cannot be changed (`data_request_flow`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '422':
           description: >-
-            The flow, or that version of it, does not exist (`flow_not_found`).
+            The flow, or that version of it, does not exist (`flow_not_found`), or the flow asks
+            for diplomas or the Verzekeringsbericht and that version does not read the name and
+            date of birth (`flow_no_identity`).
           content:
             application/json:
               schema:
@@ -9802,7 +10205,7 @@ paths:
                 $ref: '#/components/schemas/ProofingApiFlowList'
         '400':
           description: >-
-            The body is not JSON or has an unknown field (`invalid_body`), or a flow cannot be offered to members (`invalid_input`).
+            The body is not JSON or has an unknown field (`invalid_body`), or the `defaultFlowId` is a data request flow (`invalid_input`).
           content:
             application/json:
               schema:
@@ -9815,7 +10218,9 @@ paths:
           $ref: '#/components/responses/TooManyRequests'
         '422':
           description: >-
-            A flow in `flowIds` or the `defaultFlowId` is not one of the organisation's (`flow_not_found`).
+            A flow in `flowIds` or the `defaultFlowId` is not one of the organisation's
+            (`flow_not_found`) or cannot be finished (`flow_not_completable`), or a flow in
+            `flowIds` is a data request flow, which is not for members (`data_flow_for_member`).
           content:
             application/json:
               schema:
@@ -9970,7 +10375,11 @@ paths:
                 $ref: '#/components/schemas/ProofingFlowHosted'
         '400':
           description: >-
-            `enabled` is missing (`invalid_body`); `completion` or a locale is unknown, or a `returnUrl` is sent with `completion: done` (`invalid_input`); or `returnUrl` is not on an allowed origin (`redirect_not_allowed`).
+            `enabled` is missing (`invalid_body`). `completion` or a locale is unknown, a `returnUrl`
+            is sent with `completion: done`, or `returnUrl` is not an absolute URL
+            (`invalid_input`). `returnUrl` is not on an allowed origin (`redirect_not_allowed`). Or
+            the page would offer a language in which the flow's active version gives a requested
+            attribute no reason (`reasons_missing`): add the reason to the flow first.
           content:
             application/json:
               schema:
@@ -9981,6 +10390,12 @@ paths:
           $ref: '#/components/responses/ApiForbidden'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '409':
+          description: A data request flow, whose hosted page cannot be changed (`data_request_flow`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '422':
           description: >-
             The flow is not one of the organisation's (`flow_not_found`).
@@ -10140,6 +10555,12 @@ paths:
           $ref: '#/components/responses/ApiForbidden'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '409':
+          description: A data request flow, whose steps cannot be changed (`data_request_flow`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '422':
           description: >-
             The flow is not one of the organisation's (`flow_not_found`).
@@ -10298,9 +10719,17 @@ paths:
           $ref: '#/components/responses/ApiForbidden'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '409':
+          description: A data request flow, whose steps cannot be changed (`data_request_flow`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '422':
           description: >-
-            The flow is not one of the organisation's (`flow_not_found`).
+            The flow is not one of the organisation's (`flow_not_found`), or `diplomaMode` asks for
+            diplomas on a flow that does not read the name and date of birth (`flow_no_identity`):
+            the flow must request `dg1` without `age_over`.
           content:
             application/json:
               schema:
@@ -10456,9 +10885,20 @@ paths:
           $ref: '#/components/responses/ApiForbidden'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '409':
+          description: >-
+            A data request flow, whose steps cannot be changed (`data_request_flow`), or
+            `employmentMode` asks for the Verzekeringsbericht on a deployment that checks none
+            (`no_employment_checker`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '422':
           description: >-
-            The flow is not one of the organisation's (`flow_not_found`).
+            The flow is not one of the organisation's (`flow_not_found`), or `employmentMode` asks
+            for the Verzekeringsbericht on a flow that does not read the name and date of birth
+            (`flow_no_identity`): the flow must request `dg1` without `age_over`.
           content:
             application/json:
               schema:
@@ -10531,7 +10971,8 @@ paths:
       description: >-
         Authenticated with the organisation's API key as a Bearer token, with `settings:write`. Changes the fields sent and leaves the rest,
         audited `identity_proofing.settings_updated`. `allowedRedirectOrigins` replaces the list:
-        each an origin (`https://host[:port]`, or `http` on `localhost`), at most 10. Removing the
+        each an origin (`https://host[:port]`, or `http` on `localhost`, `127.0.0.1` or `[::1]`),
+        at most 10. Removing the
         origin of a flow's return page is refused (`redirect_origin_in_use`, 409): change that
         flow's `returnUrl` first.
       security:
@@ -10600,7 +11041,7 @@ paths:
                 $ref: '#/components/schemas/ProofingApiSettings'
         '400':
           description: >-
-            Nothing to change (`invalid_body`), or a field is invalid, such as an origin that is not `https://host[:port]` or more than 10 of them (`invalid_input`).
+            Nothing to change (`invalid_body`), or a field is invalid, such as an origin that is not `https://host[:port]` or more than 10 of them (`invalid_input`). `sessionTtlSeconds` and `dataRetentionDays` are refused too (`invalid_input`): each flow sets its own.
           content:
             application/json:
               schema:
@@ -10758,7 +11199,9 @@ paths:
                 $ref: '#/components/schemas/ProofingWebhookEndpoint'
         '400':
           description: >-
-            `url` is not an `https` URL, or `events` is empty or names an unknown event (`invalid_input`).
+            The body is not valid JSON or has an unknown field (`invalid_body`), or `url` is not
+            an `https` URL or is over 2048 characters, or `events` is empty or names an unknown
+            event (`invalid_input`).
           content:
             application/json:
               schema:
@@ -10769,6 +11212,13 @@ paths:
           $ref: '#/components/responses/ApiForbidden'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '409':
+          description: >-
+            The deployment has no encryption key to keep the signing secret with (`no_encryption_key`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
     delete:
       tags: [identity-proofing]
       summary: Remove the organisation's webhook endpoint (public API)
@@ -10834,8 +11284,10 @@ paths:
       tags: [identity-proofing]
       summary: Rotate the webhook signing secret (public API)
       description: >-
-        Authenticated with the organisation's API key as a Bearer token, with `webhooks:write`. Makes a new signing secret, answered once;
-        events are signed with it from then on.
+        Authenticated with the organisation's API key as a Bearer token, with `webhooks:write`. Makes a new signing secret, answered once.
+        Events are signed with it from then on. For 24 hours the previous secret signs every
+        event too, as a second `v1` in `Yivi-Signature`, so your endpoint can switch over
+        without refusing events.
       security:
         - apiKey: []
       x-codeSamples:
@@ -10891,6 +11343,13 @@ paths:
         '404':
           description: >-
             The organisation has no webhook endpoint (`webhook_not_found`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: >-
+            The deployment has no encryption key to keep the signing secret with (`no_encryption_key`).
           content:
             application/json:
               schema:
@@ -10961,8 +11420,9 @@ paths:
       tags: [identity-proofing]
       summary: List the organisation's recent webhook deliveries (public API)
       description: >-
-        Authenticated with the organisation's API key as a Bearer token, with `webhooks:write`. The latest deliveries, newest first: the
-        event, its session, the status, attempts and the endpoint's last answer.
+        Authenticated with the organisation's API key as a Bearer token, with `webhooks:write`. The 20 latest deliveries, newest first: the
+        event, its session, the status, attempts and the endpoint's last answer. A delivered or
+        failed delivery is kept 30 days.
       security:
         - apiKey: []
       x-codeSamples:
@@ -11068,12 +11528,12 @@ paths:
                       name: Acme Verzekeringen
                       branding:
                         displayName: Acme Verzekeringen
-                        primaryColor: "#1f6feb"
-                        secondaryColor: "#5412c7"
+                        primaryColor: ""
                         supportContact: support@acme.example
                         privacyUrl: https://acme.example/privacy
                         logoUri: /api/v1/proof/BwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyAhIiMkJSY/logo?v=1759397400
                         hidePoweredBy: false
+                        showTheme: true
                       dataRetentionDays: 7
                       erasureHandling: review
                     flow:
@@ -11105,6 +11565,35 @@ paths:
                 $ref: '#/components/schemas/Error'
         '429':
           $ref: '#/components/responses/HostedTooManyRequests'
+  /api/v1/proof/{token}/events:
+    parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Opaque hosted-link token from the `hostedUrl` of a hosted proofing session.
+    get:
+      tags: [identity-proofing-internal]
+      summary: Follow a hosted proofing link
+      security: []
+      description: >-
+        A Server-Sent Events stream that sends a `proofing-request` event, with no data, each
+        time the link's own session moves, so the page reads `GET /api/v1/proof/{token}/status` then instead of
+        polling it. A comment line keeps the stream open.
+      responses:
+        '200':
+          description: The event stream, open until the page leaves or the server shuts down.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+              examples:
+                changed:
+                  summary: Something changed
+                  value: "event: proofing-request\ndata: \n\n"
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/v1/proof/{token}/status:
     parameters:
       - name: token
@@ -11730,7 +12219,7 @@ paths:
         '429':
           $ref: '#/components/responses/HostedTooManyRequests'
         '409':
-          description: The session asks for no diplomas (`diplomas_not_asked`), the upload window is closed (`diplomas_closed`), or the link was cancelled or erased (`session_over`).
+          description: The session asks for no diplomas (`diplomas_not_asked`), the upload window is closed (`diplomas_closed`), the link was cancelled or erased (`session_over`), or the deployment checks no diplomas (`no_diploma_checker`).
           content:
             application/json:
               schema:
@@ -11905,7 +12394,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: The session asks for no document (`documents_not_asked`), the upload window is closed (`diplomas_closed`, `employment_closed`), the session was cancelled or erased (`session_over`), or the deployment checks no Verzekeringsbericht (`no_employment_checker`).
+          description: The session asks for no document (`documents_not_asked`), the upload window is closed (`diplomas_closed`, `employment_closed`), the session was cancelled or erased (`session_over`), or the deployment checks no diplomas (`no_diploma_checker`) or no Verzekeringsbericht (`no_employment_checker`).
           content:
             application/json:
               schema:
@@ -11965,11 +12454,10 @@ paths:
         - name: limit
           in: query
           required: false
-          description: Optional. Sessions per page.
+          description: Optional. Sessions per page, at most 100. A larger number answers 100.
           schema:
             type: integer
             minimum: 1
-            maximum: 100
             default: 50
         - name: cursor
           in: query
@@ -12004,6 +12492,7 @@ paths:
                         createdAt: "2026-10-02T09:30:00Z"
                         completedAt: "2026-10-02T09:34:12Z"
                         expectedSubject: false
+                        flowKind: identity
                     nextCursor: MjAyNi0xMC0wMlQwOTozMDowMFp8M2Y2YjQ0YTAtOWQ2Yi00YjE4LWE1N2EtMmI3ZTRhMGE5YzEx
         '400':
           description: '`limit` is not a positive number, or `cursor` is not one this API gave (`invalid_input`).'
@@ -12027,9 +12516,11 @@ paths:
 
         - Mailed (the default): the person gets a mail with the QR code, and the session runs
           10 minutes, or the flow's own length. The answer has the `deepLink` too, to show the
-          QR code yourself (with `sendMail: false` nothing is mailed).
+          QR code yourself (with `sendMail: false` nothing is mailed). A flow that runs in the
+          Yivi app only cannot be sent this way, even with `sendMail: false`: 400
+          `invalid_input`. Send it with `hosted: true`.
         - `hosted: true`: the answer has a `hostedUrl` valid 72 hours. The session starts when
-          the person opens it, and nothing is mailed.
+          the person opens it, and nothing is mailed. `session.created` is sent then, not now.
 
         Answers 201 with the session. Refused while the organisation's proofing is paused.
         Send an `Idempotency-Key` to make a retry safe: the same key and body within 24 hours
@@ -12157,6 +12648,7 @@ paths:
                     expiresAt: "2026-10-02T09:40:00Z"
                     createdAt: "2026-10-02T09:30:00Z"
                     expectedSubject: false
+                    flowKind: identity
                     deepLink: vcmrtd://verify?handover=hv_3m8x2kq7&api=https%3A%2F%2Fwallet.example.nl
                     mailSent: true
                 hosted:
@@ -12171,6 +12663,7 @@ paths:
                     expiresAt: "2026-10-05T09:30:00Z"
                     createdAt: "2026-10-02T09:30:00Z"
                     expectedSubject: true
+                    flowKind: identity
                     deepLink: ""
                     mailSent: false
                     hostedUrl: https://wallet.example.nl/p/BwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyAhIiMkJSY
@@ -12236,7 +12729,7 @@ paths:
       tags: [identity-proofing]
       summary: Get a proofing session (public API)
       description: >-
-        Authenticated with the organisation's API key as a Bearer token. One of the organisation's
+        Authenticated with the organisation's API key with `sessions:read`. One of the organisation's
         sessions, re-checked with the engine first (at most every 10 seconds) while it
         may still change: its `status`, assurance, `errorCode`, and for an approved subject the name
         read off the document (`proofedName`) until the organisation's data retention clears
@@ -12248,7 +12741,7 @@ paths:
         retention), `LEGAL_RETENTION` (an
         erasure refused because the organisation is bound by law to keep the data: its legal
         retention holds every identity check found),
-        `ORG_PAUSED` (a review left open when a platform admin paused the organisation's proofing) and,
+        `ORG_PAUSED` (a review left open when the wallet's operator paused the organisation's proofing) and,
         on sessions from before the Verzekeringsbericht had its own outcome,
         `EMPLOYMENT_NOT_PROVIDED` (no statement kept within an hour of the identity check;
         `steps` says that now). A
@@ -12325,6 +12818,7 @@ paths:
                     createdAt: "2026-10-02T09:30:00Z"
                     completedAt: "2026-10-02T09:34:12Z"
                     expectedSubject: false
+                    flowKind: identity
                 mismatch:
                   summary: Someone else's document on a session for one person
                   value:
@@ -12341,6 +12835,7 @@ paths:
                     createdAt: "2026-10-02T09:30:00Z"
                     completedAt: "2026-10-02T09:33:05Z"
                     expectedSubject: true
+                    flowKind: identity
         '401':
           $ref: '#/components/responses/ApiUnauthorized'
         '403':
@@ -12353,10 +12848,12 @@ paths:
       tags: [identity-proofing]
       summary: Erase a proofing session (public API)
       description: >-
-        Authenticated with the organisation's API key as a Bearer token. Erases the session in
-        the engine and what the wallet holds of its outcome (the
-        proofed name), whatever its state, and sends `session.purged`. The session stays
-        readable with `purgedAt` set, for the audit trail. Audited
+        Authenticated with the organisation's API key with `sessions:write`. Erases the session in
+        the engine and the personal data the wallet holds of it, whatever its state: the
+        proofed name, the `subjectName` and `subjectEmail` you gave, the reference photo, and the
+        address, diplomas and Verzekeringsbericht the person added. Sends `session.purged`. The
+        session stays readable with `purgedAt` set and its name and e-mail empty, for the audit
+        trail. Its result is gone: `GET .../result` then answers 404. Audited
         `identity_proofing.session_purged`; erasing it again changes nothing. An approved
         identity check the organisation's legal retention (`legalRetention` in its settings)
         still holds is not erased: 409 `legal_retention`, until the period has passed.
@@ -12436,7 +12933,8 @@ paths:
         `data_access` session's data, for 7 days after the organisation's decision: each of
         your sessions of the person that the reviewer approved, each with its `match`. A
         `strong` match (proven with the person's own document) also carries what the check
-        read (`identity`, `evidence`) and its diplomas, and the contact you gave when that
+        read (`identity`, `evidence`), its diplomas, the `address` and `employment` the person
+        added, and the contact you gave when that
         session was approved for the one person you sent it to (`expectedSubject`); any other
         match may be someone else's session, so it carries its facts alone. Images are named in
         `imagesHeld`, never included. Audited `identity_proofing.data_exported`.
@@ -12517,9 +13015,11 @@ paths:
         session's result, read from the engine's session on each call (the wallet
         keeps no identity of its own): `status`, `method`, assurance, `verifiedAt`, for an
         approved session `identity` (`givenName`, `familyName`, `birthDate`,
-        `nationality`), and `evidence` (`type` `emrtd`, `yivi_disclosure`, `reference_photo` or `document_photo`, the
-        document's type, issuing state and expiry, `passiveAuth` and `activeAuth`
-        `valid`/`invalid`/`not_performed`, `faceMatch`, `liveness`). For an approved session
+        `nationality`, `bsn` for a flow that keeps it, and `ageOver` in place of the birth date
+        for a flow that requests `age_over`), and `evidence` (`type` `emrtd`, `yivi_disclosure`, `reference_photo` or `document_photo`, the
+        document's type (`documentType`, `documentKind`), issuing state and expiry, `passiveAuth` and `activeAuth`
+        `valid`/`invalid`/`not_performed`, `faceMatch`, `liveness`, and `documentCheck` for a
+        photographed document). For an approved session
         also the document's images the engine still holds, each `{mimeType, data}` with `data`
         base64: `photo` (the portrait), `documentImage` and `documentImageBack` (the photos of
         its front and back). Never the document number or the selfie. Every read is audited
@@ -12687,10 +13187,13 @@ paths:
         Authenticated with the organisation's API key with `sessions:write`, for an
         organisation building its own UI: starts a session created with `hosted: true` in the app, as
         the subject picking it on the hosted page would, and answers the link to show:
-        `appLink` (the Idem app's `vcmrtd://` link) or `walletLink` (the Yivi app's
-        `openid4vp://` request, its disclosure started already), with `expiresAt`. Then
-        poll `GET .../methods/{method}/status` until `done`: for the Yivi app that poll also
-        collects what the person shared. Takes an `Idempotency-Key`.
+        `appLink` (the Idem app's link: `vcmrtd://verify`, or the https App Link where the
+        deployment sets one) or `walletLink` (the Yivi app's `openid4vp://` request, its
+        disclosure started already), with `expiresAt`. A flow that runs in the browser alone
+        takes `browser` and no other method, and answers neither link: go on with
+        `POST .../document-scan`. Then poll `GET .../methods/{method}/status` until `done`:
+        for the Yivi app that poll also collects what the person shared. Takes an
+        `Idempotency-Key`.
       security:
         - apiKey: []
       x-codeSamples:
@@ -12762,8 +13265,12 @@ paths:
                     expiresAt: "2026-10-02T09:40:00Z"
         '400':
           description: >-
-            `method` is not `idem_app` or `yivi_app`, or the flow's face check only runs in
-            the Idem app (`invalid_input`).
+            The flow does not run with `method` (`invalid_input`). A flow that runs in the
+            browser alone takes only `browser`, and any other flow only `idem_app` or
+            `yivi_app`. `idem_app` is refused when the flow is locked to the Yivi app.
+            `yivi_app` is refused when the flow is locked to the Idem app, matches the face
+            against a reference photo, has an age check the Yivi app cannot answer, or asks
+            for a higher assurance level than the Yivi app gives.
           content:
             application/json:
               schema:
@@ -12779,7 +13286,8 @@ paths:
         '409':
           description: >-
             The session was not created hosted (`not_hosted`), was started already
-            (`link_started`), or ended (`session_over`); or a call with this
+            (`link_started`), or ended (`session_over`). The flow photographs the document on
+            a deployment without a scan service (`no_document_scanner`). Or a call with this
             `Idempotency-Key` is still running or its outcome is unknown
             (`idempotency_in_flight`).
           content:
@@ -12788,8 +13296,9 @@ paths:
                 $ref: '#/components/schemas/Error'
         '422':
           description: >-
-            The session's flow can no longer be finished (`flow_not_completable`), or the
-            `Idempotency-Key` was used with another body (`idempotency_key_reused`).
+            The session's flow no longer exists (`flow_not_found`) or can no longer be
+            finished (`flow_not_completable`), or the `Idempotency-Key` was used with another
+            body (`idempotency_key_reused`).
           content:
             application/json:
               schema:
@@ -12889,7 +13398,294 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: The session does not run in that app (`wrong_method`).
+          description: >-
+            The session does not run in that app, or a hosted session is not started yet
+            (`wrong_method`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/proofing/sessions/{sessionID}/review:
+    parameters:
+      - name: sessionID
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: '^ps_[a-z2-7]{26}$'
+        description: Session id (`ps_…`), as the create answer and webhooks give it.
+    get:
+      tags: [identity-proofing]
+      summary: Read what waits for a reviewer (public API)
+      description: >-
+        Authenticated with the organisation's API key with `reviews:read`. Everything a reviewer
+        decides a session on, as the wallet's Reviews page shows it: the parts that wait
+        (`waiting`, in the order the review walks them: `identity` or `data_request`, then
+        `employment`, `diplomas`, `address`), every part with where it stands (`items`), the
+        earlier decisions, and the session's `result`. While the identity waits the result also
+        carries the identity and the photos the flow captured; once decided it carries neither
+        photo. Each read of the result is audited `identity_proofing.result_read`. Never cached.
+      security:
+        - apiKey: []
+      responses:
+        '200':
+          description: The session's review, after the call.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProofingApiReview'
+        '401':
+          $ref: '#/components/responses/ApiUnauthorized'
+        '403':
+          $ref: '#/components/responses/ApiForbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+  /api/v1/proofing/sessions/{sessionID}/review-items/{kind}:
+    parameters:
+      - name: sessionID
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: '^ps_[a-z2-7]{26}$'
+        description: Session id (`ps_…`), as the create answer and webhooks give it.
+      - name: kind
+        in: path
+        required: true
+        schema:
+          type: string
+          enum: [identity, address, employment, diplomas, data_request]
+        description: The part decided, as the review's `waiting` lists it.
+    post:
+      tags: [identity-proofing]
+      summary: Decide a part of a session's review (public API)
+      description: >-
+        Authenticated with the organisation's API key with `reviews:write`. Confirms or rejects
+        one waiting part as the person named in `reviewer`, the one deciding in your own system.
+        The decision is audited with your key as actor and that reviewer, the wallet shows the
+        reviewer as having decided it, and the same webhooks go out as for a decision in the
+        wallet. Confirming the identity approves the session; rejecting it rejects the session.
+        A step's decision leaves the session's outcome as it is. Answers the review after the
+        decision.
+      security:
+        - apiKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [decision, reason, reviewer]
+              properties:
+                decision:
+                  type: string
+                  enum: [confirm, reject]
+                  description: Required. Confirm or reject the part.
+                reason:
+                  type: string
+                  maxLength: 500
+                  description: Required. Why, as the audit log keeps it.
+                reviewer:
+                  type: string
+                  maxLength: 100
+                  description: Required. The person deciding, as your own system names them.
+                errorCode:
+                  type: string
+                  enum: [REVIEW_NOT_HOLDER, REVIEW_ALTERED, EVIDENCE_NOT_AS_REQUESTED, MANUAL_REVIEW_REJECTED]
+                  description: >-
+                    Optional, only when rejecting the identity or a data request. What was
+                    wrong: someone else's, altered, not what was asked for, or another reason.
+                    Default `MANUAL_REVIEW_REJECTED`.
+            example:
+              decision: confirm
+              reason: Document and face checked by hand
+              reviewer: Jan Jansen
+      responses:
+        '200':
+          description: The session's review, after the call.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProofingApiReview'
+        '400':
+          description: >-
+            The body is not valid JSON or has an unknown field (`invalid_body`). A field is
+            missing or invalid, or `errorCode` is not a reviewer's code or is sent with a
+            confirmation or a step (`invalid_input`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/ApiUnauthorized'
+        '403':
+          $ref: '#/components/responses/ApiForbidden'
+        '404':
+          description: >-
+            The session does not exist (`session_not_found`), or `kind` is none of the
+            review's kinds (`not_found`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '409':
+          description: >-
+            The part does not wait for a decision (`not_under_review`, `address_not_under_review`), or a file of the step has a seal nobody checked yet (`seal_unchecked`): check it again first.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/proofing/sessions/{sessionID}/review-items/{kind}/seal-check:
+    parameters:
+      - name: sessionID
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: '^ps_[a-z2-7]{26}$'
+        description: Session id (`ps_…`), as the create answer and webhooks give it.
+      - name: kind
+        in: path
+        required: true
+        schema:
+          type: string
+          enum: [diplomas, employment]
+        description: The step whose files are checked again.
+    post:
+      tags: [identity-proofing]
+      summary: Check a step's seals again (public API)
+      description: >-
+        Authenticated with the organisation's API key with `reviews:write`. Checks again the
+        seals of a waiting step's files that could not be checked at upload, as the trust lists
+        or the revocation server could not be reached. Each file ends kept or refused, and the
+        step can then be decided. Answers the review after the check.
+      security:
+        - apiKey: []
+      responses:
+        '200':
+          description: The session's review, after the call.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProofingApiReview'
+        '400':
+          description: >-
+            The kind has no seal (`invalid_input`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/ApiUnauthorized'
+        '403':
+          $ref: '#/components/responses/ApiForbidden'
+        '404':
+          description: >-
+            The session does not exist (`session_not_found`), or `kind` is none of the
+            review's kinds (`not_found`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '409':
+          description: >-
+            The step does not wait for a decision (`not_under_review`), or the deployment
+            checks no diplomas (`no_diploma_checker`) or no Verzekeringsbericht (`no_employment_checker`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: >-
+            The trust lists or the revocation server still cannot be reached (`seal_check_unavailable`); try again later.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/proofing/sessions/{sessionID}/review-links:
+    parameters:
+      - name: sessionID
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: '^ps_[a-z2-7]{26}$'
+        description: Session id (`ps_…`), as the create answer and webhooks give it.
+    post:
+      tags: [identity-proofing]
+      summary: Make a review link (public API)
+      description: >-
+        Authenticated with the organisation's API key with `reviews:write`. Answers a `url` to
+        the wallet's hosted review page for this session, for the person named in `reviewer`:
+        open it for them, or show it in an iframe on one of the organisation's allowed redirect
+        origins. The page shows the session's review as the wallet's Reviews page does, and
+        decides it as that reviewer. It lasts an hour (`expiresAt`), and stops when your key is
+        revoked. Framed, the page posts this to the parent window once nothing waits any more:
+        `{ "type": "proofing.review_completed", "session": "ps_…", "status": "approved" }`.
+        Only for an identity check: decide a data request with `POST .../review-items/data_request`.
+        Audited `identity_proofing.review_link_created`.
+      security:
+        - apiKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [reviewer]
+              properties:
+                reviewer:
+                  type: string
+                  maxLength: 100
+                  description: Required. The person who reviews through the link, as your own system names them.
+            example:
+              reviewer: Petra de Wit
+      responses:
+        '201':
+          description: The link.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [url, expiresAt]
+                properties:
+                  url:
+                    type: string
+                    format: uri
+                    description: The hosted review page. Anyone with it can review the session until it expires; hand it only to the reviewer.
+                  expiresAt:
+                    type: string
+                    format: date-time
+              example:
+                url: https://wallet.example.org/r/EXAMPLE_NOT_A_REAL_TOKEN
+                expiresAt: "2026-11-16T12:30:00Z"
+        '400':
+          description: >-
+            The body is not valid JSON or has an unknown field (`invalid_body`). `reviewer` is
+            missing or invalid, or the session is a data request (`invalid_input`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/ApiUnauthorized'
+        '403':
+          $ref: '#/components/responses/ApiForbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '409':
+          description: >-
+            Nothing of the session waits for a review (`nothing_to_review`).
           content:
             application/json:
               schema:
@@ -12975,9 +13771,10 @@ paths:
               properties:
                 language:
                   type: string
-                  enum: [en, nl]
                   default: en
-                  description: Optional. The language of the scan page.
+                  description: >-
+                    Optional. The language of the scan page: Dutch for any value starting
+                    with `nl` (any case, e.g. `nl-NL`), English for any other.
             example:
               language: nl
       responses:
@@ -13036,10 +13833,14 @@ paths:
         session the scan the person finished: the `transactionId` and `resultId` the scan
         page posted to your page. The photos and the document check then belong to the
         session, and a flow of the document photo alone is settled by it. Without a
-        `resultId` (the person stopped), the session is told the scan did not finish: 422
-        `document_scan_failed` while the person may try again, and the session is rejected
-        (`DOCUMENT_SCAN_FAILED`) once the scan service's attempts are used up. Finishing the
-        same scan again changes nothing.
+        `resultId` (the person stopped), the session is told the scan did not finish. That
+        answers 422 `document_scan_failed` while the person may try again. It rejects the
+        session (answering 204) once the scan service's attempts are used up, or at once when
+        the person stopped at a face check. The rejection's `errorCode` is `LIVENESS_FAILED`
+        or `FACE_NO_MATCH` for a face check, `DOC_EXPIRED` for an expired document, and
+        `DOCUMENT_SCAN_FAILED` otherwise. Finishing the same scan again answers 204 and
+        changes nothing while the session runs. Once that scan settled the session it
+        answers 409 `session_over`.
       security:
         - apiKey: []
       x-codeSamples:
@@ -13100,7 +13901,9 @@ paths:
               properties:
                 transactionId:
                   type: string
-                  description: Required. The scan's id, as the scan page posted it.
+                  description: >-
+                    Required. The scan's id, as the scan page posted it. Missing or not the
+                    scan started last, it answers 409 `document_scan_mismatch`.
                 resultId:
                   type: string
                   description: >-
@@ -13111,7 +13914,9 @@ paths:
               resultId: 450f3433-7167-4da0-8857-ea0d8d664779
       responses:
         '204':
-          description: The photos are in.
+          description: >-
+            The photos are in, the scan was finished already, or a stopped scan rejected the
+            session.
         '400':
           description: The body is not valid JSON or has an unknown field (`invalid_body`).
           content:
@@ -13128,7 +13933,8 @@ paths:
           description: >-
             The session is not started yet (`session_not_started`), has ended
             (`session_over`), takes no document photo (`document_scan_not_asked`), or this is
-            not the scan started last (`document_scan_mismatch`).
+            not the scan started last (`document_scan_mismatch`), or the deployment has no scan
+            service (`no_document_scanner`).
           content:
             application/json:
               schema:
@@ -13162,9 +13968,9 @@ paths:
       tags: [identity-proofing]
       summary: Cancel a proofing session (public API)
       description: >-
-        Authenticated with the organisation's API key as a Bearer token. Ends a session that is
+        Authenticated with the organisation's API key with `sessions:write`. Ends a session that is
         still `pending` or `in_progress`, in the engine too, and
-        answers it with `status` `cancelled` and `cancelledAt`. Audited
+        answers it with `status` `cancelled`, `cancelledAt` and `cancelledBy` `api_key`. Audited
         `identity_proofing.session_cancelled`. Takes an `Idempotency-Key`.
       security:
         - apiKey: []
@@ -13234,7 +14040,9 @@ paths:
                     expiresAt: "2026-10-02T09:40:00Z"
                     createdAt: "2026-10-02T09:30:00Z"
                     cancelledAt: "2026-10-02T09:31:45Z"
+                    cancelledBy: api_key
                     expectedSubject: false
+                    flowKind: identity
         '401':
           $ref: '#/components/responses/ApiUnauthorized'
         '403':
@@ -13616,6 +14424,35 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           description: The signed document is not ready yet.
+  /api/v1/signing/external/{token}/events:
+    parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+        description: The external signee's one-time invitation token.
+    get:
+      tags: [signing]
+      summary: Follow the request an external signee must sign
+      description: >-
+        Unauthenticated like `GET /api/v1/signing/external/{token}`. A Server-Sent Events
+        stream that sends a `signing-request` event, with no data, each time the request or
+        one of its signers moves, so the page re-reads its view then instead of polling. A
+        comment line keeps the stream open. 404 when the link is unknown, spent or expired.
+      responses:
+        '200':
+          description: The event stream, open until the page leaves or the server shuts down.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+              examples:
+                changed:
+                  summary: Something changed
+                  value: "event: signing-request\ndata: \n\n"
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/v1/signing/external/{token}:
     parameters:
       - name: token
@@ -14860,6 +15697,622 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+  /api/v1/signing/requests:
+    post:
+      tags: [signing-api]
+      summary: Create a signing request (signing API)
+      description: >-
+        Authenticated with the organisation's API key as a Bearer token, with `signing:write`.
+        Uploads a PDF and names who signs it: an external signee by name and e-mail address,
+        or a member of the organisation by user id. Each signee signs with their own
+        certificate, so the finished PDF carries one signature per signee. By default each
+        signee who may sign now is mailed their signing link; with `sendMail` `false` nobody
+        is mailed and the answer carries each such external signee's `signingUrl` instead, for
+        you to send them to. In `sequential` mode only the first signee may sign at first;
+        ask for the next one's link (`POST …/signers/{signerID}/link`) once their turn has
+        come. `returnUrl` is a page of yours the signing page offers the signee to go back
+        to when they are done, opened with `request_id` and `status` (`signed` or
+        `declined`) in its query. 409 `not_configured` when the organisation has switched
+        signing off.
+      security:
+        - apiKey: []
+      x-codeSamples:
+        - lang: Shell
+          label: curl
+          source: |
+            curl -X POST 'https://wallet.example.org/api/v1/signing/requests' \
+              -H "Authorization: Bearer YOUR_API_KEY" \
+              -F 'document=@contract.pdf;type=application/pdf' \
+              -F 'signers={"kind":"external","name":"Jan Jansen","email":"jan@example.org"}' \
+              -F 'sendMail=false' \
+              -F 'returnUrl=https://portal.example.org/contracts/42'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [document, signers]
+              properties:
+                document:
+                  type: string
+                  format: binary
+                  description: The PDF to sign, at most 25 MB.
+                signers:
+                  type: array
+                  description: >-
+                    One JSON object per signee, repeated in signing order:
+                    `{"kind":"external","name":"…","email":"…"}` or
+                    `{"kind":"internal","userId":"…"}`, each optionally with `placements`
+                    (where their visible signature and initials go, in PDF points).
+                  items:
+                    type: string
+                mode:
+                  type: string
+                  enum: [parallel, sequential]
+                  description: Whether signees sign in any order (the default) or in the order given.
+                sendMail:
+                  type: boolean
+                  description: False mails no signee; you hand out the signing links. Default true.
+                returnUrl:
+                  type: string
+                  format: uri
+                  description: An https page of yours the signee is offered to return to when done.
+                recipientChannel:
+                  type: string
+                  enum: [none, email, qerds]
+                  description: Where the finished PDF is delivered. Default none.
+                recipientAddress:
+                  type: string
+                recipientName:
+                  type: string
+                message:
+                  type: string
+                  description: A cover message for the recipient.
+      responses:
+        '201':
+          description: The request, with `signingUrl` on each external signee who may sign now when no mail was sent.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SigningApiRequest'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/ApiUnauthorized'
+        '403':
+          $ref: '#/components/responses/ApiForbidden'
+        '409':
+          description: The organisation has no signing provider (`not_configured`), or a selected member must re-identify first (`signer_identity_blocked`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: The document is larger than 25 MB (`document_too_large`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    get:
+      tags: [signing-api]
+      summary: List your signing requests (signing API)
+      description: >-
+        Authenticated with the organisation's API key, with `signing:read`. The requests made
+        over this API, newest first, `limit` per page (default 25, at most 100):
+        `{requests, nextCursor}`. Pass `nextCursor` back as `cursor` for the next page; it is
+        empty on the last. A request a member made in the wallet is not listed.
+      security:
+        - apiKey: []
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+        - name: cursor
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: A page of requests.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [requests, nextCursor]
+                properties:
+                  requests:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/SigningApiRequest'
+                  nextCursor:
+                    type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/ApiUnauthorized'
+        '403':
+          $ref: '#/components/responses/ApiForbidden'
+  /api/v1/signing/requests/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: The signing request's id.
+    get:
+      tags: [signing-api]
+      summary: Read a signing request (signing API)
+      description: >-
+        Authenticated with the organisation's API key, with `signing:read`. The request's
+        `status` (`awaiting_signatures`, `completed`, `declined`, `failed`) and each signee's
+        own. 404 for a request that was not made over this API.
+      security:
+        - apiKey: []
+      responses:
+        '200':
+          description: The request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SigningApiRequest'
+        '401':
+          $ref: '#/components/responses/ApiUnauthorized'
+        '403':
+          $ref: '#/components/responses/ApiForbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/signing/requests/{id}/document:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: The signing request's id.
+    get:
+      tags: [signing-api]
+      summary: Download the signed PDF (signing API)
+      description: >-
+        Authenticated with the organisation's API key, with `signing:read`. The finished PDF
+        (`application/pdf`) once every signee has signed; 409 `not_completed` before that.
+      security:
+        - apiKey: []
+      responses:
+        '200':
+          description: The signed PDF.
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/ApiUnauthorized'
+        '403':
+          $ref: '#/components/responses/ApiForbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Not every signee has signed yet (`not_completed`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/signing/requests/{id}/signers/{signerID}/link:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: The signing request's id.
+      - name: signerID
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: The signee's id, from the request's `signers`.
+    post:
+      tags: [signing-api]
+      summary: Make a signee's signing link (signing API)
+      description: >-
+        Authenticated with the organisation's API key, with `signing:write`. Makes a fresh
+        link to an external signee's signing page, for you to redirect them to or to show in
+        a frame. It replaces the signee's earlier link, the mailed one included, and is good
+        for 30 days. Refused for a signee who cannot sign now: 409 `already_signed`,
+        `not_your_turn` (sequential mode) or 400 `invalid_request` once the request is over.
+        A member has no link (404 `signer_not_found`): they sign in the wallet.
+      security:
+        - apiKey: []
+      responses:
+        '200':
+          description: The link.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [signingUrl]
+                properties:
+                  signingUrl:
+                    type: string
+                    format: uri
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/ApiUnauthorized'
+        '403':
+          $ref: '#/components/responses/ApiForbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The signee has signed already (`already_signed`) or it is not their turn (`not_your_turn`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/yivi-csc/csc/v2/info:
+    post:
+      tags: [yivi-csc]
+      summary: Describe the built-in signing service (CSC info)
+      description: >-
+        The CSC API v2 `info` method of the wallet's own signing service: its name, the CSC
+        version it implements, the methods it serves and, as `oauth2`, the OAuth 2.0 issuer
+        to authorise at (the service's own base URL). Takes no credential.
+      security: []
+      responses:
+        '200':
+          description: The service's description.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  specs:
+                    type: string
+                  name:
+                    type: string
+                  oauth2:
+                    type: string
+                    format: uri
+                  authType:
+                    type: array
+                    items:
+                      type: string
+                  methods:
+                    type: array
+                    items:
+                      type: string
+  /api/v1/yivi-csc/oauth2/authorize:
+    get:
+      tags: [yivi-csc]
+      summary: Start an authorization (OAuth 2.0 authorize)
+      description: >-
+        The CSC `oauth2/authorize` endpoint, called by sending the signer's browser to it.
+        It starts a Yivi disclosure over OpenID4VP and redirects the browser to the page
+        that shows its QR code; once the signer disclosed, that page sends the browser to
+        `redirect_uri` with `code` and `state` (or `error=access_denied`). `scope=service`
+        identifies the signer, from a passport, identity card or residence permit or from
+        the registered personal data (BRP), whichever they pick in the Yivi app; its token
+        lists the signer's credential, issuing one on first use. `scope=credential`
+        authorises signatures and takes `credentialID`, `numSignatures`, `hashes`
+        (comma-separated base64url SHA-256 digests) and `hashAlgorithmOID`; the signer must
+        then disclose the same identity the credential's certificate names. PKCE with
+        `S256` is required. A `client_id` or `redirect_uri` the service does not know is
+        answered 400 and never redirected.
+      security: []
+      parameters:
+        - name: response_type
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [code]
+        - name: client_id
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: redirect_uri
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uri
+        - name: scope
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [service, credential]
+        - name: state
+          in: query
+          schema:
+            type: string
+        - name: code_challenge
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: code_challenge_method
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [S256]
+        - name: credentialID
+          in: query
+          schema:
+            type: string
+        - name: numSignatures
+          in: query
+          schema:
+            type: integer
+        - name: hashes
+          in: query
+          schema:
+            type: string
+        - name: hashAlgorithmOID
+          in: query
+          schema:
+            type: string
+        - name: description
+          in: query
+          schema:
+            type: string
+          description: A short name for what is signed, shown to the signer.
+      responses:
+        '302':
+          description: To the authorization page, or to `redirect_uri` with an OAuth error.
+        '400':
+          description: Unknown `client_id` or `redirect_uri`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/YiviCscError'
+        '429':
+          description: Too many authorizations from this address; retry after `Retry-After` seconds.
+  /api/v1/yivi-csc/oauth2/token:
+    post:
+      tags: [yivi-csc]
+      summary: Exchange an authorization code (OAuth 2.0 token)
+      description: >-
+        The CSC `oauth2/token` endpoint: `grant_type=authorization_code` with the `code`,
+        the `redirect_uri` it was sent to and the PKCE `code_verifier`, authenticated as the
+        client (HTTP Basic, or `client_id` and `client_secret` in the form). A code is good
+        once and for a minute. The access token of a `credential` authorization is the
+        signature activation data: it signs the hashes it was authorised for, and nothing
+        else.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [grant_type, code, redirect_uri, code_verifier]
+              properties:
+                grant_type:
+                  type: string
+                  enum: [authorization_code]
+                code:
+                  type: string
+                redirect_uri:
+                  type: string
+                code_verifier:
+                  type: string
+                client_id:
+                  type: string
+                client_secret:
+                  type: string
+      responses:
+        '200':
+          description: The access token.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [access_token, token_type, expires_in]
+                properties:
+                  access_token:
+                    type: string
+                  token_type:
+                    type: string
+                  expires_in:
+                    type: integer
+        '400':
+          description: The code is not valid (`invalid_grant`) or the request is malformed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/YiviCscError'
+        '401':
+          description: Client authentication failed (`invalid_client`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/YiviCscError'
+  /api/v1/yivi-csc/csc/v2/credentials/list:
+    post:
+      tags: [yivi-csc]
+      summary: List the signer's credentials (CSC credentials/list)
+      description: >-
+        With the access token as a Bearer token. Answers the one credential of the person
+        the token was issued for, issuing it (a key and a certificate in their name) when
+        they have none or theirs has expired.
+      security: []
+      responses:
+        '200':
+          description: The credential ids.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [credentialIDs]
+                properties:
+                  credentialIDs:
+                    type: array
+                    items:
+                      type: string
+        '401':
+          description: The access token is not valid (`invalid_token`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/YiviCscError'
+  /api/v1/yivi-csc/csc/v2/credentials/info:
+    post:
+      tags: [yivi-csc]
+      summary: Read a credential (CSC credentials/info)
+      description: >-
+        With the access token as a Bearer token. Answers the credential's key algorithm and
+        its certificate; `certificates` is `none`, `single` or `chain` (the default: the
+        signing certificate, then the service's own authority). Only the token subject's own
+        credential is readable.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [credentialID]
+              properties:
+                credentialID:
+                  type: string
+                certificates:
+                  type: string
+                  enum: [none, single, chain]
+      responses:
+        '200':
+          description: The credential.
+          content:
+            application/json:
+              schema:
+                description: The CSC `credentials/info` answer (`key`, `cert`, `authMode`, `SCAL`, `multisign`).
+        '400':
+          description: Unknown `credentialID` (`invalid_request`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/YiviCscError'
+        '401':
+          description: The access token is not valid (`invalid_token`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/YiviCscError'
+  /api/v1/yivi-csc/csc/v2/signatures/signHash:
+    post:
+      tags: [yivi-csc]
+      summary: Sign hashes (CSC signatures/signHash)
+      description: >-
+        With the access token of a `credential` authorization as a Bearer token. Signs the
+        SHA-256 digests in `hashes` (base64) with the credential's ECDSA P-256 key and
+        answers the DER signatures, base64, in order. Every digest must be one the signer
+        authorised, and each is signed once; anything else is refused and spends nothing.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [credentialID, hashes, hashAlgorithmOID, signAlgo]
+              properties:
+                credentialID:
+                  type: string
+                hashes:
+                  type: array
+                  items:
+                    type: string
+                hashAlgorithmOID:
+                  type: string
+                  description: '`2.16.840.1.101.3.4.2.1` (SHA-256).'
+                signAlgo:
+                  type: string
+                  description: '`1.2.840.10045.4.3.2` (ecdsa-with-SHA256).'
+      responses:
+        '200':
+          description: The signatures.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [signatures]
+                properties:
+                  signatures:
+                    type: array
+                    items:
+                      type: string
+        '400':
+          description: A hash was not authorised, or the request is malformed (`invalid_request`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/YiviCscError'
+        '401':
+          description: The access token is not valid (`invalid_token`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/YiviCscError'
+  /api/v1/yivi-csc/authorizations/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: The authorization's id, from the page the browser was redirected to.
+    get:
+      tags: [yivi-csc]
+      summary: Read an authorization (the authorization page)
+      description: >-
+        What the authorization page shows, and its poll: `status` (`pending`, `approved`,
+        `denied`), `purpose` (`link` or `sign`), the `walletLink` for the Yivi app while
+        pending, and once settled the `redirectUrl` the browser goes on to. Unauthenticated:
+        the unguessable id is the signer's whole authorization. 404 once it has expired
+        (five minutes).
+      security: []
+      responses:
+        '200':
+          description: The authorization.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/YiviCscAuthorization'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/yivi-csc/authorizations/{id}/cancel:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: The authorization's id.
+    post:
+      tags: [yivi-csc]
+      summary: Cancel an authorization (the authorization page)
+      description: >-
+        The signer choosing not to go on: a pending authorization becomes `denied` and its
+        `redirectUrl` carries `error=access_denied` back to the signing application.
+      security: []
+      responses:
+        '200':
+          description: The authorization, denied.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/YiviCscAuthorization'
+        '404':
+          $ref: '#/components/responses/NotFound'
 x-webhooks:
   proofing-session-event:
     post:
@@ -14946,12 +16399,143 @@ components:
     apiKey:
       type: http
       scheme: bearer
-      description: One of the organisation's identity proofing API keys (`yp_live_…`), for the public `/api/v1/proofing` routes.
+      description: One of the organisation's API keys (`yp_live_…`), for the public `/api/v1/proofing` and `/api/v1/signing/requests` routes.
     cookieAuth:
       type: apiKey
       in: cookie
       name: ybw_session
   schemas:
+    SigningApiRequest:
+      type: object
+      description: A signing request as the signing API shows it.
+      required: [id, status, filename, mode, recipientChannel, deliveryStatus, signers, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [awaiting_signatures, completed, declined, failed]
+        filename:
+          type: string
+        mode:
+          type: string
+          enum: [parallel, sequential]
+        returnUrl:
+          type: string
+          format: uri
+        recipientChannel:
+          type: string
+          enum: [none, email, qerds]
+        recipientName:
+          type: string
+        recipientAddress:
+          type: string
+        deliveryStatus:
+          type: string
+          enum: [not_requested, pending, delivered, failed]
+        deliveryError:
+          type: string
+        signers:
+          type: array
+          items:
+            $ref: '#/components/schemas/SigningApiSigner'
+        createdAt:
+          type: string
+          format: date-time
+        completedAt:
+          type: string
+          format: date-time
+    SigningApiSigner:
+      type: object
+      description: One signee of a signing request.
+      required: [id, kind, name, email, order, status, placements]
+      properties:
+        id:
+          type: string
+          format: uuid
+        kind:
+          type: string
+          enum: [internal, external]
+        userId:
+          type: string
+          format: uuid
+          description: The member's user id; absent for an external signee.
+        name:
+          type: string
+        email:
+          type: string
+        order:
+          type: integer
+          description: The signee's place in the signing order, from 1.
+        status:
+          type: string
+          enum: [pending, signed, failed, declined]
+        placements:
+          type: array
+          description: Where the signee's visible signature and initials go; empty for an invisible signature.
+          items:
+            type: object
+        signedAt:
+          type: string
+          format: date-time
+        declinedAt:
+          type: string
+          format: date-time
+        declineReason:
+          type: string
+        signingUrl:
+          type: string
+          format: uri
+          description: >-
+            The signee's signing page. Only on the answer that made the link: a create
+            with `sendMail` false, for each external signee who may sign now.
+    YiviCscError:
+      type: object
+      description: An OAuth 2.0 / CSC error of the built-in signing service.
+      required: [error, error_description]
+      properties:
+        error:
+          type: string
+          description: The OAuth 2.0 or CSC error code, such as `invalid_request` or `invalid_token`.
+        error_description:
+          type: string
+    YiviCscAuthorization:
+      type: object
+      description: An authorization at the built-in signing service, as its page reads it.
+      required: [status, purpose, expiresAt]
+      properties:
+        status:
+          type: string
+          enum: [pending, approved, denied]
+        purpose:
+          type: string
+          enum: [link, sign]
+          description: Whether the signer is identifying for their certificate (`link`) or approving a signature (`sign`).
+        description:
+          type: string
+          description: The signing application's name for what is signed.
+        source:
+          type: string
+          enum: [mrtd, brp]
+          description: >-
+            For `sign`: where the signer's certificate got its name, which is what they
+            must disclose again: a passport, identity card or residence permit (`mrtd`)
+            or the registered personal data (`brp`).
+        walletLink:
+          type: string
+          description: The OpenID4VP request for the Yivi app; only while pending.
+        expiresAt:
+          type: string
+          format: date-time
+        reason:
+          type: string
+          enum: [cancelled, identity_mismatch, identity_incomplete]
+          description: Why a denied authorization was denied.
+        redirectUrl:
+          type: string
+          format: uri
+          description: Where the browser goes once the authorization settled.
     CredentialRequestTemplate:
       type: object
       required: [id, name, credentials, createdAt]
@@ -15049,7 +16633,7 @@ components:
           type: array
           items:
             type: string
-          description: What the result may carry (`dg1` the document data with name and birth date, `dg2` the chip photo, `selfie`, `age_over` only whether the person is `ageOver` or older, …); empty is the outcome only.
+          description: What the result may carry (`dg1` the document data with name and birth date, `dg2` the chip photo, `selfie`, `age_over` only whether the person is `ageOver` or older, …). A flow that carries only the outcome lists `outcome_only`.
         ageOver:
           type: integer
           description: The age `age_over` answers for; absent when the flow does not request it.
@@ -15070,13 +16654,15 @@ components:
           description: The page the flow's hosted links send the person back to; absent for none.
         diplomaMode:
           type: string
+          enum: ['off', required, always_review]
           description: Whether the flow asks for DUO diploma extracts after the identity check.
         addressMode:
           type: string
-          enum: [off, required, always_review]
+          enum: ['off', required, always_review]
           description: Whether the flow asks for the postal address after the identity check.
         employmentMode:
           type: string
+          enum: ['off', required, always_review]
           description: Whether the flow asks for the UWV Verzekeringsbericht after the identity check.
       required: [id, name, version, requestedAttributes, default, needsReferencePhoto, allowed, hostedEnabled,
         diplomaMode, addressMode, employmentMode]
@@ -15199,7 +16785,8 @@ components:
             document is not the expected person's), `ASSURANCE_NOT_MET` (the checks fell
             short of the flow's level), `REVIEW_LAPSED` (a review nobody decided in time),
             `LEGAL_RETENTION` (an erasure refused because the organisation must keep the data by law: its legal
-            retention holds every identity check found) and, on sessions from before the
+            retention holds every identity check found), `ORG_PAUSED` (a review left open when
+            the wallet's operator paused the organisation's proofing) and, on sessions from before the
             Verzekeringsbericht had its own outcome, `EMPLOYMENT_NOT_PROVIDED` (no statement kept
             in time; `steps` says that now); a reviewer
             `REVIEW_NOT_HOLDER`, `REVIEW_ALTERED`, `EVIDENCE_NOT_AS_REQUESTED` or
@@ -15241,6 +16828,9 @@ components:
         expectedSubject:
           type: boolean
           description: Created for one known person (`name` with `birthDate`).
+        test:
+          type: boolean
+          description: Only present, as true, on a session made while the organisation was in test mode.
         flowKind:
           type: string
           enum: [identity, data_access, data_erasure]
@@ -15259,7 +16849,7 @@ components:
             The review of an address the registered (BRP) address did not confirm: `pending`
             until a reviewer confirms or rejects it, `lapsed` when nobody did within the request's
             data retention. Absent on a registered address and without an address.
-      required: [id, status, flowId, flowName, subjectEmail, expiresAt, createdAt, expectedSubject]
+      required: [id, status, flowId, flowName, subjectEmail, expiresAt, createdAt, expectedSubject, flowKind]
     ProofingStep:
       type: object
       required: [kind, state]
@@ -15346,9 +16936,9 @@ components:
         steps:
           type: array
           description: >-
-            The extra steps the flow asks for (today the Verzekeringsbericht), each with its own
-            outcome beside the identity's: a step never changes the session's `status`. Absent
-            when the flow asks none.
+            The extra steps the flow asks for (the address, DUO diplomas, the
+            Verzekeringsbericht), each with its own outcome beside the identity's: a step never
+            changes the session's `status`. Absent when the flow asks none.
           items:
             $ref: '#/components/schemas/ProofingStep'
         verifiedAt:
@@ -15490,10 +17080,12 @@ components:
           enum: [idem_app, yivi_app, browser]
         appLink:
           type: string
-          description: The Idem app's link, for `idem_app`.
+          description: >-
+            The Idem app's link, for `idem_app`: `vcmrtd://verify`, or the https App Link where
+            the deployment sets one. Absent for `browser`.
         walletLink:
           type: string
-          description: The Yivi app's link, for `yivi_app`.
+          description: The Yivi app's link, for `yivi_app`. Absent for `browser`.
         expiresAt:
           type: string
           format: date-time
@@ -15548,6 +17140,11 @@ components:
             status:
               type: string
               enum: [pending, in_progress, approved, rejected, needs_review, expired, cancelled]
+              description: >-
+                The status the event brings the session to. On `session.purged` and the extra
+                step events it is the stored status, which for a session that ended without an
+                outcome can still read `pending`, `in_progress` or `needs_review`. Read the
+                session for its current `status`.
             flowId:
               type: string
             flowKind:
@@ -15574,6 +17171,9 @@ components:
             expectedSubject:
               type: boolean
               description: Only present, as true, on a session created for one person.
+            test:
+              type: boolean
+              description: Only present, as true, on a session made while the organisation was in test mode.
             cancelledBy:
               type: string
               enum: [api_key, member, subject]
@@ -15581,7 +17181,9 @@ components:
             expiryReason:
               type: string
               enum: [not_started, not_finished, review_ended]
-              description: On `session.expired`, why it expired, as on the session.
+              description: >-
+                Why it expired, as on the session: on `session.expired`, and on any other event
+                that reports the status `expired`.
             result:
               description: >-
                 Only on `session.verified`: the session's result as `GET
@@ -15593,11 +17195,13 @@ components:
             address:
               description: >-
                 Only on `session.address_added`: the address the person entered, without
-                `registered`.
+                `registered`. Absent when the session was erased before the event went out.
               allOf:
                 - $ref: '#/components/schemas/ProofingAddress'
             employment:
-              description: Only on `session.employment_added`.
+              description: >-
+                Only on `session.employment_added`. Absent when the session was erased before
+                the event went out.
               allOf:
                 - $ref: '#/components/schemas/ProofingEmployment'
             addressReview:
@@ -15616,12 +17220,17 @@ components:
                   enum: [confirmed, rejected]
             steps:
               type: array
-              description: The flow's extra steps, each with its own outcome, when it asks for any; none once purged.
+              description: >-
+                The flow's extra steps, each with its own outcome, when it asks for any. Absent on
+                events after the session was erased. `session.purged` itself still carries them,
+                as they stood just before the erasure.
               items:
                 $ref: '#/components/schemas/ProofingStep'
             diploma:
               type: object
-              description: Only on `session.diploma_added`.
+              description: >-
+                Only on `session.diploma_added`. Absent when the session was erased before the
+                event went out.
               properties:
                 qualification:
                   type: string
@@ -15852,8 +17461,9 @@ components:
     ProofingFlowSpec:
       type: object
       description: >-
-        A flow's configuration, sent to create a flow or save its next version. Only `name` and
-        `steps` are required. Unknown fields are refused (400 `invalid_body`).
+        A flow's configuration, sent to create a flow or save its next version. Only `name` is
+        always required. `steps` is required too, unless a `requiredAssuranceLevel` of `low` or
+        `substantial` adds the steps it needs. Unknown fields are refused (400 `invalid_body`).
       properties:
         name:
           type: string
@@ -15865,17 +17475,19 @@ components:
             type: string
             enum: [document_capture, nfc_read, document_photo, face_verification]
           description: >-
-            Required. What the person does, in order. `document_capture` and `nfc_read` go
-            together: scan the document and read its chip.
+            Required, unless `requiredAssuranceLevel` is `low` or `substantial`. What the person
+            does, in order. `document_capture` and `nfc_read` go together: scan the document and
+            read its chip.
         requestedAttributes:
           type: array
           items:
             type: string
-            enum: [dg1, dg11, dg2, selfie, chip_checks, biometrics, document_image, age_over]
+            enum: [dg1, dg11, dg2, selfie, chip_checks, biometrics, document_image, age_over, outcome_only]
           description: >-
-            Optional. What a session's result may carry. Default none: only the outcome.
-            `age_over` releases only whether the person is `ageOver` or older, and needs
-            `nfc_read`.
+            Optional. What a session's result may carry. Left out or empty, it carries everything
+            the steps collect, and the flow read back lists those. `["outcome_only"]` (alone)
+            carries only the outcome. `age_over` releases only whether the person is `ageOver` or
+            older, and needs `nfc_read` or `document_photo`.
         ageOver:
           type: integer
           minimum: 1
@@ -15918,7 +17530,8 @@ components:
           description: >-
             Optional. The documents accepted: kinds (`passport`, `identity_card`,
             `residence_permit`), `drivers_license` (Dutch only), or `personal_data` (the BRP data
-            the Yivi app shares, only on a flow with `apps: [yivi]`). Default any document; all
+            the Yivi app shares, only on a flow the Yivi app runs, and next to the Idem app only
+            with a document kind as well, or 422 `rejected_by_provider`). Default any document; all
             four kinds alone is stored as any document.
         acceptedIssuingCountries:
           type: array
@@ -16001,14 +17614,15 @@ components:
           description: >-
             Optional. `true` sends a session the checks would approve to `needs_review`
             instead. A rejection stays a rejection.
-      required: [name, steps]
+      required: [name]
     ProofingFlow:
       description: >-
         A flow version as the organisation sees it. `allowed`, `default`, `diplomaMode`,
-        `kind`, `hostedEnabled`, `hostedReturnUrl` and `retentionDays` are only meaningful in a
-        flow list; a single version (create, edit, versions, activate) reads `allowed` and
-        `default` false and leaves `diplomaMode`, `kind`, `hostedEnabled`, `hostedReturnUrl`
-        and `retentionDays` out.
+        `addressMode`, `employmentMode`, `kind`, `hostedEnabled`, `hostedReturnUrl` and
+        `retentionDays` are only meaningful in a flow list. A single version (create, edit,
+        versions, activate) reads `allowed` and `default` false and leaves `diplomaMode`,
+        `addressMode`, `employmentMode`, `kind`, `hostedEnabled`, `hostedReturnUrl` and
+        `retentionDays` out.
       allOf:
         - $ref: '#/components/schemas/ProofingFlowSpec'
         - type: object
@@ -16078,7 +17692,7 @@ components:
                 retention when it sets one, else the organisation's `dataRetentionDays`, plus
                 the day the proofing engine keeps its copy longer, rounded up to whole days.
                 What the on-screen page tells the person; absent on a single version.
-          required: [id, version, active, createdAt, completable, allowed, default, needsReferencePhoto]
+          required: [id, steps, version, active, createdAt, completable, allowed, default, needsReferencePhoto]
     ProofingFlowList:
       type: array
       items:
@@ -16091,14 +17705,15 @@ components:
           type: array
           items:
             type: string
-          description: Required. The flows members may send in the wallet; `[]` for none.
+          description: >-
+            Optional. The flows members may send in the wallet, replacing the list. `[]`, or
+            leaving it out, is none.
         defaultFlowId:
           type: string
           description: >-
             Optional. The default flow: the one a session without `flowId` runs. Any active
             identity flow, whether or not it is in `flowIds`. Leave it out or send `""` for
             none.
-      required: [flowIds]
     ProofingFlowHosted:
       type: object
       properties:
@@ -16584,8 +18199,9 @@ components:
           type: array
           readOnly: true
           description: >-
-            The extra steps the flow asks for (today the Verzekeringsbericht), each with its own
-            outcome beside the identity's: a step never changes the session's `status`.
+            The extra steps the flow asks for (the address, DUO diplomas, the
+            Verzekeringsbericht), each with its own outcome beside the identity's: a step never
+            changes the session's `status`.
           items:
             $ref: '#/components/schemas/ProofingStep'
         flowAlwaysReview:
@@ -16597,6 +18213,9 @@ components:
           description: The document photo, taken in the browser through `document-scan/start`; absent when the flow takes none.
         expectedSubject:
           type: boolean
+        test:
+          type: boolean
+          description: Only present, as true, on a request made while the organisation was in test mode.
         flowKind:
           type: string
           enum: [identity, data_access, data_erasure]
@@ -16825,6 +18444,9 @@ components:
                 type: string
                 nullable: true
                 description: A non-user actor, such as `api_key:<prefix>`.
+              test:
+                type: boolean
+                description: Only present, as true, on an event about a session made while the organisation was in test mode.
             required: [id, occurredAt, action, targetType, targetId, metadata, actor, actorLabel]
       required: [events]
     ProofingStats:
@@ -16865,6 +18487,123 @@ components:
           format: byte
           description: The image, standard base64.
       required: [mimeType, data]
+    ProofingApiReview:
+      type: object
+      description: What a reviewer outside the wallet decides a session on.
+      properties:
+        id:
+          type: string
+          pattern: '^ps_[a-z2-7]{26}$'
+        status:
+          type: string
+          enum: [pending, in_progress, approved, rejected, needs_review, expired, cancelled]
+        flowKind:
+          type: string
+          enum: [identity, data_access, data_erasure]
+        waiting:
+          type: array
+          description: The parts that wait for a decision, in the order the review walks them; empty once nothing waits.
+          items:
+            type: string
+            enum: [identity, address, employment, diplomas, data_request]
+        items:
+          type: array
+          description: Every part a reviewer decides, waiting or decided.
+          items:
+            type: object
+            required: [kind, state]
+            properties:
+              kind:
+                type: string
+                enum: [identity, address, employment, diplomas, data_request]
+              state:
+                type: string
+                enum: [pending, confirmed, rejected, lapsed]
+              decidedAt:
+                type: string
+                format: date-time
+        stepReviewDueAt:
+          type: string
+          format: date-time
+          description: When the first waiting step lapses undecided; absent for none.
+        flowAlwaysReview:
+          type: boolean
+          description: In review because the flow sends every session there, not because the checks doubted it.
+        sealChecks:
+          type: array
+          description: The files whose seal could not be checked at upload, with what became of each.
+          items:
+            type: object
+            required: [kind, fileName, outcome, uploadedAt, checkedAt]
+            properties:
+              kind:
+                type: string
+                enum: [diplomas, employment]
+              fileName:
+                type: string
+              outcome:
+                type: string
+                description: >-
+                  Empty while the file waits, then `kept`, the reason it was refused, or
+                  `not_checked` when its step closed first.
+              uploadedAt:
+                type: string
+                format: date-time
+              checkedAt:
+                type: string
+                format: date-time
+                nullable: true
+        decisions:
+          type: array
+          description: What reviewers decided so far, oldest first.
+          items:
+            type: object
+            required: [kind, outcome, decidedAt]
+            properties:
+              kind:
+                type: string
+                enum: [review, address, employment, diplomas]
+              outcome:
+                type: string
+                enum: [approved, rejected, confirmed, lapsed]
+                description: >-
+                  `approved` or `rejected` for a `review`, `confirmed`, `rejected` or `lapsed`
+                  for a step.
+              reason:
+                type: string
+              errorCode:
+                type: string
+              decidedBy:
+                type: string
+                description: The member, or the reviewer an API key or review link named.
+              decidedAt:
+                type: string
+                format: date-time
+        result:
+          $ref: '#/components/schemas/ProofingAdminResult'
+      required: [id, status, flowKind, waiting, items, flowAlwaysReview, sealChecks, decisions]
+    ProofingReviewLinkPage:
+      type: object
+      description: What a review link's page shows.
+      properties:
+        sessionId:
+          type: string
+        request:
+          $ref: '#/components/schemas/ProofingRequest'
+        result:
+          $ref: '#/components/schemas/ProofingAdminResult'
+        reviewer:
+          type: string
+        expiresAt:
+          type: string
+          format: date-time
+        embedOrigins:
+          type: array
+          items:
+            type: string
+        organization:
+          type: string
+      required: [sessionId, request, reviewer, expiresAt, embedOrigins, organization]
     ProofingAdminResult:
       description: The API's result plus, for an approval and a check in review, the selfie and the reference photo.
       allOf:
@@ -16886,7 +18625,7 @@ components:
         platformPausedAt:
           type: string
           format: date-time
-          description: Set while a platform administrator has it paused; only they lift it.
+          description: Set while the wallet's operator has it paused; only the operator lifts it.
         platformPausedBy:
           $ref: '#/components/schemas/ProofingPausedBy'
       required: [organizationId, paused]
@@ -16931,34 +18670,17 @@ components:
       required: [state, pendingRetries]
     ProofingBranding:
       type: object
+      description: >-
+        What the proofing mail, hosted page and Idem app say besides the organisation's theme,
+        their one look. The organisation's has no colour or logo; a hosted page's carries its
+        flow's own.
       properties:
         displayName:
           type: string
         primaryColor:
           type: string
+          description: A flow's own colour over the theme's; empty for the organisation's.
           example: '#1f6feb'
-        secondaryColor:
-          type: string
-          example: '#5412c7'
-        textColor:
-          type: string
-        surfaceColor:
-          type: string
-        borderColor:
-          type: string
-        linkColor:
-          type: string
-        successColor:
-          type: string
-        warningColor:
-          type: string
-        errorColor:
-          type: string
-        topbarColor:
-          type: string
-        fontFamily:
-          type: string
-          description: A CSS font-family list; empty keeps the design's.
         supportContact:
           type: string
         privacyUrl:
@@ -16968,7 +18690,10 @@ components:
           description: Empty without a logo; carries a version so a replaced logo is fetched again.
         hidePoweredBy:
           type: boolean
-      required: [displayName, primaryColor, secondaryColor, supportContact, privacyUrl, logoUri, hidePoweredBy]
+        showTheme:
+          type: boolean
+          description: Whether the Idem app and the hosted page wear the organisation's theme.
+      required: [displayName, primaryColor, supportContact, privacyUrl, logoUri, hidePoweredBy, showTheme]
     ProofingSettings:
       type: object
       description: What the organisation set once for all its flows.
@@ -17048,7 +18773,10 @@ components:
     ProofingUpdateSettings:
       type: object
       additionalProperties: false
-      description: Send at least one field. A field you leave out stays as it is.
+      description: >-
+        Send at least one field. A field you leave out stays as it is. `sessionTtlSeconds` and
+        `dataRetentionDays` cannot be changed: sending either is refused (400 `invalid_input`),
+        since each flow sets its own.
       minProperties: 1
       properties:
         erasureHandling:
@@ -17067,61 +18795,26 @@ components:
             type: string
           description: >-
             Optional. Replaces the list of origins a hosted page may send its person back to
-            and be framed on: each `https://host[:port]` (or `http://localhost`). An origin a
+            and be framed on: each `https://host[:port]` (or `http` on `localhost`, `127.0.0.1`
+            or `[::1]`). An origin a
             flow's return page is on cannot be removed (409 `redirect_origin_in_use`).
     ProofingBrandingForm:
       type: object
       properties:
         displayName:
           type: string
-        primaryColor:
-          type: string
-          description: '`#rrggbb`; empty is the organisation''s in the mail, and the design''s in a look of the organisation''s own.'
-        secondaryColor:
-          type: string
-          description: '`#rrggbb`, the Idem app''s second colour; empty keeps the design''s in a look of the organisation''s own.'
-        textColor:
-          type: string
-          description: '`#rrggbb`; empty keeps the design''s.'
-        surfaceColor:
-          type: string
-          description: '`#rrggbb`; empty keeps the design''s.'
-        borderColor:
-          type: string
-          description: '`#rrggbb`; empty keeps the design''s.'
-        linkColor:
-          type: string
-          description: '`#rrggbb`; empty keeps the design''s.'
-        successColor:
-          type: string
-          description: '`#rrggbb`; empty keeps the design''s.'
-        warningColor:
-          type: string
-          description: '`#rrggbb`; empty keeps the design''s.'
-        errorColor:
-          type: string
-          description: '`#rrggbb`; empty keeps the design''s.'
-        topbarColor:
-          type: string
-          description: '`#rrggbb`; empty keeps the design''s.'
-        fontFamily:
-          type: string
-          description: A CSS font-family list, as the organisation theme takes it; empty keeps the design's.
         supportContact:
           type: string
         privacyUrl:
           type: string
           description: An https URL.
-        logo:
-          type: string
-          format: binary
-          description: PNG, JPEG, GIF or WebP, at most 512 KiB.
-        removeLogo:
-          type: string
-          enum: ['true']
         hidePoweredBy:
           type: string
           enum: ['true', 'false']
+        showTheme:
+          type: string
+          enum: ['true', 'false']
+          description: Left out keeps it as it is.
     ProofingFlowBranding:
       type: object
       properties:
@@ -17180,7 +18873,7 @@ components:
           items:
             type: string
             enum: [sessions:write, sessions:read, results:read, flows:read, flows:write, settings:read,
-              settings:write, webhooks:write]
+              settings:write, webhooks:write, reviews:read, reviews:write]
         createdByName:
           type: string
           description: Who created the key; absent once that user is gone.
@@ -17253,6 +18946,7 @@ components:
         url:
           type: string
           format: uri
+          maxLength: 2048
           description: >-
             Required. Where events are sent: an `https` URL that resolves to a public address.
             A private, loopback or link-local address is never called.
@@ -17409,6 +19103,9 @@ components:
               items:
                 type: string
                 enum: [en, nl]
+            test:
+              type: boolean
+              description: Only present, as true, on a session of an organisation in test mode; the page labels it.
             organization:
               type: object
               properties:
@@ -18076,7 +19773,10 @@ components:
           schema:
             $ref: '#/components/schemas/Error'
     ApiForbidden:
-      description: The API key lacks the scope this call needs (`insufficient_scope`), or proofing is paused (`proofing_paused`).
+      description: >-
+        The API key lacks the scope this call needs (`insufficient_scope`). Creating a session,
+        or starting one in an app, is also refused while the organisation's proofing is paused
+        (`proofing_paused`).
       content:
         application/json:
           schema:
@@ -18110,7 +19810,7 @@ components:
     TooManyRequests:
       description: >-
         The organisation spent its public API budget (code `rate_limited`, "too many
-        requests for this organization"): 120 calls a minute, and of those 10 session
+        requests; retry after the Retry-After seconds"): 120 calls a minute, and of those 10 session
         creations. A client address presenting unknown or revoked keys gets this too past 60 a
         minute, instead of 401 (an IPv6 address counts with its /64). `Retry-After` says in how
         many seconds to try again.

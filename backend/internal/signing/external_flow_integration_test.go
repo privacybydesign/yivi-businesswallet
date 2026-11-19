@@ -303,7 +303,7 @@ func TestExternalSigneeTurnAndParallelInvitations(t *testing.T) {
 		t.Fatalf("IssueExternalToken: %v", err)
 	}
 	if err := store.UpsertCredential(ctx, orgID, externalSubject("second@example.org"),
-		testCredential(t, "second-cred")); err != nil {
+		"https://stub-qtsp.local", testCredential(t, "second-cred")); err != nil {
 		t.Fatalf("UpsertCredential: %v", err)
 	}
 	view, err := svc.ExternalView(ctx, secondToken)

@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -22,6 +23,10 @@ import (
 type memberListPage struct {
 	Entries []MemberEntry `json:"entries"`
 	Total   int           `json:"total"`
+	// The org's totals per status, whatever the list is narrowed to, so the
+	// page needs no second and third read for them.
+	ActiveTotal  int `json:"activeTotal"`
+	InvitedTotal int `json:"invitedTotal"`
 }
 
 func (h *Handler) members(w http.ResponseWriter, r *http.Request) error {
@@ -71,25 +76,45 @@ func (h *Handler) members(w http.ResponseWriter, r *http.Request) error {
 	}
 
 	org := OrgFromContext(r.Context())
-	entries, total, err := h.store.ListMemberEntries(r.Context(), org.ID, MemberListParams{
-		Status: status,
-		Search: strings.TrimSpace(q.Get("q")),
-		Sort:   sort,
-		Desc:   desc,
-		Limit:  limit,
-		Offset: offset,
+	// The list and what decorates it are independent reads: side by side.
+	var (
+		wg                sync.WaitGroup
+		entries           []MemberEntry
+		total             int
+		listErr           error
+		active, invited   int
+		totalsErr         error
+		lookahead         int
+		lookaheadErr      error
+		screeningSettings ScreeningSettings
+		screeningErr      error
+	)
+	ctx := r.Context()
+	wg.Go(func() {
+		entries, total, listErr = h.store.ListMemberEntries(ctx, org.ID, MemberListParams{
+			Status: status,
+			Search: strings.TrimSpace(q.Get("q")),
+			Sort:   sort,
+			Desc:   desc,
+			Limit:  limit,
+			Offset: offset,
+		})
 	})
-	if err != nil {
-		return fmt.Errorf("listing members: %w", err)
+	wg.Go(func() { active, invited, totalsErr = h.store.MemberStatusTotals(ctx, org.ID) })
+	wg.Go(func() { lookahead, lookaheadErr = h.identityLookaheadDays(ctx, org.ID) })
+	wg.Go(func() { screeningSettings, screeningErr = h.store.GetScreeningSettings(ctx, org.ID) })
+	wg.Wait()
+	if listErr != nil {
+		return fmt.Errorf("listing members: %w", listErr)
 	}
-
-	lookahead, err := h.identityLookaheadDays(r.Context(), org.ID)
-	if err != nil {
-		return fmt.Errorf("resolving identity lookahead: %w", err)
+	if totalsErr != nil {
+		return fmt.Errorf("counting members: %w", totalsErr)
 	}
-	screeningSettings, err := h.store.GetScreeningSettings(r.Context(), org.ID)
-	if err != nil {
-		return fmt.Errorf("resolving screening settings: %w", err)
+	if lookaheadErr != nil {
+		return fmt.Errorf("resolving identity lookahead: %w", lookaheadErr)
+	}
+	if screeningErr != nil {
+		return fmt.Errorf("resolving screening settings: %w", screeningErr)
 	}
 	now := time.Now()
 	for i := range entries {
@@ -97,7 +122,7 @@ func (h *Handler) members(w http.ResponseWriter, r *http.Request) error {
 		entries[i] = entries[i].withIdentityStatus(now, lookahead)
 		entries[i] = entries[i].withVogStatus(screeningSettings, now)
 	}
-	respond.JSON(w, r, http.StatusOK, memberListPage{Entries: entries, Total: total})
+	respond.JSON(w, r, http.StatusOK, memberListPage{Entries: entries, Total: total, ActiveTotal: active, InvitedTotal: invited})
 	return nil
 }
 

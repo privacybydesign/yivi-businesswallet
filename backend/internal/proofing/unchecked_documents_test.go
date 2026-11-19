@@ -3,6 +3,7 @@ package proofing
 import (
 	"context"
 	"errors"
+	"net/http"
 	"slices"
 	"testing"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/diploma"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/respond"
 )
 
 // fakeUnchecked keeps unchecked files in memory, on the fixture's stored
@@ -210,6 +212,28 @@ func TestCheckSealsAgainBeforeConfirming(t *testing.T) {
 	}
 	if err := confirmStep(d, req, ReviewKindDiplomas); err != nil {
 		t.Errorf("confirm after check: %v", err)
+	}
+}
+
+// A deployment that checks no diplomas any more answers the check again with
+// its own 409, as for a statement, not a 500.
+func TestCheckSealsAgainWithoutDiplomaChecker(t *testing.T) {
+	d := newDiplomaFixture(DiplomasRequired)
+	withUnchecked(d)
+	d.checker.down = true
+	req := d.sendApproved(t, time.Minute)
+	if _, err := d.upload(req, "Anna Maria Jansen"); err != nil {
+		t.Fatalf("AddDiplomas: %v", err)
+	}
+
+	d.svc.diplomaChecker = nil
+	_, err := checkSealsAgain(d, req, ReviewKindDiplomas)
+	if !errors.Is(err, ErrNoDiplomaChecker) {
+		t.Fatalf("check again without a checker = %v, want ErrNoDiplomaChecker", err)
+	}
+	var answer *respond.APIError
+	if !errors.As(mapError(err), &answer) || answer.Status != http.StatusConflict || answer.Code != "no_diploma_checker" {
+		t.Errorf("answer = %+v, want 409 no_diploma_checker", answer)
 	}
 }
 

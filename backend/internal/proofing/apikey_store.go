@@ -42,12 +42,23 @@ const (
 	ScopeSettingsRead  = "settings:read"
 	ScopeSettingsWrite = "settings:write"
 	ScopeWebhooksWrite = "webhooks:write"
+	// ScopeReviewsRead reads what waits for a reviewer, with its evidence;
+	// ScopeReviewsWrite decides it and makes a review link.
+	ScopeReviewsRead  = "reviews:read"
+	ScopeReviewsWrite = "reviews:write"
+	// ScopeSigningRead reads the signing requests made over the signing API
+	// (internal/signing), which takes these same keys; ScopeSigningWrite makes
+	// one and hands out its signing links.
+	ScopeSigningRead  = "signing:read"
+	ScopeSigningWrite = "signing:write"
 )
 
 // APIKeyScopes are every scope, in display order; every new key gets them all.
 var APIKeyScopes = []string{
 	ScopeSessionsWrite, ScopeSessionsRead, ScopeResultsRead, ScopeFlowsRead,
 	ScopeFlowsWrite, ScopeSettingsRead, ScopeSettingsWrite, ScopeWebhooksWrite,
+	ScopeReviewsRead, ScopeReviewsWrite,
+	ScopeSigningRead, ScopeSigningWrite,
 }
 
 // APIKey is one of an org's API keys, without its secret.
@@ -78,6 +89,8 @@ type APIKeyCaller struct {
 	KeyPrefix string
 	Scopes    []string
 	Org       Org
+	// TestMode is the key's org being in test mode now.
+	TestMode bool
 	// LastUsedAt is when the key was last recorded used (Touch); nil never.
 	LastUsedAt *time.Time
 }
@@ -212,10 +225,10 @@ func (s *APIKeyStore) Authenticate(ctx context.Context, raw string) (APIKeyCalle
 	}
 	hash := sha256.Sum256([]byte(raw))
 	var c APIKeyCaller
-	err := s.db.QueryRow(ctx, `SELECT k.id, k.name, k.prefix, k.scopes, o.id, o.name, k.last_used_at
+	err := s.db.QueryRow(ctx, `SELECT k.id, k.name, k.prefix, k.scopes, o.id, o.name, o.test_mode, k.last_used_at
 		FROM identity_proofing_api_keys k JOIN organizations o ON o.id = k.organization_id
 		WHERE k.secret_hash = $1 AND k.revoked_at IS NULL`, hash[:]).
-		Scan(&c.KeyID, &c.KeyName, &c.KeyPrefix, &c.Scopes, &c.Org.ID, &c.Org.Name, &c.LastUsedAt)
+		Scan(&c.KeyID, &c.KeyName, &c.KeyPrefix, &c.Scopes, &c.Org.ID, &c.Org.Name, &c.TestMode, &c.LastUsedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return APIKeyCaller{}, ErrAPIKeyInvalid
 	}

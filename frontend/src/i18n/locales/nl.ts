@@ -713,6 +713,8 @@ export const nl: Translation<typeof en> = {
         "Deze controle vraagt niet om een Verzekeringsbericht.",
       noEmploymentChecker:
         "Deze server controleert geen Verzekeringsbericht. Vraag je beheerder EMPLOYMENT_VALIDATOR_PROVIDER in te stellen.",
+      noDiplomaChecker:
+        "Deze server controleert geen diploma's. Vraag je beheerder DIPLOMA_VALIDATOR_PROVIDER in te stellen.",
       flowNoIdentity:
         "Een flow voor gegevensverzoeken moet naam en geboortedatum uitlezen: daarmee worden de sessies van de persoon gevonden.",
       dataFlowForMember:
@@ -1349,17 +1351,11 @@ export const nl: Translation<typeof en> = {
       privacyPlaceholder: "https://example.nl/privacy",
       hidePoweredBy:
         "Laat de regel “Mogelijk gemaakt door Yivi” weg op de gehoste pagina",
+      showTheme: "Toon deze uitstraling in de Idem-app en op de gehoste pagina",
+      showThemeHint:
+        "Uit: zij houden hun eigen uitstraling. De verificatiemail gebruikt haar altijd.",
       discard: "Verwerpen",
       save: "Huisstijl opslaan",
-      preview: {
-        caption: "Voorbeeld · verificatiemail",
-        heading: "{{name}} vraagt je je identiteit te verifiëren",
-        body: "{{name}} vraagt je je identiteit te verifiëren met je paspoort of identiteitskaart en je gezicht, in de Idem-app op je telefoon.",
-        button: "Openen in de Idem-app",
-        support: "Vragen over dit verzoek? Neem contact op met {{contact}}.",
-        privacy: "Hoe er met je gegevens wordt omgegaan: {{url}}",
-        footer: "Identiteitscontrole door Yivi",
-      },
     },
     legalRetention: {
       title: "Wettelijke bewaartermijn",
@@ -1743,6 +1739,10 @@ export const nl: Translation<typeof en> = {
       subtitle:
         "Alles in de Business Wallet werkt zonder installatie. Kom hier alleen om hetzelfde vanuit je eigen software te doen: maak een token om de API aan te roepen en voeg een endpoint toe dat de resultaten ontvangt.",
       adminOnly: "Alleen een beheerder kan deze pagina zien.",
+      signingApi: {
+        title: "Onderteken-API",
+        note: "Dezelfde API-tokens openen ook de onderteken-API op {{path}}: maak een ondertekenverzoek met een pdf en de ondertekenaars, haal de ondertekenlink van elke ondertekenaar op, lees de status en download de ondertekende pdf.",
+      },
     },
     apiKeys: {
       title: "API-tokens",
@@ -1815,6 +1815,12 @@ export const nl: Translation<typeof en> = {
       secretHint:
         "Kopieer het nu en bewaar het bij je ontvanger: het wordt niet opnieuw getoond. Controleer er de Yivi-Signature-header mee.",
       recent: "Recente afleveringen",
+      columns: {
+        event: "Gebeurtenis",
+        session: "Sessie",
+        response: "Antwoord",
+        sent: "Verstuurd",
+      },
       defaultBody:
         "Er worden geen berichten verstuurd. Resultaten staan op het tabblad Personen van elke flow, zijn op te vragen via de API en staan in de auditlog.",
       defaultHint:
@@ -1885,9 +1891,33 @@ export const nl: Translation<typeof en> = {
         caption: "Voorbeeld",
         mail: "Verificatiemail",
         app: "Idem-app",
-        start: "Starten",
+        hosted: "Gehoste pagina",
         appNote:
-          "Zo toont de Idem-app de naam, het logo en de kleur van deze flow als de persoon het verzoek opent.",
+          "Het eerste scherm van de Idem-app als de persoon het verzoek opent.",
+        idem: {
+          title: "Verzoek",
+          heading: "{{party}} wil je identiteit verifiëren",
+          requestedBy: "Aangevraagd door {{org}}",
+          expiresIn_one: "Dit verzoek verloopt over {{count}} minuut.",
+          expiresIn_other: "Dit verzoek verloopt over {{count}} minuten.",
+          theyWillReceive: "Zij ontvangen",
+          stepByStep:
+            "Je gegevens gaan stap voor stap naar de verificatiedienst, zodat je op een ander apparaat verder kunt. {{party}} ontvangt ze pas als je afrondt. Stop je, dan worden ze verwijderd zodra dit verzoek verloopt.",
+          continue: "Doorgaan",
+          decline: "Weigeren",
+          items: {
+            documentIdentity:
+              "Documentidentiteit (naam, geboortedatum, documentnummer, vervaldatum)",
+            additionalDetails:
+              "Aanvullende persoonsgegevens (persoonsnummer, geboorteplaats)",
+            facePhoto: "Je pasfoto uit de chip van het document",
+            chipChecks: "Controles op de echtheid van het document",
+            biometrics: "Resultaat van de gezichtsverificatie",
+            ageOver: "Of je {{age}} jaar of ouder bent",
+            ageCheck: "Of je oud genoeg bent",
+            everything: "Alles wat de app uit je document leest",
+          },
+        },
       },
       dropConfirm: {
         title: "De huisstijl van de organisatie gebruiken?",
@@ -2215,6 +2245,13 @@ export const nl: Translation<typeof en> = {
       },
     },
   },
+  reviewLink: {
+    reviewingAs: "Je beoordeelt als {{name}} · link geldig tot {{until}}",
+    done: "Niets van deze sessie wacht nog op jou. Je kunt deze pagina sluiten.",
+    invalid:
+      "Deze beoordelingslink is onbekend of verlopen. Vraag een nieuwe aan in je eigen systeem.",
+    error: "De beoordeling kon niet worden geladen. Probeer het zo opnieuw.",
+  },
   proofLink: {
     notFound: "Deze link bestaat niet, of is verwijderd.",
     decline: "Weigeren",
@@ -2417,6 +2454,8 @@ export const nl: Translation<typeof en> = {
     vogRequested_other: "VOG aangevraagd bij {{count}} leden",
     organizationUpdated: "Organisatie bijgewerkt",
     organizationDeleted: "Organisatie verwijderd",
+    testModeOn: "{{name}} staat nu in testmodus",
+    testModeOff: "{{name}} is nu live",
     departmentAdded: "Afdeling toegevoegd",
     departmentRenamed: "Afdeling hernoemd",
     departmentDeleted: "Afdeling verwijderd",
@@ -2441,6 +2480,7 @@ export const nl: Translation<typeof en> = {
     postguardFileSent: "Versleuteld bestand verstuurd",
     postguardNotificationsSaved: "Notificatie-instellingen opgeslagen",
     attestationSchemaCreated: "Schema aangemaakt",
+    attestationRulebookImported: "Rulebook geïmporteerd",
     attestationSchemaUpdated: "Schema bijgewerkt",
     attestationSchemaDeleted: "Schema verwijderd",
     attestationTemplateCreated: "Sjabloon aangemaakt",
@@ -2589,6 +2629,7 @@ export const nl: Translation<typeof en> = {
     system: "Systeem",
     apiKeyActor: "API-token {{prefix}}…",
     hostedLinkActor: "Persoon, via een gehoste link",
+    reviewLinkActor: "Beoordelingslink van API-token {{prefix}}…",
     adminActor: "Een beheerder",
     columns: {
       when: "Wanneer",
@@ -2619,6 +2660,7 @@ export const nl: Translation<typeof en> = {
       qerdsContact: "Contact",
       walletInstance: "Wallet",
       walletUnit: "Wallet-unit",
+      wscaAccount: "Houder-wallet",
       walletRepresentation: "Vertegenwoordiging",
       kvkRegistration: "KVK-registratie",
       postguardKey: "PostGuard API-sleutel",
@@ -2662,6 +2704,7 @@ export const nl: Translation<typeof en> = {
       orgCreated: "Organisatie aangemaakt",
       orgUpdated: "Organisatie bijgewerkt",
       orgDeleted: "Organisatie verwijderd",
+      orgTestModeChanged: "Testmodus gewijzigd",
       memberInvited: "Lid uitgenodigd",
       inviteResent: "Uitnodiging opnieuw verstuurd",
       inviteRevoked: "Uitnodiging ingetrokken",
@@ -2720,6 +2763,8 @@ export const nl: Translation<typeof en> = {
       representationRevoked: "Vertegenwoordiging ingetrokken",
       walletUnitActivated: "Wallet-unit geactiveerd",
       walletUnitRevoked: "Wallet-unit ingetrokken",
+      wscaAccountActivated: "Houder-wallet geactiveerd",
+      wscaAccountRotated: "Wallet-geheim geroteerd",
       kvkRegistrationValidated: "KVK-registratie gevalideerd",
       kvkRegistrationNotValidated: "KVK-registratie afgewezen",
       attestationSchemaCreated: "Attestatieschema aangemaakt",
@@ -2732,6 +2777,7 @@ export const nl: Translation<typeof en> = {
       attestationClaimed: "Attestatie geclaimd",
       attestationRevoked: "Attestatie ingetrokken",
       attestationOfferCancelled: "Attestatieaanbod geannuleerd",
+      attestationDeclined: "Ontvanger heeft een attestatieaanbod geweigerd",
       attestationKeyAdded: "Attestatiesleutel toegevoegd",
       attestationKeySuspended: "Attestatiesleutel opgeschort",
       attestationKeyRevoked: "Attestatiesleutel ingetrokken",
@@ -2838,6 +2884,7 @@ export const nl: Translation<typeof en> = {
       identityProofingAddressAdded: "Adres ingevuld",
       identityProofingAddressReviewed: "Adres beoordeeld",
       identityProofingReviewItemDecided: "Beoordeling afgerond",
+      identityProofingReviewLinkCreated: "Beoordelingslink gemaakt",
       identityProofingFlowEmploymentConfigured:
         "Gewijzigd of een flow om het Verzekeringsbericht vraagt",
       identityProofingEmploymentAdded: "Verzekeringsbericht toegevoegd",
@@ -2927,14 +2974,6 @@ export const nl: Translation<typeof en> = {
     requestIdentificationHint:
       "Vraagt dit lid om nu zijn identiteit opnieuw te bevestigen. Het lid krijgt een e-mail met een link.",
     identityRequested: "Identificatie aangevraagd",
-    proofing: {
-      flow: "Flow voor identiteitsverificatie",
-      send: "Identiteitsverificatie versturen",
-      hint: "Mailt dit lid een QR-code en een link voor de Idem-app. De sessie start bij het versturen van de mail en loopt 10 minuten; stuur daarna een nieuw verzoek.",
-      noFlows:
-        "Er is nog geen flow beschikbaar voor leden. Maak er een aan en vink die aan onder",
-      lastRequest: "Laatste verificatie:",
-    },
     vogValidUntil: "VOG geldig tot",
     vogNone: "Geen VOG bekend",
     requestVog: "VOG aanvragen",
@@ -2990,10 +3029,10 @@ export const nl: Translation<typeof en> = {
   signing: {
     title: "Documenten ondertekenen",
     subtitle:
-      "Gekwalificeerde elektronische handtekeningen via je CSC-ondertekenprovider",
+      "Elektronische handtekeningen via de ondertekenprovider van je organisatie",
     credentialTitle: "Ondertekencertificaat",
     credentialDescription:
-      "Je gekwalificeerde ondertekencertificaat wordt eenmalig opgehaald en voor elke handtekening hergebruikt. Bij het koppelen opent je wallet om het te autoriseren.",
+      "Je ondertekencertificaat wordt eenmalig opgehaald en voor elke handtekening hergebruikt. Om het te koppelen identificeer je je met je wallet-app.",
     credentialIdLabel: "Certificaat-ID",
     keyAlgoLabel: "Sleutelalgoritme",
     notLinked: "Er is nog geen ondertekencertificaat gekoppeld.",
@@ -3004,7 +3043,7 @@ export const nl: Translation<typeof en> = {
       "Het koppelen van het ondertekencertificaat is niet voltooid.",
     credentialLoadError: "Kon je ondertekencertificaat niet laden.",
     walletHint:
-      "Je wordt doorgestuurd naar de ondertekenprovider om te autoriseren met je wallet en daarna teruggebracht.",
+      "Je wordt doorgestuurd naar de ondertekenprovider om je te identificeren met je wallet-app en daarna teruggebracht.",
     signTitle: "Een document ondertekenen",
     signDescription:
       "Upload een PDF. De hash wordt met je wallet geautoriseerd, door de provider ondertekend en de ondertekende PDF wordt aan je teruggegeven.",
@@ -3125,6 +3164,7 @@ export const nl: Translation<typeof en> = {
     toSignError:
       "Kon de documenten die op jouw handtekening wachten niet laden.",
     requestedBy: "Aangevraagd door {{name}}",
+    requestedViaApi: "Aangevraagd via de API",
     alreadySigned: "Je hebt dit document al ondertekend.",
     notYourTurn: "Een eerdere ondertekenaar moet eerst tekenen.",
     signInProgress:
@@ -3178,7 +3218,7 @@ export const nl: Translation<typeof en> = {
       progress: "{{signed}} van {{total}}",
       reviewDocument: "Het document openen",
       needsCredential:
-        "Koppel eerst een ondertekencertificaat. Daarvoor opent je wallet één keer; daarna kun je ondertekenen.",
+        "Koppel eerst je ondertekencertificaat. Daarvoor identificeer je je één keer met je wallet-app; daarna kun je ondertekenen.",
       linkButton: "Ondertekencertificaat koppelen",
       signButton: "Document ondertekenen",
       declineButton: "Weigeren",
@@ -3209,7 +3249,47 @@ export const nl: Translation<typeof en> = {
       errorHint:
         "Kon dit ondertekenverzoek niet laden. Probeer het later opnieuw.",
       walletHint:
-        "Je wordt doorgestuurd naar de ondertekenprovider om te autoriseren met je wallet en daarna teruggebracht.",
+        "Je wordt doorgestuurd naar de ondertekenprovider om je te identificeren met je wallet-app en daarna teruggebracht.",
+      returnTo: "Terug naar {{host}}",
+    },
+    authorize: {
+      link: {
+        title: "Identificeer je om je ondertekencertificaat te krijgen",
+        choose:
+          "In de Yivi-app kies je wat je deelt: je paspoort, identiteitskaart of verblijfsvergunning, of je geregistreerde persoonsgegevens (BRP).",
+        name: "De naam die je deelt is de naam bij je handtekening.",
+      },
+      sign: {
+        title: "Keur het ondertekenen van {{document}} goed",
+        titleUnnamed: "Keur het ondertekenen van dit document goed",
+        intro: "Keur deze handtekening goed in de Yivi-app.",
+        sourceMrtd:
+          "Deel je paspoort, identiteitskaart of verblijfsvergunning. Het moet hetzelfde document zijn als waarmee je ondertekencertificaat is uitgegeven.",
+        sourceBrp:
+          "Deel je geregistreerde persoonsgegevens (BRP). Het moeten dezelfde gegevens zijn als waarmee je ondertekencertificaat is uitgegeven.",
+      },
+      scanHint:
+        "Scan de QR-code met de Yivi-app, of open de app op dit apparaat.",
+      openYivi: "Open de Yivi-app",
+      cancelError: "Kon niet annuleren. Probeer het opnieuw.",
+      leaving: "Je wordt teruggebracht…",
+      denied: {
+        title: "Niet goedgekeurd",
+        identityMismatch:
+          "De identiteit die je deelde is niet die waarvoor je ondertekencertificaat is uitgegeven.",
+        identityIncomplete:
+          "Wat je deelde bevatte geen naam of geboortedatum en kan dus niet worden gebruikt om te ondertekenen.",
+        generic: "Dit is niet goedgekeurd.",
+        continue: "Doorgaan",
+      },
+      expired: {
+        title: "Deze autorisatie is verlopen",
+        message: "Begin opnieuw vanaf de ondertekenpagina.",
+      },
+      error: {
+        title: "Er ging iets mis",
+        message: "Kon deze autorisatie niet laden. Probeer het later opnieuw.",
+      },
     },
   },
   signedDocuments: {
@@ -3238,7 +3318,6 @@ export const nl: Translation<typeof en> = {
     tabScreening: "Screening (VOG)",
     tabBranding: "Huisstijl",
     tabPrivacy: "Gegevens en privacy",
-    tabTheme: "Wallet-thema",
     tabCommunication: "Communicatie",
     tabEmail: "E-mail",
     tabMailTemplates: "E-mailteksten",
@@ -3250,6 +3329,17 @@ export const nl: Translation<typeof en> = {
     tabSigning: "Ondertekenen",
     tabPostguard: "PostGuard",
     tabWallets: "Wallets",
+    brandingWallet: "Uitstraling",
+    brandingWalletHint:
+      "Eén uitstraling voor de business wallet, de verificatiemail, de gehoste pagina en de Idem-app.",
+    brandingExternal: "Naam en contact",
+    brandingExternalHint:
+      "Wat de verificatiemail, de gehoste pagina en de Idem-app zeggen tegen een persoon buiten de organisatie.",
+    unsaved: {
+      title: "Weggaan zonder op te slaan?",
+      message: "Je wijzigingen in de huisstijl zijn niet opgeslagen.",
+      leave: "Weggaan",
+    },
     adminOnly: "Alleen organisatiebeheerders kunnen instellingen beheren.",
     discard: "Verwerpen",
     organisation: {
@@ -3881,14 +3971,19 @@ export const nl: Translation<typeof en> = {
       "Kon de instellingen van de ondertekenprovider niet laden: {{message}}",
     heading: "CSC-ondertekenprovider",
     description:
-      "Verbind met een externe QTSP via de Cloud Signature Consortium (CSC) API v2 om gekwalificeerde handtekeningen te maken. Dit stelt de verbinding in; het ondertekenen zelf wordt apart toegevoegd.",
+      "Documenten worden ondertekend via een ondertekenprovider die de Cloud Signature Consortium (CSC) API v2 spreekt. De ingebouwde ondertekendienst werkt zonder instellen; verbind in plaats daarvan met een externe QTSP om gekwalificeerde handtekeningen te maken.",
     providerKind: "Provider",
     kinds: {
+      yivi: "Ingebouwde ondertekendienst (aanbevolen)",
       sample: "Voorbeeld-QTSP (zelf gehost)",
       custom: "Eigen CSC-endpoint",
     },
     sampleHint:
       "De voorbeeldprovider is de meegeleverde referentie-QTSP. Start hem met `docker compose --profile signer up`; hij draait op http://localhost:8085.",
+    builtInHint:
+      "De eigen ondertekendienst van de wallet, en de standaard. Ondertekenaars identificeren zich met de Yivi-app, met hun paspoort, identiteitskaart, verblijfsvergunning of geregistreerde persoonsgegevens (BRP), en ondertekenen met een geavanceerde elektronische handtekening. Er valt niets in te stellen.",
+    builtInUnavailable:
+      "Deze omgeving draait de ingebouwde ondertekendienst niet. Kies een andere provider.",
     baseUrl: "CSC-basis-URL",
     baseUrlPlaceholder: "https://qtsp.example.org",
     clientId: "OAuth-client-ID",
@@ -4034,6 +4129,22 @@ export const nl: Translation<typeof en> = {
       organizationsHint: "Totaal in deze deployment",
     },
     viewAll: "Alle organisaties bekijken",
+  },
+  testMode: {
+    banner:
+      "Testmodus: identiteitscontroles in deze organisatie zijn testsessies, gescheiden van de echte.",
+    label: "Test",
+    live: "Live",
+    hostedNotice: "Testsessie: {{organization}} test deze controle.",
+    column: "Modus",
+    switchToTest: "Naar testmodus",
+    switchToLive: "Live zetten",
+    confirmTestTitle: "{{name}} in testmodus zetten?",
+    confirmTestMessage:
+      "Nieuwe identiteitscontroles worden testsessies. De echte sessies zijn verborgen tot de organisatie weer live is; er wordt niets verwijderd.",
+    confirmLiveTitle: "{{name}} live zetten?",
+    confirmLiveMessage:
+      "Nieuwe identiteitscontroles zijn weer echt. De testsessies worden verborgen en komen terug als de organisatie weer in testmodus gaat; de bewaartermijn verwijdert ze nog steeds op tijd.",
   },
   allOrganizations: {
     title: "Organisaties",
@@ -4473,6 +4584,9 @@ export const nl: Translation<typeof en> = {
         attributes: "Attributen",
         noAttributes: "Deze credential geeft geen attributen vrij.",
         doesNotExpire: "Verloopt niet",
+        rulebookMatch: "Voldoet aan het WE BUILD-rulebook {{rulebook}}.",
+        rulebookMismatch:
+          "Voldoet niet aan het WE BUILD-rulebook {{rulebook}}. Andere WE BUILD-wallets kunnen hem weigeren.",
       },
     },
     schemas: {
@@ -4480,6 +4594,20 @@ export const nl: Translation<typeof en> = {
       newAction: "Nieuw schema",
       delete: "Schema verwijderen",
       confirmDelete: "Schema “{{name}}” verwijderen?",
+    },
+    rulebooks: {
+      openAction: "Importeren uit WE BUILD",
+      title: "Een WE BUILD-rulebook importeren",
+      intro:
+        "Een rulebook-schema volgt het WE BUILD-attestatierulebook precies. Type en attributen liggen vast, en elke uitgegeven credential wordt tegen het rulebook gecontroleerd.",
+      import: "Importeren",
+      imported: "Geïmporteerd",
+      importError: "Het rulebook importeren mislukt: {{message}}",
+      aboutOrganization: "Over een organisatie",
+      aboutPerson: "Over een persoon",
+      attributeCount_one: "{{count}} attribuut",
+      attributeCount_other: "{{count}} attributen",
+      tag: "WE BUILD",
     },
     keys: {
       empty: "Nog geen sleutels.",
@@ -4528,6 +4656,8 @@ export const nl: Translation<typeof en> = {
       status: "Status",
       qualified: "Gekwalificeerd credential",
       attributes: "Attributen",
+      rulebookFixed:
+        "WE BUILD legt de attributen en het onderwerp van dit schema vast. Die zijn hier niet te wijzigen.",
       addAttribute: "Attribuut toevoegen",
       attributesRequired: "Voeg minstens één attribuut toe.",
       attrKey: "Sleutel",
@@ -4636,6 +4766,15 @@ export const nl: Translation<typeof en> = {
       unknownAttribute:
         "Een van de attributen hoort niet bij het schema van dit sjabloon.",
       missingAttribute: "Een verplicht attribuut ontbreekt.",
+      invalidClaims: "De claims voldoen niet aan het rulebook. {{message}}",
+      rulebookClaimsIntro:
+        "Dit sjabloon volgt een WE BUILD-rulebook. Bewerk de claims als JSON. Ze beginnen bij het voorbeeld uit het rulebook en worden bij het uitgeven tegen het rulebook gecontroleerd.",
+      rulebookClaimsLabel: "Claims (JSON)",
+      rulebookClaimsReset: "Opnieuw beginnen bij het voorbeeld",
+      claims: {
+        invalidJson: "Dit is geen geldige JSON.",
+        notAnObject: "De claims moeten een JSON-object zijn.",
+      },
     },
   },
   postguard: {

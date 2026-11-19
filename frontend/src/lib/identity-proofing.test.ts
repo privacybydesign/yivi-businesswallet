@@ -40,7 +40,6 @@ import {
   identityRequired,
   proofingRejectionReason,
   effectiveBranding,
-  appLook,
   dropsOwnBranding,
   hostedDraft,
   hostedDraftDirty,
@@ -66,6 +65,7 @@ import {
   sendableByMail,
   documentScanMessage,
   sessionStage,
+  sessionStep,
   sessionView,
   sendRequestFields,
   verifyStages,
@@ -1555,6 +1555,7 @@ describe("proofingErrorMessage", () => {
     [409, "employment_closed", "employmentClosed"],
     [409, "employment_not_asked", "employmentNotAsked"],
     [409, "no_employment_checker", "noEmploymentChecker"],
+    [409, "no_diploma_checker", "noDiplomaChecker"],
     [503, "seal_check_unavailable", "sealCheckUnavailable"],
   ] as const)("maps %i %s to its own copy", (status, code, key) => {
     const copy = t(`identityProofing.errors.${key}`);
@@ -2347,6 +2348,74 @@ describe("sessionStage", () => {
   it("runs the app's session otherwise", () => {
     expect(sessionStage(app)).toBe("session");
     expect(sessionStage({ ...app, method: "yivi_app" })).toBe("session");
+  });
+});
+
+describe("sessionStep", () => {
+  const running = { view: "running", status: "in_progress" } as const;
+
+  it("shows a step after the identity check before anything else", () => {
+    for (const view of ["address", "documents"] as const) {
+      expect(
+        sessionStep({
+          view,
+          status: "needs_review",
+          method: "pending",
+          scanning: true,
+        }),
+      ).toBe(view);
+    }
+  });
+
+  it("ends an expired session instead of showing an outcome", () => {
+    expect(
+      sessionStep({
+        view: "outcome",
+        status: "expired",
+        method: "idem_app",
+        scanning: false,
+      }),
+    ).toBe("ended");
+    expect(
+      sessionStep({
+        view: "expired",
+        status: "pending",
+        method: "pending",
+        scanning: false,
+      }),
+    ).toBe("ended");
+  });
+
+  it("shows the outcome of a settled session", () => {
+    expect(
+      sessionStep({
+        view: "outcome",
+        status: "approved",
+        method: "yivi_app",
+        scanning: false,
+      }),
+    ).toBe("outcome");
+  });
+
+  it("walks a running session: app choice, then its scan or its app", () => {
+    expect(
+      sessionStep({ ...running, method: "pending", scanning: false }),
+    ).toBe("method");
+    expect(
+      sessionStep({ ...running, method: "yivi_app", scanning: true }),
+    ).toBe("scan");
+    expect(sessionStep({ ...running, method: "browser", scanning: true })).toBe(
+      "scan",
+    );
+    expect(
+      sessionStep({ ...running, method: "browser", scanning: false }),
+    ).toBe("finishing");
+    expect(
+      sessionStep({ ...running, method: "idem_app", scanning: false }),
+    ).toBe("app");
+    expect(
+      sessionStep({ ...running, method: "yivi_app", scanning: false }),
+    ).toBe("app");
   });
 });
 
@@ -3194,20 +3263,11 @@ describe("effective branding", () => {
   const org: ProofingBranding = {
     displayName: "Acme",
     primaryColor: "#111111",
-    secondaryColor: "#222222",
-    textColor: "#333333",
-    surfaceColor: "#444444",
-    borderColor: "#555555",
-    linkColor: "#666666",
-    successColor: "#777777",
-    warningColor: "#888888",
-    errorColor: "#999999",
-    topbarColor: "#aaaaaa",
-    fontFamily: "Open Sans, sans-serif",
     supportContact: "help@acme.example",
     privacyUrl: "https://acme.example/privacy",
     logoUri: "/org-logo",
     hidePoweredBy: true,
+    showTheme: true,
   };
   const none: ProofingFlowBranding = {
     custom: true,
@@ -3254,78 +3314,6 @@ describe("effective branding", () => {
       ...org,
       primaryColor: "#abcdef",
     });
-  });
-});
-
-describe("app look", () => {
-  const bare: ProofingBranding = {
-    displayName: "",
-    primaryColor: "",
-    secondaryColor: "",
-    textColor: "",
-    surfaceColor: "",
-    borderColor: "",
-    linkColor: "",
-    successColor: "",
-    warningColor: "",
-    errorColor: "",
-    topbarColor: "",
-    fontFamily: "",
-    supportContact: "help@acme.example",
-    privacyUrl: "https://acme.example/privacy",
-    logoUri: "",
-    hidePoweredBy: false,
-  };
-  const theme = {
-    primaryColor: "#036bd2",
-    topbarColor: "#101e1e",
-    logoUri: "/theme-logo",
-  };
-
-  it("is the org's theme under the branding's name without a look of its own", () => {
-    expect(
-      appLook({ ...bare, displayName: "Acme Trips" }, theme, "Acme"),
-    ).toEqual({
-      name: "Acme Trips",
-      primaryColor: "#036bd2",
-      headerColor: "#101e1e",
-      logoUri: "/theme-logo",
-    });
-  });
-
-  it("takes the branding's logo over the theme's", () => {
-    expect(appLook({ ...bare, logoUri: "/flow-logo" }, theme, "Acme")).toEqual({
-      name: "Acme",
-      primaryColor: "#036bd2",
-      headerColor: "#101e1e",
-      logoUri: "/flow-logo",
-    });
-  });
-
-  it("is the branding alone once it has a colour or a font, the app's own for the rest", () => {
-    expect(
-      appLook({ ...bare, primaryColor: "#22337a" }, theme, "Acme"),
-    ).toEqual({
-      name: "Acme",
-      primaryColor: "#22337a",
-      headerColor: "",
-      logoUri: "",
-    });
-    expect(
-      appLook({ ...bare, fontFamily: "Inter, sans-serif" }, theme, "Acme")
-        .primaryColor,
-    ).toBe("");
-    expect(
-      appLook(
-        { ...bare, secondaryColor: "#112233", topbarColor: "#0a3d2e" },
-        theme,
-        "Acme",
-      ).headerColor,
-    ).toBe("#0a3d2e");
-  });
-
-  it("does not count the support contact or privacy link as a look", () => {
-    expect(appLook(bare, theme, "Acme").primaryColor).toBe("#036bd2");
   });
 });
 

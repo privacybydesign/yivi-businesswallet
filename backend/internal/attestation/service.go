@@ -7,11 +7,13 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/attestation/rulebook"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/eudiholder"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/openid4vciissuer"
@@ -24,6 +26,10 @@ const claimTokenBytes = 24
 // the bound is that a detached context cannot be cancelled by the acceptance that
 // just failed (see Service.releaseClaim).
 const releaseClaimTimeout = 5 * time.Second
+
+// listReconcileBudget bounds the issuer calls one Issued-tab load may spend, so a
+// slow issuer cannot keep the whole ledger from loading.
+const listReconcileBudget = 5 * time.Second
 
 // issuer is the hosted-issuer seam the service orchestrates (see
 // internal/openid4vciissuer). Accept the interface; the concrete client/stub is
@@ -52,6 +58,7 @@ type issuedStore interface {
 	MarkFailed(ctx context.Context, orgID, id uuid.UUID) error
 	MarkClaimed(ctx context.Context, orgID, id uuid.UUID, credentialUUID string) (Issued, error)
 	GetIssued(ctx context.Context, orgID, id uuid.UUID) (Issued, error)
+	ListIssued(ctx context.Context, orgID uuid.UUID) ([]Issued, error)
 	Revoke(ctx context.Context, orgID, id uuid.UUID) (Issued, error)
 	Cancel(ctx context.Context, orgID, id uuid.UUID) (Issued, error)
 	GetClaim(ctx context.Context, token string) (claimRow, error)
@@ -76,7 +83,7 @@ type offerStore interface {
 	ClaimOffer(ctx context.Context, orgID, id uuid.UUID) (CredentialOffer, error)
 	ReleaseOffer(ctx context.Context, orgID, id uuid.UUID) error
 	AcceptOffer(ctx context.Context, orgID, id uuid.UUID, in HeldInput) (HeldAttestation, error)
-	DeclineOffer(ctx context.Context, orgID, id uuid.UUID) error
+	DeclineOffer(ctx context.Context, orgID, id uuid.UUID) (CredentialOffer, error)
 }
 
 // holderEngine is the organization's holder-wallet engine seam the service
@@ -105,6 +112,8 @@ type emailNotifier interface {
 // not a claim link.
 type qerdsNotifier interface {
 	SendCredentialOffer(ctx context.Context, orgID uuid.UUID, toAddress, orgName, credentialName, offerURI string) error
+	// SendOfferDeclined tells the issuer at toAddress that its offer was declined.
+	SendOfferDeclined(ctx context.Context, orgID uuid.UUID, toAddress, credentialName, offerURI string) error
 }
 
 // Service coordinates issuance across the ledger store, the hosted issuer and the
@@ -166,7 +175,7 @@ func (s *Service) Issue(ctx context.Context, orgID uuid.UUID, issuedBy *uuid.UUI
 	if err := checkRecipientKind(detail.SubjectType, in.Recipient.Kind); err != nil {
 		return IssueResult{}, err
 	}
-	if err := validateAttributes(detail.SchemaAttributes, in.Attributes); err != nil {
+	if err := validateAttributes(detail, in.Attributes); err != nil {
 		return IssueResult{}, err
 	}
 
@@ -197,14 +206,15 @@ func (s *Service) Issue(ctx context.Context, orgID uuid.UUID, issuedBy *uuid.UUI
 		VCT:                detail.SchemaVCT,
 		DisplayName:        detail.Name,
 		IssuerName:         orgName,
-		Claims:             toClaims(in.Attributes),
+		Claims:             maps.Clone(in.Attributes),
 		ExpirationSeconds:  expirationSeconds,
 		// tx_code is a second factor only for the external-email path (a person
 		// keys the PIN in). Members redeem while authenticated; an organization
 		// redeems from its console over the authenticated QERDS channel — a
 		// tx_code there has no one to enter it and would block the accept (see
 		// .ai/features/oid4vci-over-qerds.md §4).
-		UseTxCode: in.Recipient.Kind == RecipientExternal,
+		UseTxCode:   in.Recipient.Kind == RecipientExternal,
+		AwaitRedeem: in.Recipient.Kind == RecipientOrganization,
 	})
 	if err != nil {
 		if failErr := s.store.MarkFailed(ctx, orgID, issued.ID); failErr != nil {
@@ -260,6 +270,44 @@ func (s *Service) Status(ctx context.Context, orgID, id uuid.UUID) (Issued, erro
 	}
 	if credentialUUID, ok := s.reconcile(ctx, s.instanceFor(ctx, orgID), issued.IssuanceID); ok {
 		return s.store.MarkClaimed(ctx, orgID, id, credentialUUID)
+	}
+	return issued, nil
+}
+
+// ListIssued returns the issuance ledger, first reconciling every open offer to an
+// organization with the issuer. An organization accepts an offer in its own
+// wallet, so only the issuer can tell this side that it was claimed.
+func (s *Service) ListIssued(ctx context.Context, orgID uuid.UUID) ([]Issued, error) {
+	issued, err := s.store.ListIssued(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
+	reconcileCtx, cancel := context.WithTimeout(ctx, listReconcileBudget)
+	defer cancel()
+	instance, resolved := "", false
+	for i, row := range issued {
+		if row.Status != StatusOffered || row.IssuanceID == "" || row.RecipientKind != RecipientOrganization {
+			continue
+		}
+		if reconcileCtx.Err() != nil {
+			break
+		}
+		if !resolved {
+			instance, resolved = s.instanceFor(ctx, orgID), true
+		}
+		credentialUUID, ok := s.reconcile(reconcileCtx, instance, row.IssuanceID)
+		if !ok {
+			continue
+		}
+		claimed, err := s.store.MarkClaimed(ctx, orgID, row.ID, credentialUUID)
+		if errors.Is(err, ErrIssuedNotFound) {
+			// Claimed, cancelled or revoked by a concurrent request since the read.
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		issued[i] = claimed
 	}
 	return issued, nil
 }
@@ -435,8 +483,23 @@ func (s *Service) releaseClaim(ctx context.Context, orgID, id uuid.UUID) {
 // DeclineOffer refuses a pending credential offer. Nothing is redeemed, so the
 // credential never reaches the wallet; the QERDS message and its evidence stay in
 // the inbox. Returns ErrOfferNotFound when the offer is absent or already decided.
+// The decline is told back to the issuer over QERDS; the issuer cannot learn it
+// any other way, since nothing is redeemed. A failed send is logged, not
+// returned: the decline itself is recorded and cannot be repeated.
 func (s *Service) DeclineOffer(ctx context.Context, orgID, id uuid.UUID) error {
-	return s.offers.DeclineOffer(ctx, orgID, id)
+	offer, err := s.offers.DeclineOffer(ctx, orgID, id)
+	if err != nil {
+		return err
+	}
+	if offer.SenderAddress == "" {
+		return nil
+	}
+	if err := s.qerds.SendOfferDeclined(ctx, orgID, offer.SenderAddress, offer.CredentialName, offer.Offer); err != nil {
+		slog.ErrorContext(ctx, "attestation: tell issuer of declined offer",
+			slog.String("offerId", offer.ID.String()), slog.String("to", offer.SenderAddress),
+			slog.String("error", err.Error()))
+	}
+	return nil
 }
 
 // HeldClaimsView is a held credential's index metadata plus its disclosed
@@ -466,6 +529,10 @@ type HeldClaimsView struct {
 	Revoked     bool       `json:"revoked"`
 	HeldChecks
 	Attributes []eudiholder.HeldAttribute `json:"attributes"`
+	// Rulebook is the WE BUILD rulebook the credential's vct belongs to, and
+	// RulebookViolations where its claims do not match that rulebook's schema.
+	Rulebook           string   `json:"rulebook,omitempty"`
+	RulebookViolations []string `json:"rulebookViolations,omitempty"`
 }
 
 // HeldChecks are what the wallet knows about a held credential's integrity:
@@ -533,20 +600,45 @@ func (s *Service) HeldClaims(ctx context.Context, orgID, id uuid.UUID, lang stri
 		return HeldClaimsView{}, fmt.Errorf("attestation: held validity %s from engine: %w", id, err)
 	}
 	validity := validities[held.CredentialRef]
+	rulebookID, violations, err := checkRulebook(held.VCT, cred.Attributes)
+	if err != nil {
+		return HeldClaimsView{}, fmt.Errorf("attestation: held claims %s rulebook check: %w", id, err)
+	}
 	return HeldClaimsView{
-		ID:          held.ID,
-		VCT:         held.VCT,
-		Issuer:      held.Issuer,
-		IssuerName:  issuerName,
-		DisplayName: cred.DisplayName,
-		LogoURI:     cred.LogoURI,
-		Source:      held.Source,
-		ReceivedAt:  held.ReceivedAt,
-		ExpiresAt:   validity.ExpiresAt,
-		Revoked:     validity.Revoked,
-		HeldChecks:  heldChecks(validity),
-		Attributes:  cred.Attributes,
+		Rulebook:           rulebookID,
+		RulebookViolations: violations,
+		ID:                 held.ID,
+		VCT:                held.VCT,
+		Issuer:             held.Issuer,
+		IssuerName:         issuerName,
+		DisplayName:        cred.DisplayName,
+		LogoURI:            cred.LogoURI,
+		Source:             held.Source,
+		ReceivedAt:         held.ReceivedAt,
+		ExpiresAt:          validity.ExpiresAt,
+		Revoked:            validity.Revoked,
+		HeldChecks:         heldChecks(validity),
+		Attributes:         cred.Attributes,
 	}, nil
+}
+
+// checkRulebook validates a held credential's claims against the WE BUILD rulebook
+// its vct belongs to. It returns no rulebook for any other vct.
+func checkRulebook(vct string, attrs []eudiholder.HeldAttribute) (string, []string, error) {
+	rb, ok := rulebook.ForVCT(vct)
+	if !ok {
+		return "", nil, nil
+	}
+	claims := make(map[string]any, len(attrs))
+	for _, a := range attrs {
+		claims[a.Key] = a.Value
+	}
+	err := rb.ValidateClaims(claims)
+	var ve *rulebook.ValidationError
+	if errors.As(err, &ve) {
+		return rb.ID, ve.Violations, nil
+	}
+	return rb.ID, nil, err
 }
 
 // ListHeld returns an organization's active held credentials enriched with each
@@ -634,32 +726,36 @@ func resolveDelivery(subjectType, method string) string {
 	return DeliveryEmail
 }
 
-// validateAttributes enforces the schema allow-list: every provided key must be
-// declared, and every required attribute must be present and non-empty.
-func validateAttributes(allowed []AttributeDef, provided map[string]string) error {
-	byKey := make(map[string]AttributeDef, len(allowed))
-	for _, a := range allowed {
+// validateAttributes checks the values a template issues: a rulebook schema's
+// against the rulebook's JSON schema (rulebook.ErrInvalidClaims), an
+// organization-defined schema's against its allow-list, where every declared key
+// may be given as a string and every required one must be non-empty.
+func validateAttributes(detail TemplateDetail, provided map[string]any) error {
+	if detail.SchemaRulebook != "" {
+		rb, ok := rulebook.Get(detail.SchemaRulebook)
+		if !ok {
+			return fmt.Errorf("%w: %q", ErrUnknownRulebook, detail.SchemaRulebook)
+		}
+		return rb.ValidateClaims(provided)
+	}
+	byKey := make(map[string]AttributeDef, len(detail.SchemaAttributes))
+	for _, a := range detail.SchemaAttributes {
 		byKey[a.Key] = a
 	}
-	for key := range provided {
+	for key, value := range provided {
 		if _, ok := byKey[key]; !ok {
 			return fmt.Errorf("%w: %q", ErrUnknownAttribute, key)
 		}
+		if _, ok := value.(string); !ok {
+			return fmt.Errorf("%w: %q", ErrInvalidAttribute, key)
+		}
 	}
-	for _, a := range allowed {
-		if a.Required && provided[a.Key] == "" {
+	for _, a := range detail.SchemaAttributes {
+		if v, _ := provided[a.Key].(string); a.Required && v == "" {
 			return fmt.Errorf("%w: %q", ErrMissingAttribute, a.Key)
 		}
 	}
 	return nil
-}
-
-func toClaims(attrs map[string]string) map[string]any {
-	out := make(map[string]any, len(attrs))
-	for k, v := range attrs {
-		out[k] = v
-	}
-	return out
 }
 
 func newClaimToken() (string, error) {

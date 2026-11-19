@@ -181,3 +181,13 @@ func TestHideHeldHistoryDetailKeepsStatusChanges(t *testing.T) {
 		t.Errorf("status change = %+v, want it whole", changed)
 	}
 }
+
+func TestCreateSchemaRefusesARulebookType(t *testing.T) {
+	body := `{"vct":"uri:eu.eudi.vat.2","displayName":"Fake VAT","credentialConfigId":"cfg",
+		"subjectType":"organization","attributes":[{"key":"vat_id","label":"VAT ID","type":"string"}]}`
+	r := httptest.NewRequest("POST", "/orgs/acme/attestations/schemas", strings.NewReader(body))
+	err := (&Handler{}).createSchema(httptest.NewRecorder(), r)
+	if code := apiErrorCode(t, err); code != "vct_rulebook" {
+		t.Fatalf("expected vct_rulebook, got %q", code)
+	}
+}

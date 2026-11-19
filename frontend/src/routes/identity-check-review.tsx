@@ -4,10 +4,14 @@ import * as React from "react";
 import { useMeQuery } from "../api/auth.queries";
 import { useOrganizationQuery } from "../api/organization.queries";
 import {
-  useDecideReviewMutation,
-  useProofingRequestResultQuery,
+  useDecideReviewFor,
+  useReviewResultQuery,
 } from "../api/identity-proofing.queries";
-import type { ProofingRequest, ProofingResult } from "../api/identity-proofing";
+import type {
+  ProofingRequest,
+  ProofingResult,
+  ReviewTarget,
+} from "../api/identity-proofing";
 import { usePercentFormatter } from "../lib/format-percent";
 import { useWhenFormatter } from "../lib/format-when";
 import {
@@ -45,6 +49,7 @@ import { IdentityPhotos } from "./proofing-people";
 import {
   BackToReviews,
   ClosedNote,
+  ReviewProgress,
   SessionDecisions,
   REVIEW_ERROR,
   REVIEW_FIELD_LABEL,
@@ -71,10 +76,10 @@ const SUBMIT_KEYS = {
 // An identity check that waits for a person: why, what the engine checked by
 // itself, what the chip holds, and the decision.
 export function IdentityCheckReview({
-  slug,
+  target,
   request,
 }: Readonly<{
-  slug: string;
+  target: ReviewTarget;
   request: ProofingRequest;
 }>): React.JSX.Element {
   const { t } = useTranslation();
@@ -84,13 +89,15 @@ export function IdentityCheckReview({
   // A check the reader sent or that is about them is another reviewer's.
   const own = ownReview(request, me.data);
   // Once decided, the result and photos are an admin's: the review is over.
-  const isAdmin = useOrganizationQuery(slug).data?.role === "admin";
+  const isAdmin =
+    useOrganizationQuery(target.kind === "org" ? target.slug : "").data
+      ?.role === "admin";
   const readable =
     request.purgedAt === undefined &&
     (waiting ||
       (isAdmin &&
         (request.status === "approved" || request.status === "rejected")));
-  const result = useProofingRequestResultQuery(slug, request.id, readable);
+  const result = useReviewResultQuery(target, request.id, readable);
   const subject = requestSubject(request);
   const subtitle = [
     subject.name,
@@ -112,6 +119,7 @@ export function IdentityCheckReview({
         subtitle={subtitle}
       />
       <div className="flex flex-wrap items-start gap-6 p-4 sm:p-8">
+        <ReviewProgress request={request} className="basis-full" />
         <div className="flex min-w-0 flex-[1_1_34rem] flex-col gap-6">
           {waiting && <WhyItWaits reason={checkReviewReason(request)} />}
           {/* Neither approved nor rejected: no decision to list below. */}
@@ -128,9 +136,13 @@ export function IdentityCheckReview({
         </div>
         {waiting &&
           (own ? (
-            <OwnReviewNote slug={slug} own={own} />
+            <OwnReviewNote target={target} own={own} />
           ) : (
-            <CheckDecision slug={slug} request={request} name={subject.name} />
+            <CheckDecision
+              target={target}
+              request={request}
+              name={subject.name}
+            />
           ))}
       </div>
     </>
@@ -188,7 +200,7 @@ function WhyItWaits({
   );
 }
 
-type Result = ReturnType<typeof useProofingRequestResultQuery>;
+type Result = ReturnType<typeof useReviewResultQuery>;
 
 // The rows of a section that reads the result, or why they are not there.
 function ResultState({
@@ -329,10 +341,10 @@ function ChipData({
 
 // In place of the decision on a check the reader may not decide.
 function OwnReviewNote({
-  slug,
+  target,
   own,
 }: Readonly<{
-  slug: string;
+  target: ReviewTarget;
   own: OwnReview;
 }>): React.JSX.Element {
   const { t } = useTranslation();
@@ -344,24 +356,24 @@ function OwnReviewNote({
       <output className="block text-[13.5px]">
         {t(`identityProofing.reviews.check.own.${own}`)}
       </output>
-      <BackToReviews to={reviewPath(slug)} />
+      {target.kind === "org" && <BackToReviews to={reviewPath(target.slug)} />}
     </div>
   );
 }
 
 // Approve, or reject with what is wrong, and always a reason the audit log keeps.
 function CheckDecision({
-  slug,
+  target,
   request,
   name,
 }: Readonly<{
-  slug: string;
+  target: ReviewTarget;
   request: ProofingRequest;
   name: string;
 }>): React.JSX.Element {
   const { t } = useTranslation();
-  const afterDecision = useAfterDecision(slug);
-  const decide = useDecideReviewMutation(slug, request.id);
+  const afterDecision = useAfterDecision(target);
+  const decide = useDecideReviewFor(target, request.id);
   const [draft, setDraft] = useState<CheckDecisionDraft>({
     choice: undefined,
     rejectReason: DEFAULT_REJECT_REASON,
@@ -496,7 +508,7 @@ function CheckDecision({
       <Button type="submit" size="lg" loading={decide.isPending}>
         {t(`identityProofing.reviews.check.decision.${submitKey}`)}
       </Button>
-      <BackToReviews to={reviewPath(slug)} />
+      {target.kind === "org" && <BackToReviews to={reviewPath(target.slug)} />}
     </form>
   );
 }

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // fakeSMTP is a minimal SMTP server: enough of the protocol for one message, and
@@ -180,5 +181,49 @@ func TestSendRefusesAnUnusableConfigBeforeDialing(t *testing.T) {
 	}
 	if server.sawCommand("EHLO") {
 		t.Error("the transport dialed before validating the config")
+	}
+}
+
+// A server that accepts the connection and then says nothing must not hold the
+// caller: the send gives up at its deadline.
+func TestSendGivesUpOnASilentServer(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+	accepted := make(chan net.Conn, 1)
+	go func() {
+		if conn, err := listener.Accept(); err == nil {
+			accepted <- conn
+		}
+	}()
+	t.Cleanup(func() {
+		select {
+		case conn := <-accepted:
+			_ = conn.Close()
+		default:
+		}
+	})
+	host, portText, err := net.SplitHostPort(listener.Addr().String())
+	if err != nil {
+		t.Fatalf("split address: %v", err)
+	}
+	port, err := strconv.Atoi(portText)
+	if err != nil {
+		t.Fatalf("port: %v", err)
+	}
+
+	const timeout = 200 * time.Millisecond
+	started := time.Now()
+	err = SMTPSender{Timeout: timeout}.Send(Config{
+		Host: host, Port: port,
+		FromName: "Acme BV", FromAddress: "no-reply@acme.example",
+	}, Message{To: "person@example.org", Subject: "Hello", TextBody: "plain body"})
+	if err == nil {
+		t.Fatal("Send to a silent server succeeded")
+	}
+	if waited := time.Since(started); waited > 20*timeout {
+		t.Fatalf("Send took %s, want it to stop near its %s deadline", waited, timeout)
 	}
 }

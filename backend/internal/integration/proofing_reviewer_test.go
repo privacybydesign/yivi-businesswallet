@@ -415,6 +415,15 @@ func TestProofingAddressReviewFlow(t *testing.T) {
 		t.Errorf("a member without the right deciding an address = %d, want 403", resp.StatusCode)
 	}
 	_ = resp.Body.Close()
+	// Their page asks for the counts all the same: nothing waits for them, and
+	// the address that does wait is not among what they are told.
+	noRight := decodeJSON[struct {
+		Counts   map[string]int `json:"counts"`
+		Sessions int            `json:"sessions"`
+	}](t, env.do(http.MethodGet, "/api/v1/orgs/acme/identity-proofing/review-items/counts", nil))
+	if noRight.Sessions != 0 || noRight.Counts["address"] != 0 || len(noRight.Counts) != 5 {
+		t.Errorf("counts without the right = %+v, want five kinds at 0", noRight)
+	}
 
 	env.loginAs("admin@acme.test")
 	resp = env.putJSON(reviewRightPath(member), map[string]any{"canReview": true})

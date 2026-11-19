@@ -11,6 +11,7 @@ import (
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/database"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/lifecycle"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/registryprovider"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/testdb"
@@ -81,6 +82,9 @@ func TestRegisterOrganization(t *testing.T) {
 	}
 	if org.Slug != slug || org.Name != att.LegalName || org.KVKNumber != stubKVK {
 		t.Fatalf("org = %q/%q/%q, want %q/%q/%q", org.Slug, org.Name, org.KVKNumber, slug, att.LegalName, stubKVK)
+	}
+	if !org.TestMode {
+		t.Error("a registered org starts live, want test mode")
 	}
 	if org.Status != organization.StatusActive {
 		t.Fatalf("status = %q, want active", org.Status)
@@ -239,5 +243,13 @@ func TestSetStatus(t *testing.T) {
 	}
 	if suspended.Status != organization.StatusSuspended {
 		t.Fatalf("status = %q, want suspended", suspended.Status)
+	}
+
+	if _, err := store.SetStatus(ctx, org.ID, organization.StatusRevoked); err != nil {
+		t.Fatalf("revoke a suspended wallet: %v", err)
+	}
+	// Revoked is final: suspending it must not bring it back.
+	if _, err := store.SetStatus(ctx, org.ID, organization.StatusSuspended); !errors.Is(err, lifecycle.ErrTransition) {
+		t.Fatalf("suspend a revoked wallet: err = %v, want lifecycle.ErrTransition", err)
 	}
 }

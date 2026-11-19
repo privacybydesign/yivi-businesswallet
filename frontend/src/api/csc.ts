@@ -1,14 +1,20 @@
 import { z } from "zod";
 import { request } from "./http";
 
-// Per-organization connection settings for a CSC API v2 signing provider (a
-// remote QTSP the business wallet drives to create qualified signatures). The
-// client secret is write-only: it is never returned, only whether one is stored
-// (`hasClientSecret`).
+// Per-organization settings for the CSC API v2 signing provider the business
+// wallet drives to sign documents: the wallet's own built-in signing service
+// (the default, where the signer identifies with the Yivi app), or a remote
+// QTSP. A remote provider's client secret is write-only: it is never returned,
+// only whether one is stored (`hasClientSecret`).
 //
 // `providerKind` is a plain string, not a zod enum, so a new backend kind needs no
 // frontend change. `providerKinds` lists the kinds this deployment offers plus the
 // base URL to pre-fill when each is chosen.
+
+// The built-in signing service. It has nothing to configure: the backend
+// stores no base URL, client id or client secret for it.
+export const CSC_PROVIDER_KIND_BUILT_IN = "yivi";
+
 export const cscProviderKindSchema = z.object({
   id: z.string(),
   defaultBaseUrl: z.string(),
@@ -43,7 +49,8 @@ export interface CscSettingsInput {
   baseUrl: string;
   clientId: string;
   // null keeps the stored client secret, a value replaces it, "" clears it.
-  clientSecret: string | null;
+  // Left out for the built-in service, which has none.
+  clientSecret?: string | null;
 }
 
 function base(slug: string): string {
@@ -74,7 +81,7 @@ export function updateCscSettings(
 }
 
 // Probes the stored endpoint's unauthenticated /csc/v2/info so an admin can see
-// the connection reaches the QTSP they meant before relying on it.
+// the connection reaches the provider they meant before relying on it.
 export function testCscConnection(
   slug: string,
   signal?: AbortSignal,

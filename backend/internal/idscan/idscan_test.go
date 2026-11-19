@@ -71,7 +71,7 @@ func TestCreateTransaction(t *testing.T) {
 			}))
 			t.Cleanup(srv.Close)
 
-			trx, err := New(testKeyID, testSecret, srv.URL+"/", srv.Client()).CreateTransaction(context.Background(), LocaleDutch, ScanOptions{RedactBSN: redact, MinimumAge: testMinimumAge})
+			trx, err := New(testKeyID, testSecret, srv.URL+"/", srv.Client()).CreateTransaction(context.Background(), LocaleDutch, ScanOptions{RedactBSN: redact, RedactPortrait: redact, MinimumAge: testMinimumAge})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -92,7 +92,7 @@ func TestCreateTransaction(t *testing.T) {
 			// The BSN is printed as the personal number, and on an older
 			// Dutch document in the MRZ too. The signature goes with it.
 			redacted, has := scan["redactFields"].([]any)
-			if has != redact || has && !slices.Equal(redacted, []any{fieldPersonalNumber, fieldMRZ, fieldSignature}) {
+			if has != redact || has && !slices.Equal(redacted, []any{fieldPersonalNumber, fieldMRZ, fieldSignature, fieldPortrait, fieldGhostPortrait}) {
 				t.Errorf("documentScan = %v, want redactFields %v", scan, redact)
 			}
 			// ID Scan enforces the flow's minimum age. allowedExpiration and

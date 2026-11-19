@@ -50,7 +50,7 @@ func newSettingsResponse(slug string, s Settings) settingsResponse {
 		SessionTTLSeconds:      int(s.Session.SessionTTL.Seconds()),
 		DataRetentionDays:      s.Session.DataRetentionDays,
 		ErasureHandling:        s.Session.ErasureHandling,
-		Branding:               newBrandingResponse(slug, s),
+		Branding:               newBrandingResponse(s),
 		LegalRetention:         newLegalRetentionBody(s.LegalRetention),
 		AllowedRedirectOrigins: append([]string{}, s.RedirectOrigins...),
 	}

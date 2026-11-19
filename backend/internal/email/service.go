@@ -267,8 +267,7 @@ type ProofingMail struct {
 }
 
 // ProofingBrand is the proofing mail's look: its primary colour ("" is the
-// org's) and its logo (none shows its name as the wordmark, never the org's
-// theme logo under another display name).
+// org's) and its logo (none is the org's, as the Idem app and hosted page show).
 type ProofingBrand struct {
 	PrimaryColor string
 	Logo         Logo
@@ -278,7 +277,75 @@ type ProofingBrand struct {
 // and a button for the same vcmrtd deep link. Returns ErrNotConfigured when the
 // org has no usable SMTP settings.
 func (s *Service) SendIdentityProofingRequested(ctx context.Context, orgID uuid.UUID, m ProofingMail) error {
-	vars := map[string]string{
+	cfg, msg, err := s.composeBranded(ctx, orgID, KindIdentityProofingRequested, s.locale(m.Locale), proofingVars(m), m.Brand)
+	if err != nil {
+		return err
+	}
+	msg.To = m.To
+	return s.sender.Send(cfg, msg)
+}
+
+// PreviewTheme is an unsaved org theme a preview renders with in place of the
+// saved one: its seeds and its logo (none shows the name as the wordmark), or
+// with KeepLogo the saved logo.
+type PreviewTheme struct {
+	Seeds    Seeds
+	Logo     Logo
+	KeepLogo bool
+}
+
+// PreviewIdentityProofingRequested renders m as SendIdentityProofingRequested
+// would send it, with the kind's sample deep link and validity, and its images
+// inline for a sandboxed frame; with theme, in that theme instead of the saved
+// one. Needs no SMTP configuration.
+func (s *Service) PreviewIdentityProofingRequested(ctx context.Context, orgID uuid.UUID, m ProofingMail, theme *PreviewTheme) (Body, error) {
+	locale := s.locale(m.Locale)
+	vars, _ := SampleVariables(KindIdentityProofingRequested, locale, m.OrgName)
+	vars[varRequesterName] = m.RequesterName
+	vars[varSupportContact] = m.SupportContact
+	vars[varPrivacyURL] = m.PrivacyURL
+	tpl, err := s.templateFor(ctx, orgID, KindIdentityProofingRequested, locale)
+	if err != nil {
+		return Body{}, err
+	}
+	var brand Brand
+	switch {
+	case theme == nil && m.Brand == nil:
+		brand = s.brandWithLogo(ctx, orgID, tpl)
+	case theme == nil:
+		brand = s.proofingBrand(ctx, orgID, tpl, *m.Brand)
+	default:
+		draft := *theme
+		if draft.KeepLogo && templateHasLogoBlock(tpl) {
+			draft.Logo = s.logoFor(ctx, orgID)
+		}
+		brand = previewBrand(tpl, draft, m.Brand)
+	}
+	body, err := Render(KindIdentityProofingRequested, locale, tpl, brand, vars)
+	if err != nil {
+		return Body{}, fmt.Errorf("email: render proofing mail preview: %w", err)
+	}
+	return inlinePreviewLogo(body), nil
+}
+
+// previewBrand is proofingBrand over an unsaved theme.
+func previewBrand(tpl Template, theme PreviewTheme, proofing *ProofingBrand) Brand {
+	seeds := theme.Seeds
+	if proofing != nil && proofing.PrimaryColor != "" {
+		seeds.PrimaryColor = proofing.PrimaryColor
+	}
+	brand := resolveBrand(seeds)
+	if templateHasLogoBlock(tpl) {
+		brand.Logo = theme.Logo
+		if proofing != nil && proofing.Logo.present() {
+			brand.Logo = proofing.Logo
+		}
+	}
+	return brand
+}
+
+func proofingVars(m ProofingMail) map[string]string {
+	return map[string]string{
 		varOrgName:        m.OrgName,
 		varRequesterName:  m.RequesterName,
 		varProofingURL:    m.DeepLink,
@@ -286,12 +353,6 @@ func (s *Service) SendIdentityProofingRequested(ctx context.Context, orgID uuid.
 		varSupportContact: m.SupportContact,
 		varPrivacyURL:     m.PrivacyURL,
 	}
-	cfg, msg, err := s.composeBranded(ctx, orgID, KindIdentityProofingRequested, s.locale(m.Locale), vars, m.Brand)
-	if err != nil {
-		return err
-	}
-	msg.To = m.To
-	return s.sender.Send(cfg, msg)
 }
 
 // SendVogReminder tells a member their VOG is expiring soon, linking into the
@@ -506,8 +567,9 @@ func (s *Service) templateFor(ctx context.Context, orgID uuid.UUID, kind Kind, l
 	return tpl, nil
 }
 
-// proofingBrand is the org's palette with the proofing branding's primary
-// colour, and its logo (or the wordmark) when the layout has a logo block.
+// proofingBrand is the org's palette and logo with the proofing branding's
+// primary colour and logo over them, the logo only when the layout has a logo
+// block.
 func (s *Service) proofingBrand(ctx context.Context, orgID uuid.UUID, tpl Template, c ProofingBrand) Brand {
 	seeds := s.seedsFor(ctx, orgID)
 	if c.PrimaryColor != "" {
@@ -516,6 +578,9 @@ func (s *Service) proofingBrand(ctx context.Context, orgID uuid.UUID, tpl Templa
 	brand := resolveBrand(seeds)
 	if templateHasLogoBlock(tpl) {
 		brand.Logo = c.Logo
+		if !brand.Logo.present() {
+			brand.Logo = s.logoFor(ctx, orgID)
+		}
 	}
 	return brand
 }
