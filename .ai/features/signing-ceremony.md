@@ -30,6 +30,8 @@ a ceremony. So signing is split:
 1. **Link credential** (once, `POST /orgs/{slug}/signing/credential/link`): a `scope=service`
    ceremony → `credentials/list` (auto-issues if none) → `credentials/info` → cache the
    credential id + certificate + chain per (org, user) in `signing_credentials`.
+   The row records the provider it was linked at (`provider_base_url`): after the org
+   changes provider the old credential no longer counts and the signer links again.
 2. **Sign a document** (per doc, `POST /orgs/{slug}/signing/requests`): prepare the PDF against
    the cached cert to get the hash → `scope=credential` `authorize` binding that hash (SCAL2)
    → token → `signHash` → embed. One wallet scan per document.
