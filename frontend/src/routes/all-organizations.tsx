@@ -4,7 +4,9 @@ import { useTranslation } from "react-i18next";
 import {
   useDeleteOrganizationMutation,
   useOrganizationsQuery,
+  useSetTestModeMutation,
 } from "../api/organization.queries";
+import type { Organization } from "../api/organization";
 import {
   useProofingPausesQuery,
   useSetPlatformPauseMutation,
@@ -22,7 +24,7 @@ import {
 } from "../ui";
 import * as React from "react";
 
-const COLUMNS = 5;
+const COLUMNS = 6;
 
 export default function AllOrganizations(): React.JSX.Element {
   const { t } = useTranslation();
@@ -35,6 +37,7 @@ export default function AllOrganizations(): React.JSX.Element {
     [pauses.data],
   );
   const [query, setQuery] = useState("");
+  const [switching, setSwitching] = useState<Organization | null>(null);
 
   function handleDelete(
     event: React.MouseEvent,
@@ -102,6 +105,7 @@ export default function AllOrganizations(): React.JSX.Element {
                 <Table.HeaderCell>
                   {t("identityProofing.pause.platformColumn")}
                 </Table.HeaderCell>
+                <Table.HeaderCell>{t("testMode.column")}</Table.HeaderCell>
                 <Table.HeaderCell className="text-right">
                   {t("allOrganizations.columnActions")}
                 </Table.HeaderCell>
@@ -155,6 +159,12 @@ export default function AllOrganizations(): React.JSX.Element {
                           failed={pauses.isError}
                         />
                       </Table.Cell>
+                      <Table.Cell>
+                        <TestModeCell
+                          org={org}
+                          onSwitch={() => setSwitching(org)}
+                        />
+                      </Table.Cell>
                       <Table.Cell className="text-right">
                         <Button
                           variant="dangerGhost"
@@ -171,6 +181,9 @@ export default function AllOrganizations(): React.JSX.Element {
               </Table.Body>
             </Table>
           </Card>
+        )}
+        {switching && (
+          <TestModeDialog org={switching} onClose={() => setSwitching(null)} />
         )}
       </div>
     </>
@@ -259,5 +272,69 @@ function ProofingPauseCell({
         />
       )}
     </div>
+  );
+}
+
+// Whether an org runs in test mode, and the platform admin's switch for it.
+function TestModeCell({
+  org,
+  onSwitch,
+}: Readonly<{ org: Organization; onSwitch: () => void }>): React.JSX.Element {
+  const { t } = useTranslation();
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      {org.testMode ? (
+        <Tag tone="amber">{t("testMode.label")}</Tag>
+      ) : (
+        <Tag tone="green">{t("testMode.live")}</Tag>
+      )}
+      <Button
+        size="sm"
+        variant="secondary"
+        onClick={(event) => {
+          // The row opens the org; this button must not.
+          event.stopPropagation();
+          onSwitch();
+        }}
+      >
+        {org.testMode ? t("testMode.switchToLive") : t("testMode.switchToTest")}
+      </Button>
+    </div>
+  );
+}
+
+// Confirms switching org's mode: its proofing lists change with it. Rendered
+// outside the table, so a click in it does not open the org's row.
+function TestModeDialog({
+  org,
+  onClose,
+}: Readonly<{ org: Organization; onClose: () => void }>): React.JSX.Element {
+  const { t } = useTranslation();
+  const set = useSetTestModeMutation();
+  const next = !org.testMode;
+  return (
+    <ConfirmDialog
+      title={
+        next
+          ? t("testMode.confirmTestTitle", { name: org.name })
+          : t("testMode.confirmLiveTitle", { name: org.name })
+      }
+      message={
+        next
+          ? t("testMode.confirmTestMessage")
+          : t("testMode.confirmLiveMessage")
+      }
+      confirmLabel={
+        next ? t("testMode.switchToTest") : t("testMode.switchToLive")
+      }
+      busy={set.isPending}
+      onConfirm={() =>
+        set.mutate({ id: org.id, testMode: next }, { onSuccess: onClose })
+      }
+      onClose={() => {
+        set.reset();
+        onClose();
+      }}
+    />
   );
 }

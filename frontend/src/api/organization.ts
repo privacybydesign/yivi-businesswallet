@@ -25,6 +25,9 @@ export const organizationSchema = z.object({
   // Only the list endpoints carry the org's theme logo path (absent when the org
   // has no logo, or on single-org endpoints), so the org switcher can show it.
   logoUri: z.string().optional(),
+  // A platform admin put the org in test mode: its identity proofing runs as
+  // test sessions, kept apart from its real ones.
+  testMode: z.boolean(),
 });
 
 export type Organization = z.infer<typeof organizationSchema>;
@@ -233,6 +236,23 @@ export function deleteOrganization(
     method: "DELETE",
     signal,
   });
+}
+
+// setOrganizationTestMode moves an org into or out of test mode (platform-admin only).
+export function setOrganizationTestMode(
+  id: string,
+  testMode: boolean,
+  signal?: AbortSignal,
+): Promise<Organization> {
+  return request(
+    `/api/v1/admin/organizations/${encodeURIComponent(id)}/test-mode`,
+    {
+      schema: organizationSchema,
+      method: "PUT",
+      body: { testMode },
+      signal,
+    },
+  );
 }
 
 export function getOrganization(
@@ -831,6 +851,8 @@ export const auditEventSchema = z.object({
   // Set for an ordinary member: actor, target id and metadata are withheld,
   // so who acted, on whom and what changed is visible to admins only.
   detailHidden: z.boolean().optional(),
+  // An event about a test proofing session.
+  test: z.boolean().optional(),
 });
 
 export type AuditEvent = z.infer<typeof auditEventSchema>;

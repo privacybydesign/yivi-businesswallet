@@ -17,7 +17,7 @@ import {
 } from "../lib/audit-event";
 import { fullName, personInitials } from "../lib/name";
 import { useWhenFormatter } from "../lib/format-when";
-import { Avatar, Button, Card, Icon, Table, TopBar } from "../ui";
+import { Avatar, Button, Card, Icon, Table, Tag, TopBar } from "../ui";
 import * as React from "react";
 
 const COLUMN_COUNT = 6;
@@ -229,7 +229,10 @@ function AuditRow({
           </div>
         </Table.Cell>
         <Table.Cell>
-          <span className="font-semibold">{action}</span>
+          <span className="flex items-center gap-2">
+            <span className="font-semibold">{action}</span>
+            {event.test && <Tag tone="amber">{t("testMode.label")}</Tag>}
+          </span>
         </Table.Cell>
         <Table.Cell className="text-ink-soft">
           {auditTargetLabel(event.targetType, t)}

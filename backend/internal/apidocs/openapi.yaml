@@ -441,6 +441,56 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/v1/admin/organizations/{id}/test-mode:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: Organisation id.
+    put:
+      tags: [platform-admin]
+      summary: Put an organisation in or out of test mode (platform admin)
+      description: >-
+        Requires the platform administrator role. Body `{testMode}`. An organisation in test mode
+        works as any other, but each identity proofing session it makes is a test session
+        (`test: true` on the session, its webhooks and its hosted page), and every answer to its
+        API keys carries the header `Test-Mode: true`. It sees only the
+        sessions of the mode it is in: its real ones are hidden while in test mode, its test ones
+        once live again; nothing is deleted, and retention still applies. The organisation's own
+        admins cannot change it. Audited `organization.test_mode_changed` when it changes.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                testMode:
+                  type: boolean
+              required: [testMode]
+            examples:
+              test:
+                summary: Test mode on
+                value:
+                  testMode: true
+      responses:
+        '200':
+          description: The organisation after the change, with `testMode`.
+          content:
+            application/json:
+              schema:
+                description: The organisation.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/v1/admin/identity-reviews:
     get:
       tags: [platform-admin]
@@ -15828,6 +15878,9 @@ components:
         expectedSubject:
           type: boolean
           description: Created for one known person (`name` with `birthDate`).
+        test:
+          type: boolean
+          description: Only present, as true, on a session made while the organisation was in test mode.
         flowKind:
           type: string
           enum: [identity, data_access, data_erasure]
@@ -16168,6 +16221,9 @@ components:
             expectedSubject:
               type: boolean
               description: Only present, as true, on a session created for one person.
+            test:
+              type: boolean
+              description: Only present, as true, on a session made while the organisation was in test mode.
             cancelledBy:
               type: string
               enum: [api_key, member, subject]
@@ -17207,6 +17263,9 @@ components:
           description: The document photo, taken in the browser through `document-scan/start`; absent when the flow takes none.
         expectedSubject:
           type: boolean
+        test:
+          type: boolean
+          description: Only present, as true, on a request made while the organisation was in test mode.
         flowKind:
           type: string
           enum: [identity, data_access, data_erasure]
@@ -17435,6 +17494,9 @@ components:
                 type: string
                 nullable: true
                 description: A non-user actor, such as `api_key:<prefix>`.
+              test:
+                type: boolean
+                description: Only present, as true, on an event about a session made while the organisation was in test mode.
             required: [id, occurredAt, action, targetType, targetId, metadata, actor, actorLabel]
       required: [events]
     ProofingStats:
@@ -18091,6 +18153,9 @@ components:
               items:
                 type: string
                 enum: [en, nl]
+            test:
+              type: boolean
+              description: Only present, as true, on a session of an organisation in test mode; the page labels it.
             organization:
               type: object
               properties:

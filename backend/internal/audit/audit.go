@@ -16,6 +16,8 @@ const (
 	OrganizationCreated = "organization.created"
 	OrganizationUpdated = "organization.updated"
 	OrganizationDeleted = "organization.deleted"
+	// OrganizationTestModeChanged is a platform admin moving an org into or out of test mode.
+	OrganizationTestModeChanged = "organization.test_mode_changed"
 
 	MembershipInvited        = "membership.invited"
 	MembershipInviteResent   = "membership.invite_resent"
@@ -420,10 +422,20 @@ func (DBRecorder) Record(ctx context.Context, q database.Querier, action string,
 		requestID = &id
 	}
 
+	// An event about a test proofing session is marked test, whatever recorded it.
+	var requestTarget *uuid.UUID
+	if target.Type == TargetIdentityProofingRequest {
+		if id, err := uuid.Parse(target.ID); err == nil {
+			requestTarget = &id
+		}
+	}
+
 	const insert = `INSERT INTO audit_events
-		(actor_user_id, organization_id, action, target_type, target_id, metadata, request_id, actor_label)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`
-	if _, err := q.Exec(ctx, insert, actorID, target.OrgID, action, target.Type, target.ID, meta, requestID, actorLabel); err != nil {
+		(actor_user_id, organization_id, action, target_type, target_id, metadata, request_id, actor_label, test)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8,
+			EXISTS (SELECT 1 FROM identity_proofing_requests r WHERE r.id = $9 AND r.test))`
+	if _, err := q.Exec(ctx, insert, actorID, target.OrgID, action, target.Type, target.ID, meta, requestID, actorLabel,
+		requestTarget); err != nil {
 		return fmt.Errorf("audit: record %s: %w", action, err)
 	}
 	return nil

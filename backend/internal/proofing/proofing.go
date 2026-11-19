@@ -317,6 +317,8 @@ type Request struct {
 	// Hosted is a request its subject opens from a link (ChannelHosted): its
 	// engine session is created only when the subject starts.
 	Hosted bool
+	// Test is a request made while its org was in test mode.
+	Test bool
 	// FlowKind is what the session is for: an identity check, or a person
 	// asking for their data (FlowDataAccess) or its erasure (FlowDataErasure),
 	// which goes to review once the person is proven (see data_request.go).

@@ -19,6 +19,7 @@ import {
   createDepartment,
   deleteDepartment,
   deleteOrganization,
+  setOrganizationTestMode,
   getIdentitySettings,
   getMemberAuditEvents,
   getMemberInsights,
@@ -195,6 +196,27 @@ export function useDeleteOrganizationMutation(): UseMutationResult<
     onSuccess: () => {
       toast.success(t("toasts.organizationDeleted"));
       void invalidateOrganizationLists(queryClient);
+    },
+  });
+}
+
+export function useSetTestModeMutation(): UseMutationResult<
+  Organization,
+  Error,
+  { id: string; testMode: boolean }
+> {
+  const queryClient = useQueryClient();
+  const { t } = useTranslation();
+  return useMutation({
+    mutationFn: ({ id, testMode }) => setOrganizationTestMode(id, testMode),
+    onSuccess: (org) => {
+      toast.success(
+        t(org.testMode ? "toasts.testModeOn" : "toasts.testModeOff", {
+          name: org.name,
+        }),
+      );
+      // Everything the org shows changes with its mode.
+      void queryClient.invalidateQueries();
     },
   });
 }

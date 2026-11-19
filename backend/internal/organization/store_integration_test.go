@@ -291,3 +291,35 @@ func TestStoreDeleteStripsProofingSubjects(t *testing.T) {
 		t.Errorf("event without its subject = %d, %v; want the event kept", kept, err)
 	}
 }
+
+// Test mode is audited only when it changes, and reads back on the org.
+func TestStoreSetTestMode(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	store := organization.NewStore(pool, audit.NewDBRecorder())
+	ctx := context.Background()
+	created := makeOrg(t, pool, "Acme", "acme")
+	if created.TestMode {
+		t.Fatal("a new org is in test mode")
+	}
+
+	for _, on := range []bool{true, true, false} {
+		org, err := store.SetTestMode(ctx, created.ID, on)
+		if err != nil || org.TestMode != on {
+			t.Fatalf("SetTestMode(%v) = %+v, %v", on, org, err)
+		}
+	}
+	if got, err := store.GetBySlug(ctx, "acme"); err != nil || got.TestMode {
+		t.Errorf("GetBySlug = %+v, %v; want live", got, err)
+	}
+	var n int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE action = $1 AND organization_id = $2`,
+		audit.OrganizationTestModeChanged, created.ID).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 2 {
+		t.Errorf("test mode audited %d times, want 2 (a repeat changes nothing)", n)
+	}
+	if _, err := store.SetTestMode(ctx, uuid.New(), true); !errors.Is(err, organization.ErrNotFound) {
+		t.Errorf("unknown org = %v, want ErrNotFound", err)
+	}
+}

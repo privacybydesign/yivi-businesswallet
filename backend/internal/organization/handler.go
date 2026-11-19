@@ -25,6 +25,7 @@ type repository interface {
 	GetBySlug(ctx context.Context, slug string) (Organization, error)
 	Update(ctx context.Context, id uuid.UUID, name string) (Organization, error)
 	Delete(ctx context.Context, id uuid.UUID) error
+	SetTestMode(ctx context.Context, id uuid.UUID, on bool) (Organization, error)
 	ListForUser(ctx context.Context, userID uuid.UUID) ([]Organization, error)
 	GetMembership(ctx context.Context, userID, orgID uuid.UUID) (Membership, error)
 	ResolveAuthority(ctx context.Context, orgID, userID uuid.UUID) (Authority, error)
@@ -156,6 +157,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("GET /organizations", platform(respond.HandlerFunc(h.list)))
 	mux.Handle("GET /organizations/{id}", platform(respond.HandlerFunc(h.get)))
 	mux.Handle("DELETE /organizations/{id}", platform(respond.HandlerFunc(h.delete)))
+	mux.Handle("PUT /admin/organizations/{id}/test-mode", platform(respond.HandlerFunc(h.setTestMode)))
 
 	mux.Handle("GET /admin/identity-reviews", platform(respond.HandlerFunc(h.listIdentityReviews)))
 	mux.Handle("POST /admin/identity-reviews/{id}/approve", platform(respond.HandlerFunc(h.approveIdentityReview)))
@@ -258,7 +260,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) error {
 func (h *Handler) get(w http.ResponseWriter, r *http.Request) error {
 	id, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
-		return badRequest("invalid_id", "invalid id")
+		return badRequest("invalid_id", msgInvalidID)
 	}
 
 	org, err := h.store.GetByID(r.Context(), id)
@@ -276,7 +278,7 @@ func (h *Handler) get(w http.ResponseWriter, r *http.Request) error {
 func (h *Handler) delete(w http.ResponseWriter, r *http.Request) error {
 	id, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
-		return badRequest("invalid_id", "invalid id")
+		return badRequest("invalid_id", msgInvalidID)
 	}
 
 	if err := h.store.Delete(r.Context(), id); errors.Is(err, ErrNotFound) {
@@ -286,6 +288,36 @@ func (h *Handler) delete(w http.ResponseWriter, r *http.Request) error {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+	return nil
+}
+
+// msgInvalidID answers an organization id that is not a UUID.
+const msgInvalidID = "invalid id"
+
+type testModeRequest struct {
+	TestMode *bool `json:"testMode"`
+}
+
+func (h *Handler) setTestMode(w http.ResponseWriter, r *http.Request) error {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		return badRequest("invalid_id", msgInvalidID)
+	}
+	var req testModeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		return badRequest("invalid_body", "invalid request body")
+	}
+	if req.TestMode == nil {
+		return badRequest("invalid_input", "testMode is required")
+	}
+	org, err := h.store.SetTestMode(r.Context(), id, *req.TestMode)
+	if errors.Is(err, ErrNotFound) {
+		return &respond.APIError{Status: http.StatusNotFound, Code: "org_not_found", Message: "organization not found"}
+	}
+	if err != nil {
+		return fmt.Errorf("setting test mode of organization %s: %w", id, err)
+	}
+	respond.JSON(w, r, http.StatusOK, org)
 	return nil
 }
 

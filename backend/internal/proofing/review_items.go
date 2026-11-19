@@ -346,7 +346,7 @@ func (s *RequestStore) ReviewCounts(ctx context.Context, orgID uuid.UUID) (Revie
 			SELECT `+sessionReviewWaits+` AS own, `+sessionReviewKindColumn+` AS own_kind,
 				`+address+` AS address, `+employment+` AS employment, `+diplomas+` AS diplomas
 			FROM identity_proofing_requests r
-			WHERE r.organization_id = $1 AND r.purged_at IS NULL
+			WHERE r.organization_id = $1 AND r.purged_at IS NULL AND `+inOrgMode+`
 		)
 		SELECT count(*) FILTER (WHERE own AND own_kind = $4), count(*) FILTER (WHERE own AND own_kind = $5),
 			count(*) FILTER (WHERE address), count(*) FILTER (WHERE employment), count(*) FILTER (WHERE diplomas),
