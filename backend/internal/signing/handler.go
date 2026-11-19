@@ -161,29 +161,54 @@ func (h *Handler) createRequest(w http.ResponseWriter, r *http.Request) error {
 	org := organization.OrgFromContext(r.Context())
 	u := auth.UserFromContext(r.Context())
 
+	upload, err := parseUpload(w, r)
+	if err != nil {
+		return err
+	}
+	id, err := h.svc.CreateRequest(r.Context(), org.ID, u.ID, org.Slug, upload.filename, upload.pdf, upload.signers, upload.mode, upload.recipient)
+	if err := h.mapStartError(err); err != nil {
+		return err
+	}
+	respond.JSON(w, r, http.StatusCreated, map[string]string{"id": id.String()})
+	return nil
+}
+
+// upload is a new request as its multipart form carries it: the document and who
+// signs it, how, and where the result goes.
+type upload struct {
+	filename  string
+	pdf       []byte
+	signers   []SignerInput
+	mode      string
+	recipient RecipientInput
+}
+
+// parseUpload reads the multipart form a request is created from. The wallet's
+// own create and the API's take the same form.
+func parseUpload(w http.ResponseWriter, r *http.Request) (upload, error) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxUploadBytes+bodySlack)
 	if err := r.ParseMultipartForm(multipartMemory); err != nil {
 		if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
-			return documentTooLarge()
+			return upload{}, documentTooLarge()
 		}
-		return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_upload", Message: "could not read the uploaded document"}
+		return upload{}, &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_upload", Message: "could not read the uploaded document"}
 	}
 	file, header, err := r.FormFile("document")
 	if err != nil {
-		return &respond.APIError{Status: http.StatusBadRequest, Code: "missing_document", Message: "a PDF document is required in the 'document' field"}
+		return upload{}, &respond.APIError{Status: http.StatusBadRequest, Code: "missing_document", Message: "a PDF document is required in the 'document' field"}
 	}
 	defer func() { _ = file.Close() }()
 	pdf, err := io.ReadAll(io.LimitReader(file, maxUploadBytes+1))
 	if err != nil {
-		return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_upload", Message: "could not read the uploaded document"}
+		return upload{}, &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_upload", Message: "could not read the uploaded document"}
 	}
 	if len(pdf) > maxUploadBytes {
-		return documentTooLarge()
+		return upload{}, documentTooLarge()
 	}
 
 	signers, err := parseSigners(r.Form["signers"])
 	if err != nil {
-		return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_signers", Message: "select one or more valid signers"}
+		return upload{}, &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_signers", Message: "select one or more valid signers"}
 	}
 	rec := RecipientInput{
 		Channel: strings.TrimSpace(r.FormValue("recipientChannel")),
@@ -198,13 +223,7 @@ func (h *Handler) createRequest(w http.ResponseWriter, r *http.Request) error {
 	if mode == "" {
 		mode = ModeParallel
 	}
-
-	id, err := h.svc.CreateRequest(r.Context(), org.ID, u.ID, org.Slug, header.Filename, pdf, signers, mode, rec)
-	if err := h.mapStartError(err); err != nil {
-		return err
-	}
-	respond.JSON(w, r, http.StatusCreated, map[string]string{"id": id.String()})
-	return nil
+	return upload{filename: header.Filename, pdf: pdf, signers: signers, mode: mode, recipient: rec}, nil
 }
 
 // documentTooLarge is the 413 both size gates return: the body cap that stops an
@@ -341,11 +360,17 @@ func (h *Handler) getDocument(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return fmt.Errorf("getting signed document: %w", err)
 	}
+	writePDF(w, "attachment", signedName(filename), doc)
+	return nil
+}
+
+// writePDF answers with a PDF, as a download (attachment) or to read in the
+// browser (inline).
+func writePDF(w http.ResponseWriter, disposition, filename string, doc []byte) {
 	w.Header().Set("Content-Type", "application/pdf")
-	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", signedName(filename)))
+	w.Header().Set("Content-Disposition", fmt.Sprintf("%s; filename=%q", disposition, filename))
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(doc)
-	return nil
 }
 
 func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
@@ -473,10 +498,7 @@ func (h *Handler) externalDocument(w http.ResponseWriter, r *http.Request) error
 	if err := h.mapExternalError(err); err != nil {
 		return err
 	}
-	w.Header().Set("Content-Type", "application/pdf")
-	w.Header().Set("Content-Disposition", fmt.Sprintf("inline; filename=%q", documentName(filename)))
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(doc)
+	writePDF(w, "inline", documentName(filename), doc)
 	return nil
 }
 
@@ -492,6 +514,10 @@ func (h *Handler) mapExternalError(err error) error {
 
 // mapStartError translates domain errors into API errors.
 func (h *Handler) mapStartError(err error) error {
+	return mapStartError(err)
+}
+
+func mapStartError(err error) error {
 	switch {
 	case err == nil:
 		return nil

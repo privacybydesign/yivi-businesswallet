@@ -10,9 +10,13 @@
 // the deployment CSC key, never returned to the frontend (Settings reports
 // HasClientSecret, not the secret), and never put in a log line or error.
 //
-// The signing ceremony itself (OAuth authorize over OID4VP, credentials/list,
-// signHash, PAdES assembly) is not here yet — this is the settings section and a
-// connection test only.
+// The signing ceremony itself (OAuth authorize, credentials/list, signHash, PAdES
+// assembly) is internal/signing; this is the settings section and a connection
+// test only.
+//
+// An organisation that has saved nothing here signs with the wallet's own signing
+// service (internal/yivicsc, kind "yivi"), when the deployment runs it: that is the
+// default, with nothing to set up.
 package csc
 
 import (
@@ -37,6 +41,11 @@ var ErrNoEncryptionKey = errors.New("csc: no encryption key configured; cannot s
 type ProviderKind string
 
 const (
+	// ProviderKindYivi is the wallet's own signing service (internal/yivicsc): a
+	// CSC API v2 provider this deployment hosts, whose signers identify with the
+	// Yivi app. It needs no endpoint or client of the organisation's own, and it is
+	// what an organisation that configured nothing uses.
+	ProviderKindYivi ProviderKind = "yivi"
 	// ProviderKindSample is the self-hosted reference QTSP shipped behind
 	// `docker compose --profile signer` (issue #194). Its default base URL is the
 	// dev port that profile publishes.
@@ -57,8 +66,8 @@ type ProviderKindInfo struct {
 	DefaultBaseURL string       `json:"defaultBaseUrl"`
 }
 
-// ProviderKinds returns the selectable kinds, in the order the settings screen
-// lists them.
+// ProviderKinds returns the kinds of remote provider an organisation can connect,
+// in the order the settings screen lists them.
 func ProviderKinds() []ProviderKindInfo {
 	return []ProviderKindInfo{
 		{ID: ProviderKindSample, DefaultBaseURL: SampleBaseURL},
@@ -66,8 +75,38 @@ func ProviderKinds() []ProviderKindInfo {
 	}
 }
 
-// KnownProviderKind reports whether kind is one this deployment can configure.
+// BuiltIn is the wallet's own signing service as this slice needs to know it: how
+// the signing ceremony reaches it, and what a connection test reports. It is nil
+// on a deployment that does not run the service (no CSC encryption key to keep
+// signing keys with).
+type BuiltIn struct {
+	// BaseURL is the service's CSC base URL.
+	BaseURL string
+	// ClientID and ClientSecret are the OAuth client the signing ceremony uses.
+	ClientID     string
+	ClientSecret string
+	// Info is the service's own /csc/v2/info, which a connection test answers
+	// with: the backend does not have to reach its own public address to know it.
+	Info Info
+}
+
+// ProviderKindsFor returns every kind an organisation can choose on a deployment
+// with builtIn: the wallet's own service first when it runs, then ProviderKinds.
+func ProviderKindsFor(builtIn *BuiltIn) []ProviderKindInfo {
+	kinds := ProviderKinds()
+	if builtIn == nil {
+		return kinds
+	}
+	return append([]ProviderKindInfo{{ID: ProviderKindYivi, DefaultBaseURL: builtIn.BaseURL}}, kinds...)
+}
+
+// KnownProviderKind reports whether kind is one a deployment can configure.
+// Whether this deployment runs the wallet's own service is the store's to say
+// (ErrBuiltInUnavailable), since that is not a property of the input.
 func KnownProviderKind(kind ProviderKind) bool {
+	if kind == ProviderKindYivi {
+		return true
+	}
 	for _, k := range ProviderKinds() {
 		if k.ID == kind {
 			return true
@@ -76,8 +115,14 @@ func KnownProviderKind(kind ProviderKind) bool {
 	return false
 }
 
+// ErrBuiltInUnavailable means the wallet's own signing service was chosen on a
+// deployment that does not run it.
+var ErrBuiltInUnavailable = errors.New("csc: this deployment does not run the built-in signing service")
+
 // Settings is the non-secret view of an org's CSC configuration (never the client
-// secret). Configured is false when no row exists yet.
+// secret). Configured is false when the org has saved nothing and the deployment
+// has no service of its own to fall back on; an org that saved nothing where the
+// wallet's own service runs reads as that service, configured and enabled.
 type Settings struct {
 	Configured   bool         `json:"configured"`
 	Enabled      bool         `json:"enabled"`
@@ -132,6 +177,12 @@ func Normalize(in SettingsInput) (SettingsInput, error) {
 	}
 	if !KnownProviderKind(out.ProviderKind) {
 		return SettingsInput{}, errors.New("unknown provider kind " + string(out.ProviderKind))
+	}
+	if out.ProviderKind == ProviderKindYivi {
+		// The wallet's own service has no endpoint or client of the organisation's:
+		// whatever the form still held from another kind is dropped, the secret too.
+		empty := ""
+		return SettingsInput{Enabled: in.Enabled, ProviderKind: ProviderKindYivi, ClientSecret: &empty}, nil
 	}
 	baseURL, err := NormalizeBaseURL(in.BaseURL)
 	if err != nil {

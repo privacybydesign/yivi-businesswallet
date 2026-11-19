@@ -317,3 +317,40 @@ func (v vcts) proofingRequestQuery(req ProofingRequest) dcqlQuery {
 	}
 	return q
 }
+
+// SigningRequest is the disclosure that authorises a signature at the wallet's
+// own signing service (internal/yivicsc): the holder's name and date of birth
+// from any one of Sources, and nothing else.
+type SigningRequest struct {
+	Sources []string
+}
+
+// signingQuery offers the holder each of req's sources as an option of one
+// credential set, as proofingRequestQuery does, asking only what names the
+// signer: a document's given names, family name and date of birth, or the
+// same from the registered personal data.
+func (v vcts) signingQuery(req SigningRequest) dcqlQuery {
+	documentClaims := claimPaths(ClaimGivenNames, ClaimFamilyName, ClaimDateOfBirth)
+	personalClaims := claimPaths(ClaimPersonalFirstNames, ClaimPersonalPrefix, ClaimPersonalFamilyName, ClaimPersonalDateOfBirth)
+
+	var q dcqlQuery
+	var options [][]string
+	add := func(id, vct string, claims []dcqlClaim) {
+		q.Credentials = append(q.Credentials, dcqlCredential{ID: id, Format: formatSDJWT, Meta: dcqlMeta{[]string{vct}}, Claims: claims})
+		options = append(options, []string{id})
+	}
+	for _, c := range [...]struct{ source, id, vct string }{
+		{SourcePassport, credIDPassport, v.passport},
+		{SourceIdentityCard, credIDIDCard, v.idCard},
+		{SourceResidencePermit, credIDResidencePermit, v.residencePermit},
+	} {
+		if slices.Contains(req.Sources, c.source) {
+			add(c.id, c.vct, documentClaims)
+		}
+	}
+	if slices.Contains(req.Sources, SourcePersonalData) {
+		add(credIDPersonalData, v.personalData, personalClaims)
+	}
+	q.CredentialSets = []dcqlCredentialSet{{Options: options}}
+	return q
+}

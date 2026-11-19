@@ -73,6 +73,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/walletunit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/wsca"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/wscawallet"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/yivicsc"
 )
 
 const (
@@ -80,7 +81,12 @@ const (
 	shutdownTimeout = 10 * time.Second
 
 	verifierProbeTimeout = 10 * time.Second
-	verifierHTTPTimeout  = 15 * time.Second
+	// hostedSigningProbeTimeout bounds the built-in signing service's boot probe:
+	// one read of its certificate authority, and on a first boot its making.
+	hostedSigningProbeTimeout = 10 * time.Second
+	// apiPrefix is where the versioned API is served under the app's origin.
+	apiPrefix           = "/api/v1"
+	verifierHTTPTimeout = 15 * time.Second
 
 	qerdsProbeTimeout = 10 * time.Second
 	qerdsHTTPTimeout  = 30 * time.Second
@@ -756,8 +762,12 @@ type wiring struct {
 	provisioningHandler   *provisioning.Handler
 	cscHandler            *csc.Handler
 	signingHandler        *signing.Handler
-	proofingHandler       *proofing.Handler
-	proofingApp           server.Registerer
+	signingService        *signing.Service
+	signingAPIHandler     *signing.APIHandler
+	// yiviCSCHandler serves the wallet's own signing service; nil when it is off.
+	yiviCSCHandler  *yivicsc.Handler
+	proofingHandler *proofing.Handler
+	proofingApp     server.Registerer
 }
 
 func (w *wiring) close() {
@@ -1234,8 +1244,15 @@ func (w *wiring) buildIntegrations(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	cscStore := csc.NewStore(w.pool, w.recorder, cscCipher)
-	w.cscHandler = csc.NewHandler(cscStore, csc.NewClient(), w.requireUser, w.orgHandler.Authorize)
+	// The wallet's own signing service, which every org signs with until it
+	// connects another provider. Nil without the key above: it has signing keys
+	// to keep.
+	hosted, err := w.buildHostedSigning(ctx, cscCipher)
+	if err != nil {
+		return err
+	}
+	cscStore := csc.NewStore(w.pool, w.recorder, cscCipher, hosted.builtIn)
+	w.cscHandler = csc.NewHandler(cscStore, csc.NewClient(), hosted.builtIn, w.requireUser, w.orgHandler.Authorize)
 
 	// Qualified document signing: the business wallet as the RP-centric SCA driving
 	// the per-org CSC provider (base URL + OAuth client from cscStore). A request is
@@ -1248,12 +1265,73 @@ func (w *wiring) buildIntegrations(ctx context.Context) error {
 	// SigningRedirectURI is the QTSP-registered OAuth callback; empty falls back to
 	// the localhost default inside NewService (see signing.DefaultRedirectURI). A
 	// hosted deploy sets SIGNING_REDIRECT_URI to its own public callback.
-	signingService := signing.NewService(signingStore, signingprovider.NewClient(), cscStore, signingMembers{store: w.orgStore}, signingOrgs{store: w.orgStore}, signingDelivery, signingNotify, cfg.SigningRedirectURI, cfg.AppBaseURL, cfg.SigningOAuthIssuerInternal)
+	w.signingService = signing.NewService(signingStore, hosted.provider, cscStore, signingMembers{store: w.orgStore}, signingOrgs{store: w.orgStore}, signingDelivery, signingNotify, cfg.SigningRedirectURI, cfg.AppBaseURL, cfg.SigningOAuthIssuerInternal)
+	if hosted.builtIn != nil {
+		w.signingService.UseHostedProvider(hosted.builtIn.BaseURL, hosted.redirectURI)
+	}
 	database.Periodic{Name: "signing-redelivery", Interval: signing.RedeliveryInterval, Runs: w.pool}.
-		Start(ctx, signingService.RedeliverStalled)
-	w.signingHandler = signing.NewHandler(signingService, w.requireUser, w.orgHandler.Authorize)
+		Start(ctx, w.signingService.RedeliverStalled)
+	w.signingHandler = signing.NewHandler(w.signingService, w.requireUser, w.orgHandler.Authorize)
 	w.signingHandler.SetEvents(w.events)
 	return nil
+}
+
+// signingProvider is the provider seam the signing ceremony drives.
+type signingProvider interface {
+	Discover(ctx context.Context, baseURL string) (signingprovider.Info, error)
+	AuthorizeURL(issuer string, p signingprovider.AuthorizeParams) string
+	ExchangeToken(ctx context.Context, issuer, clientID, clientSecret, code, codeVerifier, redirectURI string) (signingprovider.Token, error)
+	ListCredentials(ctx context.Context, baseURL, accessToken string) ([]string, error)
+	CredentialInfo(ctx context.Context, baseURL, accessToken, credentialID string) (signingprovider.Credential, error)
+	SignHash(ctx context.Context, baseURL, accessToken, credentialID string, hashesB64 []string, signAlgoOID, hashAlgoOID string) ([]string, error)
+}
+
+// hostedSigning is what the wallet's own signing service contributes to the
+// signing slices: how the settings name it (builtIn, nil when it is off), the
+// callback its built-in client returns to, and the provider the ceremony drives,
+// which answers for the service in process and passes every other provider on.
+type hostedSigning struct {
+	builtIn     *csc.BuiltIn
+	redirectURI string
+	provider    signingProvider
+}
+
+// buildHostedSigning starts the wallet's own signing service (internal/yivicsc)
+// and mounts its routes. Without a CSC encryption key the service is off and the
+// ceremony drives remote providers only. A key that does not open the service's
+// certificate authority fails the boot, as every provider's probe does.
+func (w *wiring) buildHostedSigning(ctx context.Context, cscCipher *crypto.Cipher) (hostedSigning, error) {
+	remote := signingprovider.NewClient()
+	if cscCipher == nil {
+		slog.WarnContext(ctx, "the built-in signing service is off: CSC_ENCRYPTION_KEY is not set, so organisations can only sign with a provider they connect themselves")
+		return hostedSigning{provider: remote}, nil
+	}
+	subjectSecret, clientSecret, err := yivicsc.DeriveSecrets(cscCipher)
+	if err != nil {
+		return hostedSigning{}, err
+	}
+	// The API is served under the app's own origin: by the same container in
+	// production, through the dev server's proxy locally.
+	apiURL := strings.TrimRight(w.cfg.AppBaseURL, "/") + apiPrefix
+	redirectURI := apiURL + signing.CallbackPath
+	service := yivicsc.NewService(yivicsc.NewStore(w.pool, cscCipher), w.verifier, subjectSecret, yivicsc.Config{
+		PublicURL:  apiURL,
+		AppBaseURL: w.cfg.AppBaseURL,
+		Clients:    []yivicsc.Client{{ID: yivicsc.ClientID, Secret: clientSecret, RedirectURI: redirectURI}},
+	})
+	if err := probe(ctx, hostedSigningProbeTimeout, service); err != nil {
+		return hostedSigning{}, fmt.Errorf("built-in signing service: %w", err)
+	}
+	w.yiviCSCHandler = yivicsc.NewHandler(service)
+	info := service.Info()
+	return hostedSigning{
+		builtIn: &csc.BuiltIn{
+			BaseURL: service.BaseURL(), ClientID: yivicsc.ClientID, ClientSecret: clientSecret,
+			Info: csc.Info{Name: info.Name, Specs: info.Specs},
+		},
+		redirectURI: redirectURI,
+		provider:    yivicsc.NewProvider(service, remote),
+	}, nil
 }
 
 func (w *wiring) buildProofing(ctx context.Context) error {
@@ -1330,6 +1408,9 @@ func (w *wiring) buildProofing(ctx context.Context) error {
 		database.RunOnNotify(proofingJobs, w.pool, proofing.WebhookChannel, "identity_proofing_webhooks", deliverer.Run)
 	}
 	w.proofingHandler = proofing.NewHandler(proofingService, w.requireUser, w.orgHandler.Authorize)
+	// The signing API takes the org's API keys, which the proofing handler
+	// authenticates.
+	w.signingAPIHandler = signing.NewAPIHandler(w.signingService, signingAPIAuth{keys: w.proofingHandler, orgs: w.orgStore})
 	proofingIdempotency := proofing.NewIdempotencyStore(w.pool, proofingCipher)
 	w.proofingHandler.SetIdempotencyStore(proofingIdempotency)
 	w.proofingHandler.SetPlatformAdmins(w.platformAdmins)
@@ -1380,9 +1461,7 @@ func (w *wiring) setDocumentCheckers(ctx context.Context, proofingService *proof
 
 // httpServer serves every slice wired so far.
 func (w *wiring) httpServer() *http.Server {
-	handler := server.New(
-		w.pool,
-		w.cfg.StaticDir,
+	features := []server.Registerer{
 		w.presenterHandler,
 		w.requesterHandler,
 		w.requestTemplates,
@@ -1403,10 +1482,15 @@ func (w *wiring) httpServer() *http.Server {
 		w.provisioningHandler,
 		w.cscHandler,
 		w.signingHandler,
+		w.signingAPIHandler,
 		w.proofingHandler,
 		w.proofingApp,
 		events.NewHandler(w.events, w.requireUser, w.orgHandler.Authorize),
-	)
+	}
+	if w.yiviCSCHandler != nil {
+		features = append(features, w.yiviCSCHandler)
+	}
+	handler := server.New(w.pool, w.cfg.StaticDir, features...)
 	// Outermost, so every route and the SPA's page headers see the client
 	// address the trusted proxies report.
 	handler = clientip.Middleware(clientip.NewResolver(w.cfg.TrustedProxies))(handler)

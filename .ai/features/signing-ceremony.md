@@ -5,6 +5,12 @@ Status: **implemented** (backend + gated frontend). Builds on the CSC provider s
 **RP-centric Signature Creation Application (SCA)** driving a remote QTSP's CSC API v2 to
 create a qualified electronic signature over a PDF (PAdES).
 
+> **The default provider is now the wallet itself.** An organisation that connected nothing
+> signs with the built-in signing service, whose authorization is a Yivi disclosure
+> (`.ai/features/yivi-signing.md`, which also covers the signing API). This document describes
+> the ceremony as the client of any CSC provider; where it says the wallet step needs an EUDI
+> reference wallet, that is the reference QTSP behind `--profile signer` only.
+
 ## Who does what
 
 The QTSP reference implementation is **backend-only** and owns the wallet ceremony: on

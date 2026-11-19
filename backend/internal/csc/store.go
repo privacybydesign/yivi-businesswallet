@@ -20,10 +20,22 @@ type Store struct {
 	db     database.DB
 	audit  audit.Recorder
 	cipher *crypto.Cipher
+	// builtIn is the wallet's own signing service, nil when the deployment does
+	// not run it. It is what an org with no row signs with.
+	builtIn *BuiltIn
 }
 
-func NewStore(db database.DB, recorder audit.Recorder, cipher *crypto.Cipher) *Store {
-	return &Store{db: db, audit: recorder, cipher: cipher}
+func NewStore(db database.DB, recorder audit.Recorder, cipher *crypto.Cipher, builtIn *BuiltIn) *Store {
+	return &Store{db: db, audit: recorder, cipher: cipher, builtIn: builtIn}
+}
+
+// defaults is what an org that saved nothing has: the wallet's own service,
+// enabled, where the deployment runs it; nothing otherwise.
+func (s *Store) defaults() Settings {
+	if s.builtIn == nil {
+		return Settings{Configured: false, ProviderKind: ProviderKindSample}
+	}
+	return Settings{Configured: true, Enabled: true, ProviderKind: ProviderKindYivi, BaseURL: s.builtIn.BaseURL}
 }
 
 // GetSettings returns the non-secret view of an org's CSC settings.
@@ -35,12 +47,21 @@ func (s *Store) GetSettings(ctx context.Context, orgID uuid.UUID) (Settings, err
 	err := s.db.QueryRow(ctx, query, orgID).Scan(
 		&out.ProviderKind, &out.BaseURL, &out.ClientID, &out.HasClientSecret, &out.Enabled, &out.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return Settings{Configured: false, ProviderKind: ProviderKindSample}, nil
+		return s.defaults(), nil
 	}
 	if err != nil {
 		return Settings{}, fmt.Errorf("csc: get settings org %s: %w", orgID, err)
 	}
 	out.Configured = true
+	if out.ProviderKind == ProviderKindYivi {
+		// The row holds no endpoint for the wallet's own service; the screen shows
+		// the deployment's. A row left from a deployment that ran it reads as off.
+		if s.builtIn == nil {
+			out.Enabled = false
+		} else {
+			out.BaseURL = s.builtIn.BaseURL
+		}
+	}
 	return out, nil
 }
 
@@ -68,13 +89,20 @@ func (s *Store) Upsert(ctx context.Context, orgID uuid.UUID, in SettingsInput) (
 		}
 	}
 
-	// A provider with no endpoint cannot be enabled: there is nothing to reach.
+	// A provider with no endpoint cannot be enabled: there is nothing to reach. The
+	// wallet's own service has none to give; it is reachable whenever it runs.
 	enabled := in.Enabled && in.BaseURL != ""
+	if in.ProviderKind == ProviderKindYivi {
+		if s.builtIn == nil {
+			return Settings{}, ErrBuiltInUnavailable
+		}
+		enabled = in.Enabled
+	}
 
 	err := database.InTx(ctx, s.db, func(q database.Querier) error {
 		// Read (and lock) the current row inside the transaction so the audited
 		// {before, after} diff is the change this save actually made.
-		before, err := readAuditable(ctx, q, orgID)
+		before, err := s.readAuditable(ctx, q, orgID)
 		if err != nil {
 			return err
 		}
@@ -137,9 +165,9 @@ func auditSnapshot(kind ProviderKind, baseURL, clientID string, enabled, hasSecr
 }
 
 // readAuditable reads (and locks) an org's current settings for the audit diff. A
-// missing row reads as nil, so the first save renders as a create rather than an
-// update against an invented empty configuration.
-func readAuditable(ctx context.Context, q database.Querier, orgID uuid.UUID) (auditState, error) {
+// missing row reads as the defaults the org had until now, so the first save shows
+// what it changed from: the wallet's own service where that runs.
+func (s *Store) readAuditable(ctx context.Context, q database.Querier, orgID uuid.UUID) (auditState, error) {
 	const query = `SELECT provider_kind, base_url, client_id, enabled,
 		client_secret_ciphertext IS NOT NULL
 		FROM org_csc_settings WHERE organization_id = $1 FOR UPDATE`
@@ -147,7 +175,8 @@ func readAuditable(ctx context.Context, q database.Querier, orgID uuid.UUID) (au
 	switch err := q.QueryRow(ctx, query, orgID).Scan(
 		&current.providerKind, &current.baseURL, &current.clientID, &current.enabled, &current.hasClientSecret); {
 	case errors.Is(err, pgx.ErrNoRows):
-		return auditState{providerKind: ProviderKindSample}, nil
+		d := s.defaults()
+		return auditState{providerKind: d.ProviderKind, enabled: d.Enabled}, nil
 	case err != nil:
 		return auditState{}, fmt.Errorf("csc: read settings org %s: %w", orgID, err)
 	}
@@ -157,19 +186,31 @@ func readAuditable(ctx context.Context, q database.Querier, orgID uuid.UUID) (au
 // ResolveConnection returns an org's CSC base URL, OAuth client id, and the
 // DECRYPTED client secret, for the signing ceremony (internal/signing) to drive
 // the authorization + token exchange. The secret is decrypted here and never
-// leaves as ciphertext; an org with no row returns empty strings (the caller
-// treats that as "not configured"). A stored secret with no deployment key is a
-// misconfiguration surfaced as an error, not a silent empty secret.
+// leaves as ciphertext. An org with no row, and one that chose the wallet's own
+// service, get that service's connection; where the deployment does not run it
+// they get empty strings (the caller treats that as "not configured"), as does an
+// org that turned the wallet's own service off. A stored secret with no deployment
+// key is a misconfiguration surfaced as an error, not a silent empty secret.
 func (s *Store) ResolveConnection(ctx context.Context, orgID uuid.UUID) (baseURL, clientID, clientSecret string, err error) {
-	const query = `SELECT base_url, client_id, client_secret_ciphertext
+	const query = `SELECT provider_kind, enabled, base_url, client_id, client_secret_ciphertext
 		FROM org_csc_settings WHERE organization_id = $1`
 	var ciphertext []byte
-	err = s.db.QueryRow(ctx, query, orgID).Scan(&baseURL, &clientID, &ciphertext)
+	var kind ProviderKind
+	var enabled bool
+	err = s.db.QueryRow(ctx, query, orgID).Scan(&kind, &enabled, &baseURL, &clientID, &ciphertext)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return "", "", "", nil
+		return s.builtInConnection()
 	}
 	if err != nil {
 		return "", "", "", fmt.Errorf("csc: resolve connection org %s: %w", orgID, err)
+	}
+	if kind == ProviderKindYivi {
+		// Off means off here: the org was signing with this by default, so
+		// disabling it is how an admin says the org does not sign.
+		if !enabled {
+			return "", "", "", nil
+		}
+		return s.builtInConnection()
 	}
 	if len(ciphertext) > 0 {
 		if s.cipher == nil {
@@ -182,6 +223,15 @@ func (s *Store) ResolveConnection(ctx context.Context, orgID uuid.UUID) (baseURL
 		clientSecret = string(plain)
 	}
 	return baseURL, clientID, clientSecret, nil
+}
+
+// builtInConnection is the wallet's own service's connection, or empty strings
+// where the deployment does not run it.
+func (s *Store) builtInConnection() (baseURL, clientID, clientSecret string, err error) {
+	if s.builtIn == nil {
+		return "", "", "", nil
+	}
+	return s.builtIn.BaseURL, s.builtIn.ClientID, s.builtIn.ClientSecret, nil
 }
 
 // Available reports whether the org has a CSC signing provider configured and
@@ -197,20 +247,16 @@ func (s *Store) Available(ctx context.Context, orgID uuid.UUID) (bool, error) {
 }
 
 // BaseURLFor resolves the base URL a connection test should probe. It returns
-// ErrNotConfigured when the org has no row or no base URL stored — neither is a
-// failure, both are "nothing to test".
+// ErrNotConfigured when the org has no base URL to probe (nothing stored, on a
+// deployment with no service of its own): that is not a failure, it is "nothing
+// to test".
 func (s *Store) BaseURLFor(ctx context.Context, orgID uuid.UUID) (string, error) {
-	const query = `SELECT base_url FROM org_csc_settings WHERE organization_id = $1`
-	var baseURL string
-	err := s.db.QueryRow(ctx, query, orgID).Scan(&baseURL)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return "", ErrNotConfigured
-	}
+	settings, err := s.GetSettings(ctx, orgID)
 	if err != nil {
-		return "", fmt.Errorf("csc: base url for org %s: %w", orgID, err)
+		return "", err
 	}
-	if baseURL == "" {
+	if settings.BaseURL == "" {
 		return "", ErrNotConfigured
 	}
-	return baseURL, nil
+	return settings.BaseURL, nil
 }

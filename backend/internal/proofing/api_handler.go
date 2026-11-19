@@ -123,6 +123,21 @@ func callerFromContext(ctx context.Context) APIKeyCaller {
 	return c
 }
 
+// RequireAPIKey lets a request through only with one of the org's API keys
+// carrying scope, under the limits every API call is held to. It is exported for
+// the other API the org's keys open, the signing API (internal/signing), which
+// reads the caller back with APICallerFromContext.
+func (h *Handler) RequireAPIKey(scope string, next respond.HandlerFunc) http.Handler {
+	return h.requireAPIKey(scope, next)
+}
+
+// APICallerFromContext returns the API key a request authenticated with; false
+// for a request that passed no RequireAPIKey.
+func APICallerFromContext(ctx context.Context) (APIKeyCaller, bool) {
+	c, ok := ctx.Value(apiCallerKey{}).(APIKeyCaller)
+	return c, ok
+}
+
 const bearerPrefix = "Bearer "
 
 // requireAPIKey authenticates the key in the Authorization header.

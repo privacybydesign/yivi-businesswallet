@@ -196,6 +196,13 @@ export const router = createBrowserRouter([
         path: "/sign/:token",
         lazy: page(() => import("./routes/signing-external")),
       },
+      // The built-in signing service's authorization page, where a signing
+      // ceremony sends the signer's browser to approve in the Yivi app: public,
+      // keyed by the authorization id, for a member and an external signee alike.
+      {
+        path: "/signing/authorize/:id",
+        lazy: page(() => import("./routes/signing-authorize")),
+      },
       // An external person verifying from a hosted link: public, keyed by
       // the link's token, on the subject's own device.
       { path: "/p/:token", lazy: page(() => import("./routes/proof")) },

@@ -63,7 +63,6 @@ import {
   proofingRejectionReason,
   dataRequestRefusal,
   reasonIn,
-  secondsUntil,
   sessionStage,
   sessionStep,
   sessionView,
@@ -76,6 +75,7 @@ import type {
 } from "../lib/identity-proofing";
 import { useDateFormatter, useMonthFormatter } from "../lib/format-when";
 import { useDebouncedValue } from "../lib/use-debounced-value";
+import { useSecondsLeft } from "../lib/use-seconds-left";
 import { legalReasonIn } from "../lib/legal-retention";
 import {
   PERSON_STEP_TONES,
@@ -109,7 +109,6 @@ const LINK_BUTTON =
 const STEP_HEADING = "text-ink text-[22px] leading-[30px] font-bold";
 
 const QR_SIZE = 240;
-const COUNTDOWN_TICK_MS = 1000;
 
 // Who asks: the org as the steps show it, with its branding.
 export interface VerifyOrg {
@@ -2122,7 +2121,7 @@ function Failed({
   );
 }
 
-function Countdown({
+export function Countdown({
   seconds,
 }: Readonly<{ seconds: number }>): React.JSX.Element {
   const { t } = useTranslation();
@@ -2138,7 +2137,9 @@ function Countdown({
   );
 }
 
-function QrCode({ value }: Readonly<{ value: string }>): React.JSX.Element {
+export function QrCode({
+  value,
+}: Readonly<{ value: string }>): React.JSX.Element {
   const [dataUrl, setDataUrl] = useState("");
   useEffect(() => {
     let cancelled = false;
@@ -2190,15 +2191,4 @@ function QrPlaceholder({
       {label && <span className="text-[13px]">{label}</span>}
     </div>
   );
-}
-
-// Seconds left until expiresAt, re-read every second; 0 without one.
-function useSecondsLeft(expiresAt: string | undefined): number {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (expiresAt === undefined) return;
-    const timer = setInterval(() => setNow(Date.now()), COUNTDOWN_TICK_MS);
-    return () => clearInterval(timer);
-  }, [expiresAt]);
-  return expiresAt === undefined ? 0 : secondsUntil(expiresAt, now);
 }

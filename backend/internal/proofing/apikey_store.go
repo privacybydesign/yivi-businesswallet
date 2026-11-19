@@ -46,6 +46,11 @@ const (
 	// ScopeReviewsWrite decides it and makes a review link.
 	ScopeReviewsRead  = "reviews:read"
 	ScopeReviewsWrite = "reviews:write"
+	// ScopeSigningRead reads the signing requests made over the signing API
+	// (internal/signing), which takes these same keys; ScopeSigningWrite makes
+	// one and hands out its signing links.
+	ScopeSigningRead  = "signing:read"
+	ScopeSigningWrite = "signing:write"
 )
 
 // APIKeyScopes are every scope, in display order; every new key gets them all.
@@ -53,6 +58,7 @@ var APIKeyScopes = []string{
 	ScopeSessionsWrite, ScopeSessionsRead, ScopeResultsRead, ScopeFlowsRead,
 	ScopeFlowsWrite, ScopeSettingsRead, ScopeSettingsWrite, ScopeWebhooksWrite,
 	ScopeReviewsRead, ScopeReviewsWrite,
+	ScopeSigningRead, ScopeSigningWrite,
 }
 
 // APIKey is one of an org's API keys, without its secret.

@@ -62,6 +62,9 @@ func (c *Client) AuthorizeURL(issuer string, p AuthorizeParams) string {
 		q.Set("numSignatures", strconv.Itoa(p.NumSignatures))
 		q.Set("hashes", strings.Join(p.Hashes, ","))
 		q.Set("hashAlgorithmOID", p.HashAlgorithmOID)
+		if p.Description != "" {
+			q.Set("description", p.Description)
+		}
 	}
 	return endpoint(issuer, "/oauth2/authorize") + "?" + q.Encode()
 }

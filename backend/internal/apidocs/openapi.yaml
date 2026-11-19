@@ -44,9 +44,33 @@ tags:
   - name: provisioning
     description: Per-organisation user and department provisioning from an identity directory.
   - name: csc
-    description: Per-organisation CSC API v2 signing-provider (remote QTSP) connection settings.
+    description: >-
+      Per-organisation CSC API v2 signing-provider settings: the wallet's own signing
+      service (`yivi`, the default) or a remote provider the organisation connects.
   - name: signing
-    description: Qualified document signing — the RP-centric signing ceremony against a CSC provider.
+    description: Document signing in the wallet — the signing ceremony against the organisation's CSC provider.
+  - name: signing-api
+    description: >-
+      The signing API, for embedding document signing in your own system. Authenticate
+      with one of the organisation's API tokens (the same ones the identity proofing API
+      takes) as a Bearer token; a token made before this API existed has the
+      `signing:read` and `signing:write` scopes too. The flow: `POST
+      /api/v1/signing/requests` with the PDF and its signees; send each signee to their
+      `signingUrl` (a page of the wallet, in a redirect or a frame) or let the wallet mail
+      it; poll `GET /api/v1/signing/requests/{id}` until `status` is `completed`; download
+      the PDF from `…/document`. A signee identifies with the Yivi app on the signing page
+      and signs with a certificate in their own name. With the wallet's own signing
+      service that is an advanced electronic signature, not a qualified one.
+  - name: yivi-csc
+    description: >-
+      The wallet's own signing service: a Cloud Signature Consortium (CSC) API v2 provider
+      and its OAuth 2.0 authorization server, under `/api/v1/yivi-csc`. A signer authorises
+      with a Yivi disclosure over OpenID4VP of their name and date of birth, from a
+      passport, identity card or residence permit or from the registered personal data
+      (BRP). Every organisation signs with it until it connects another provider. Its keys
+      are kept by the deployment and its certificates chain to the deployment's own
+      authority, so its signatures are advanced, not qualified. The wallet's signing
+      ceremony is its one registered client.
   - name: openid4vp
     description: >-
       Inbound OpenID4VP — an external verifier invoking the business wallet as the
@@ -15494,6 +15518,622 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+  /api/v1/signing/requests:
+    post:
+      tags: [signing-api]
+      summary: Create a signing request (signing API)
+      description: >-
+        Authenticated with the organisation's API key as a Bearer token, with `signing:write`.
+        Uploads a PDF and names who signs it: an external signee by name and e-mail address,
+        or a member of the organisation by user id. Each signee signs with their own
+        certificate, so the finished PDF carries one signature per signee. By default each
+        signee who may sign now is mailed their signing link; with `sendMail` `false` nobody
+        is mailed and the answer carries each such external signee's `signingUrl` instead, for
+        you to send them to. In `sequential` mode only the first signee may sign at first;
+        ask for the next one's link (`POST …/signers/{signerID}/link`) once their turn has
+        come. `returnUrl` is a page of yours the signing page offers the signee to go back
+        to when they are done, opened with `request_id` and `status` (`signed` or
+        `declined`) in its query. 409 `not_configured` when the organisation has switched
+        signing off.
+      security:
+        - apiKey: []
+      x-codeSamples:
+        - lang: Shell
+          label: curl
+          source: |
+            curl -X POST 'https://wallet.example.org/api/v1/signing/requests' \
+              -H "Authorization: Bearer YOUR_API_KEY" \
+              -F 'document=@contract.pdf;type=application/pdf' \
+              -F 'signers={"kind":"external","name":"Jan Jansen","email":"jan@example.org"}' \
+              -F 'sendMail=false' \
+              -F 'returnUrl=https://portal.example.org/contracts/42'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [document, signers]
+              properties:
+                document:
+                  type: string
+                  format: binary
+                  description: The PDF to sign, at most 25 MB.
+                signers:
+                  type: array
+                  description: >-
+                    One JSON object per signee, repeated in signing order:
+                    `{"kind":"external","name":"…","email":"…"}` or
+                    `{"kind":"internal","userId":"…"}`, each optionally with `placements`
+                    (where their visible signature and initials go, in PDF points).
+                  items:
+                    type: string
+                mode:
+                  type: string
+                  enum: [parallel, sequential]
+                  description: Whether signees sign in any order (the default) or in the order given.
+                sendMail:
+                  type: boolean
+                  description: False mails no signee; you hand out the signing links. Default true.
+                returnUrl:
+                  type: string
+                  format: uri
+                  description: An https page of yours the signee is offered to return to when done.
+                recipientChannel:
+                  type: string
+                  enum: [none, email, qerds]
+                  description: Where the finished PDF is delivered. Default none.
+                recipientAddress:
+                  type: string
+                recipientName:
+                  type: string
+                message:
+                  type: string
+                  description: A cover message for the recipient.
+      responses:
+        '201':
+          description: The request, with `signingUrl` on each external signee who may sign now when no mail was sent.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SigningApiRequest'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/ApiUnauthorized'
+        '403':
+          $ref: '#/components/responses/ApiForbidden'
+        '409':
+          description: The organisation has no signing provider (`not_configured`), or a selected member must re-identify first (`signer_identity_blocked`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: The document is larger than 25 MB (`document_too_large`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    get:
+      tags: [signing-api]
+      summary: List your signing requests (signing API)
+      description: >-
+        Authenticated with the organisation's API key, with `signing:read`. The requests made
+        over this API, newest first, `limit` per page (default 25, at most 100):
+        `{requests, nextCursor}`. Pass `nextCursor` back as `cursor` for the next page; it is
+        empty on the last. A request a member made in the wallet is not listed.
+      security:
+        - apiKey: []
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+        - name: cursor
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: A page of requests.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [requests, nextCursor]
+                properties:
+                  requests:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/SigningApiRequest'
+                  nextCursor:
+                    type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/ApiUnauthorized'
+        '403':
+          $ref: '#/components/responses/ApiForbidden'
+  /api/v1/signing/requests/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: The signing request's id.
+    get:
+      tags: [signing-api]
+      summary: Read a signing request (signing API)
+      description: >-
+        Authenticated with the organisation's API key, with `signing:read`. The request's
+        `status` (`awaiting_signatures`, `completed`, `declined`, `failed`) and each signee's
+        own. 404 for a request that was not made over this API.
+      security:
+        - apiKey: []
+      responses:
+        '200':
+          description: The request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SigningApiRequest'
+        '401':
+          $ref: '#/components/responses/ApiUnauthorized'
+        '403':
+          $ref: '#/components/responses/ApiForbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/signing/requests/{id}/document:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: The signing request's id.
+    get:
+      tags: [signing-api]
+      summary: Download the signed PDF (signing API)
+      description: >-
+        Authenticated with the organisation's API key, with `signing:read`. The finished PDF
+        (`application/pdf`) once every signee has signed; 409 `not_completed` before that.
+      security:
+        - apiKey: []
+      responses:
+        '200':
+          description: The signed PDF.
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/ApiUnauthorized'
+        '403':
+          $ref: '#/components/responses/ApiForbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Not every signee has signed yet (`not_completed`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/signing/requests/{id}/signers/{signerID}/link:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: The signing request's id.
+      - name: signerID
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: The signee's id, from the request's `signers`.
+    post:
+      tags: [signing-api]
+      summary: Make a signee's signing link (signing API)
+      description: >-
+        Authenticated with the organisation's API key, with `signing:write`. Makes a fresh
+        link to an external signee's signing page, for you to redirect them to or to show in
+        a frame. It replaces the signee's earlier link, the mailed one included, and is good
+        for 30 days. Refused for a signee who cannot sign now: 409 `already_signed`,
+        `not_your_turn` (sequential mode) or 400 `invalid_request` once the request is over.
+        A member has no link (404 `signer_not_found`): they sign in the wallet.
+      security:
+        - apiKey: []
+      responses:
+        '200':
+          description: The link.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [signingUrl]
+                properties:
+                  signingUrl:
+                    type: string
+                    format: uri
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/ApiUnauthorized'
+        '403':
+          $ref: '#/components/responses/ApiForbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The signee has signed already (`already_signed`) or it is not their turn (`not_your_turn`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/yivi-csc/csc/v2/info:
+    post:
+      tags: [yivi-csc]
+      summary: Describe the built-in signing service (CSC info)
+      description: >-
+        The CSC API v2 `info` method of the wallet's own signing service: its name, the CSC
+        version it implements, the methods it serves and, as `oauth2`, the OAuth 2.0 issuer
+        to authorise at (the service's own base URL). Takes no credential.
+      security: []
+      responses:
+        '200':
+          description: The service's description.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  specs:
+                    type: string
+                  name:
+                    type: string
+                  oauth2:
+                    type: string
+                    format: uri
+                  authType:
+                    type: array
+                    items:
+                      type: string
+                  methods:
+                    type: array
+                    items:
+                      type: string
+  /api/v1/yivi-csc/oauth2/authorize:
+    get:
+      tags: [yivi-csc]
+      summary: Start an authorization (OAuth 2.0 authorize)
+      description: >-
+        The CSC `oauth2/authorize` endpoint, called by sending the signer's browser to it.
+        It starts a Yivi disclosure over OpenID4VP and redirects the browser to the page
+        that shows its QR code; once the signer disclosed, that page sends the browser to
+        `redirect_uri` with `code` and `state` (or `error=access_denied`). `scope=service`
+        identifies the signer, from a passport, identity card or residence permit or from
+        the registered personal data (BRP), whichever they pick in the Yivi app; its token
+        lists the signer's credential, issuing one on first use. `scope=credential`
+        authorises signatures and takes `credentialID`, `numSignatures`, `hashes`
+        (comma-separated base64url SHA-256 digests) and `hashAlgorithmOID`; the signer must
+        then disclose the same identity the credential's certificate names. PKCE with
+        `S256` is required. A `client_id` or `redirect_uri` the service does not know is
+        answered 400 and never redirected.
+      security: []
+      parameters:
+        - name: response_type
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [code]
+        - name: client_id
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: redirect_uri
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uri
+        - name: scope
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [service, credential]
+        - name: state
+          in: query
+          schema:
+            type: string
+        - name: code_challenge
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: code_challenge_method
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [S256]
+        - name: credentialID
+          in: query
+          schema:
+            type: string
+        - name: numSignatures
+          in: query
+          schema:
+            type: integer
+        - name: hashes
+          in: query
+          schema:
+            type: string
+        - name: hashAlgorithmOID
+          in: query
+          schema:
+            type: string
+        - name: description
+          in: query
+          schema:
+            type: string
+          description: A short name for what is signed, shown to the signer.
+      responses:
+        '302':
+          description: To the authorization page, or to `redirect_uri` with an OAuth error.
+        '400':
+          description: Unknown `client_id` or `redirect_uri`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/YiviCscError'
+        '429':
+          description: Too many authorizations from this address; retry after `Retry-After` seconds.
+  /api/v1/yivi-csc/oauth2/token:
+    post:
+      tags: [yivi-csc]
+      summary: Exchange an authorization code (OAuth 2.0 token)
+      description: >-
+        The CSC `oauth2/token` endpoint: `grant_type=authorization_code` with the `code`,
+        the `redirect_uri` it was sent to and the PKCE `code_verifier`, authenticated as the
+        client (HTTP Basic, or `client_id` and `client_secret` in the form). A code is good
+        once and for a minute. The access token of a `credential` authorization is the
+        signature activation data: it signs the hashes it was authorised for, and nothing
+        else.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [grant_type, code, redirect_uri, code_verifier]
+              properties:
+                grant_type:
+                  type: string
+                  enum: [authorization_code]
+                code:
+                  type: string
+                redirect_uri:
+                  type: string
+                code_verifier:
+                  type: string
+                client_id:
+                  type: string
+                client_secret:
+                  type: string
+      responses:
+        '200':
+          description: The access token.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [access_token, token_type, expires_in]
+                properties:
+                  access_token:
+                    type: string
+                  token_type:
+                    type: string
+                  expires_in:
+                    type: integer
+        '400':
+          description: The code is not valid (`invalid_grant`) or the request is malformed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/YiviCscError'
+        '401':
+          description: Client authentication failed (`invalid_client`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/YiviCscError'
+  /api/v1/yivi-csc/csc/v2/credentials/list:
+    post:
+      tags: [yivi-csc]
+      summary: List the signer's credentials (CSC credentials/list)
+      description: >-
+        With the access token as a Bearer token. Answers the one credential of the person
+        the token was issued for, issuing it (a key and a certificate in their name) when
+        they have none or theirs has expired.
+      security: []
+      responses:
+        '200':
+          description: The credential ids.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [credentialIDs]
+                properties:
+                  credentialIDs:
+                    type: array
+                    items:
+                      type: string
+        '401':
+          description: The access token is not valid (`invalid_token`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/YiviCscError'
+  /api/v1/yivi-csc/csc/v2/credentials/info:
+    post:
+      tags: [yivi-csc]
+      summary: Read a credential (CSC credentials/info)
+      description: >-
+        With the access token as a Bearer token. Answers the credential's key algorithm and
+        its certificate; `certificates` is `none`, `single` or `chain` (the default: the
+        signing certificate, then the service's own authority). Only the token subject's own
+        credential is readable.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [credentialID]
+              properties:
+                credentialID:
+                  type: string
+                certificates:
+                  type: string
+                  enum: [none, single, chain]
+      responses:
+        '200':
+          description: The credential.
+          content:
+            application/json:
+              schema:
+                description: The CSC `credentials/info` answer (`key`, `cert`, `authMode`, `SCAL`, `multisign`).
+        '400':
+          description: Unknown `credentialID` (`invalid_request`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/YiviCscError'
+        '401':
+          description: The access token is not valid (`invalid_token`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/YiviCscError'
+  /api/v1/yivi-csc/csc/v2/signatures/signHash:
+    post:
+      tags: [yivi-csc]
+      summary: Sign hashes (CSC signatures/signHash)
+      description: >-
+        With the access token of a `credential` authorization as a Bearer token. Signs the
+        SHA-256 digests in `hashes` (base64) with the credential's ECDSA P-256 key and
+        answers the DER signatures, base64, in order. Every digest must be one the signer
+        authorised, and each is signed once; anything else is refused and spends nothing.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [credentialID, hashes, hashAlgorithmOID, signAlgo]
+              properties:
+                credentialID:
+                  type: string
+                hashes:
+                  type: array
+                  items:
+                    type: string
+                hashAlgorithmOID:
+                  type: string
+                  description: '`2.16.840.1.101.3.4.2.1` (SHA-256).'
+                signAlgo:
+                  type: string
+                  description: '`1.2.840.10045.4.3.2` (ecdsa-with-SHA256).'
+      responses:
+        '200':
+          description: The signatures.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [signatures]
+                properties:
+                  signatures:
+                    type: array
+                    items:
+                      type: string
+        '400':
+          description: A hash was not authorised, or the request is malformed (`invalid_request`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/YiviCscError'
+        '401':
+          description: The access token is not valid (`invalid_token`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/YiviCscError'
+  /api/v1/yivi-csc/authorizations/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: The authorization's id, from the page the browser was redirected to.
+    get:
+      tags: [yivi-csc]
+      summary: Read an authorization (the authorization page)
+      description: >-
+        What the authorization page shows, and its poll: `status` (`pending`, `approved`,
+        `denied`), `purpose` (`link` or `sign`), the `walletLink` for the Yivi app while
+        pending, and once settled the `redirectUrl` the browser goes on to. Unauthenticated:
+        the unguessable id is the signer's whole authorization. 404 once it has expired
+        (five minutes).
+      security: []
+      responses:
+        '200':
+          description: The authorization.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/YiviCscAuthorization'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/yivi-csc/authorizations/{id}/cancel:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: The authorization's id.
+    post:
+      tags: [yivi-csc]
+      summary: Cancel an authorization (the authorization page)
+      description: >-
+        The signer choosing not to go on: a pending authorization becomes `denied` and its
+        `redirectUrl` carries `error=access_denied` back to the signing application.
+      security: []
+      responses:
+        '200':
+          description: The authorization, denied.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/YiviCscAuthorization'
+        '404':
+          $ref: '#/components/responses/NotFound'
 x-webhooks:
   proofing-session-event:
     post:
@@ -15580,12 +16220,143 @@ components:
     apiKey:
       type: http
       scheme: bearer
-      description: One of the organisation's identity proofing API keys (`yp_live_…`), for the public `/api/v1/proofing` routes.
+      description: One of the organisation's API keys (`yp_live_…`), for the public `/api/v1/proofing` and `/api/v1/signing/requests` routes.
     cookieAuth:
       type: apiKey
       in: cookie
       name: ybw_session
   schemas:
+    SigningApiRequest:
+      type: object
+      description: A signing request as the signing API shows it.
+      required: [id, status, filename, mode, recipientChannel, deliveryStatus, signers, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [awaiting_signatures, completed, declined, failed]
+        filename:
+          type: string
+        mode:
+          type: string
+          enum: [parallel, sequential]
+        returnUrl:
+          type: string
+          format: uri
+        recipientChannel:
+          type: string
+          enum: [none, email, qerds]
+        recipientName:
+          type: string
+        recipientAddress:
+          type: string
+        deliveryStatus:
+          type: string
+          enum: [not_requested, pending, delivered, failed]
+        deliveryError:
+          type: string
+        signers:
+          type: array
+          items:
+            $ref: '#/components/schemas/SigningApiSigner'
+        createdAt:
+          type: string
+          format: date-time
+        completedAt:
+          type: string
+          format: date-time
+    SigningApiSigner:
+      type: object
+      description: One signee of a signing request.
+      required: [id, kind, name, email, order, status, placements]
+      properties:
+        id:
+          type: string
+          format: uuid
+        kind:
+          type: string
+          enum: [internal, external]
+        userId:
+          type: string
+          format: uuid
+          description: The member's user id; absent for an external signee.
+        name:
+          type: string
+        email:
+          type: string
+        order:
+          type: integer
+          description: The signee's place in the signing order, from 1.
+        status:
+          type: string
+          enum: [pending, signed, failed, declined]
+        placements:
+          type: array
+          description: Where the signee's visible signature and initials go; empty for an invisible signature.
+          items:
+            type: object
+        signedAt:
+          type: string
+          format: date-time
+        declinedAt:
+          type: string
+          format: date-time
+        declineReason:
+          type: string
+        signingUrl:
+          type: string
+          format: uri
+          description: >-
+            The signee's signing page. Only on the answer that made the link: a create
+            with `sendMail` false, for each external signee who may sign now.
+    YiviCscError:
+      type: object
+      description: An OAuth 2.0 / CSC error of the built-in signing service.
+      required: [error, error_description]
+      properties:
+        error:
+          type: string
+          description: The OAuth 2.0 or CSC error code, such as `invalid_request` or `invalid_token`.
+        error_description:
+          type: string
+    YiviCscAuthorization:
+      type: object
+      description: An authorization at the built-in signing service, as its page reads it.
+      required: [status, purpose, expiresAt]
+      properties:
+        status:
+          type: string
+          enum: [pending, approved, denied]
+        purpose:
+          type: string
+          enum: [link, sign]
+          description: Whether the signer is identifying for their certificate (`link`) or approving a signature (`sign`).
+        description:
+          type: string
+          description: The signing application's name for what is signed.
+        source:
+          type: string
+          enum: [mrtd, brp]
+          description: >-
+            For `sign`: where the signer's certificate got its name, which is what they
+            must disclose again: a passport, identity card or residence permit (`mrtd`)
+            or the registered personal data (`brp`).
+        walletLink:
+          type: string
+          description: The OpenID4VP request for the Yivi app; only while pending.
+        expiresAt:
+          type: string
+          format: date-time
+        reason:
+          type: string
+          enum: [cancelled, identity_mismatch, identity_incomplete]
+          description: Why a denied authorization was denied.
+        redirectUrl:
+          type: string
+          format: uri
+          description: Where the browser goes once the authorization settled.
     CredentialRequestTemplate:
       type: object
       required: [id, name, credentials, createdAt]

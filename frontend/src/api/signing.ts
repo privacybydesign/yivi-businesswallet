@@ -1,12 +1,12 @@
 import { z } from "zod";
 import { ApiError, absoluteApiUrl, request, requestBlob } from "./http";
 
-// The qualified co-signing workflow: the business wallet is the RP-centric
-// Signature Creation Application. Each signer links a signing credential once (a
-// member in the "My credential" tab, an external signee behind their invitation
-// link), then a request routes a PDF to its signers; each signs via an OID4VP + CSC
-// ceremony that hands the browser off to the QTSP authorization server and returns
-// here. When all have signed, the document is delivered to the recipient over QERDS
+// The co-signing workflow: the business wallet is the RP-centric Signature
+// Creation Application. Each signer links a signing credential once (a member in
+// the "My credential" tab, an external signee behind their invitation link), then
+// a request routes a PDF to its signers; each signs via an OID4VP + CSC ceremony
+// that hands the browser off to the signing provider's authorization server (the
+// built-in service's own page, or a remote QTSP) and returns here. When all have signed, the document is delivered to the recipient over QERDS
 // or email.
 
 const NOT_FOUND_STATUS = 404;
@@ -77,6 +77,13 @@ export const PLACEMENT_KIND = {
 export type PlacementKind =
   (typeof PLACEMENT_KIND)[keyof typeof PLACEMENT_KIND];
 
+// How a request was made: by a member in the wallet, or by the organization's
+// own software over the signing API. An API request has no creator.
+export const CREATED_VIA = {
+  member: "member",
+  api: "api",
+} as const;
+
 export const placementSchema = z.object({
   kind: z.string(),
   page: z.number(),
@@ -111,6 +118,9 @@ export const signingRequestSchema = z.object({
   mode: z.string(),
   createdBy: z.string(),
   createdByName: z.string(),
+  createdVia: z.string().default(CREATED_VIA.member),
+  // For an API request: the site its signees are sent back to when done.
+  returnUrl: z.string().optional(),
   recipientChannel: z.string(),
   recipientName: z.string().optional(),
   recipientAddress: z.string().optional(),
@@ -324,6 +334,9 @@ export const externalSigningSchema = z.object({
   hasCredential: z.boolean(),
   canSign: z.boolean(),
   createdAt: z.string(),
+  // The site that sent the signee here, to offer a way back once they are
+  // done; it already carries the request id and status.
+  returnUrl: z.string().optional(),
 });
 export type ExternalSigning = z.infer<typeof externalSigningSchema>;
 
