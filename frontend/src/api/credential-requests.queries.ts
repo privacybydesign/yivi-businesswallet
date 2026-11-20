@@ -3,6 +3,7 @@ import type { UseMutationResult, UseQueryResult } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import type {
   CreateRequestTemplate,
+  CredentialType,
   IncomingRequest,
   OutboundRequest,
   RequestTemplate,
@@ -13,6 +14,7 @@ import {
   createRequestTemplate,
   declineIncomingRequest,
   deleteRequestTemplate,
+  getCredentialTypes,
   getIncomingRequests,
   getOutboundRequests,
   getRequestTemplates,
@@ -26,6 +28,21 @@ export function outboundRequestsQueryKey(slug: string): readonly string[] {
 
 export function incomingRequestsQueryKey(slug: string): readonly string[] {
   return ["organizations", "detail", slug, "credential-requests", "incoming"];
+}
+
+export function credentialTypesQueryKey(slug: string): readonly string[] {
+  return ["organizations", "detail", slug, "credential-requests", "types"];
+}
+
+export function useCredentialTypesQuery(
+  slug: string,
+  enabled = true,
+): UseQueryResult<CredentialType[], Error> {
+  return useQuery({
+    queryKey: credentialTypesQueryKey(slug),
+    queryFn: ({ signal }) => getCredentialTypes(slug, signal),
+    enabled: enabled && slug !== "",
+  });
 }
 
 export function requestTemplatesQueryKey(slug: string): readonly string[] {
