@@ -93,6 +93,9 @@ export function useRemoveMyAvatarMutation(): UseMutationResult<
 export function signOutCache(queryClient: QueryClient): void {
   // "me" is set, not removed: removing it leaves the screens that read it on
   // the old user, so the route guard never sends them to the login page.
+  // A "me" fetch still in flight would land after this and put the old user
+  // back, so it is cancelled first.
+  void queryClient.cancelQueries({ queryKey: meQueryKey });
   queryClient.setQueryData(meQueryKey, null);
   const meHash = hashKey(meQueryKey);
   queryClient.removeQueries({

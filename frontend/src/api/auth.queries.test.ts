@@ -35,6 +35,29 @@ describe("signOutCache", () => {
     shell.stop();
   });
 
+  it("stays signed out when a fetch of the user was still running", async () => {
+    const queryClient = new QueryClient();
+    const alice = { email: "alice@example.test" };
+    queryClient.setQueryData(meQueryKey, alice);
+    const guard = watch(queryClient, meQueryKey);
+    // A refetch that started while still signed in and answers after the logout.
+    let answer: (me: unknown) => void = () => {};
+    const running = queryClient
+      .fetchQuery({
+        queryKey: meQueryKey,
+        queryFn: () => new Promise((resolve) => (answer = resolve)),
+      })
+      .catch(() => undefined);
+
+    signOutCache(queryClient);
+    answer(alice);
+    await running;
+
+    expect(guard.data()).toBeNull();
+    expect(queryClient.getQueryData(meQueryKey)).toBeNull();
+    guard.stop();
+  });
+
   it("drops everything else the user read", () => {
     const queryClient = new QueryClient();
     queryClient.setQueryData(meQueryKey, { email: "alice@example.test" });
