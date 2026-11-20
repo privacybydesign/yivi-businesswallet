@@ -202,7 +202,7 @@ func TestIssueOrganizationDeliversOverQerds(t *testing.T) {
 	_, err := e.service.Issue(ctx, e.orgID, &e.actorID, "Caesar", attestation.IssueInput{
 		TemplateID: templateID,
 		Recipient:  attestation.Recipient{Kind: attestation.RecipientOrganization, Ref: "supplier@qerds.example"},
-		Attributes: map[string]any{"name": "Supplier B.V."},
+		Attributes: map[string]any{"name": "Supplier B.V.", attestation.IdentifierClaim: map[string]any{"euid": "NLNHR.12345678"}},
 	})
 	if err != nil {
 		t.Fatalf("Issue: %v", err)

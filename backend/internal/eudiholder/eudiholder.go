@@ -91,6 +91,11 @@ type Holder interface {
 	// yields an empty (non-nil) map.
 	Validities(ctx context.Context, orgID uuid.UUID) (map[string]HeldValidity, error)
 
+	// Payload returns a held credential's payload exactly as its issuer signed it,
+	// every disclosure resolved, so it can be checked against a credential schema.
+	// It is nil for a credential the engine holds no signed form of (the stub).
+	Payload(ctx context.Context, orgID uuid.UUID, ref string) (map[string]any, error)
+
 	// RefreshStatuses re-reads the Token Status List of every credential the
 	// organization holds that carries a status reference and stores what it
 	// observed, with the time of the check; Validities reads it back. It reports

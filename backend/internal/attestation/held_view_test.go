@@ -131,6 +131,10 @@ func (h *heldViewHolder) Validities(_ context.Context, _ uuid.UUID) (map[string]
 	return h.validities, nil
 }
 
+func (h *heldViewHolder) Payload(context.Context, uuid.UUID, string) (map[string]any, error) {
+	return nil, nil
+}
+
 func TestListHeldCarriesEachCredentialsValidity(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

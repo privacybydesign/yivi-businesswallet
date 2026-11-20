@@ -4573,6 +4573,16 @@ export const en = {
       recipientRequired: "Choose a recipient.",
       noAttributes: "This template has no attributes to fill in.",
       attributeRequired: "This attribute is required.",
+      identifierTitle: "Identifier (WE BUILD)",
+      identifierHint:
+        "WE BUILD requires at least one identifier of the organization. The EUID is filled in from the address book.",
+      identifierRequired: "Fill in at least one identifier.",
+      identifierFields: {
+        euid: "EUID",
+        lei: "LEI",
+        tax: "Tax number",
+        other: "Other identifier",
+      },
       reviewTemplate: "Template",
       reviewRecipient: "Recipient",
       offerHint:
