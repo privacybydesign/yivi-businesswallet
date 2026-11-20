@@ -14,7 +14,7 @@
     "typecheck": "tsc --build"
   },
   "dependencies": {
-    "@e4a/pg-js": "^2.2.0",
+    "@e4a/pg-js": "^2.6.0",
     "busboy": "^1.6.0"
   },
   "devDependencies": {
