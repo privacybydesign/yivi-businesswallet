@@ -1,5 +1,10 @@
-import type { UseMutationResult, UseQueryResult } from "@tanstack/react-query";
+import type {
+  QueryClient,
+  UseMutationResult,
+  UseQueryResult,
+} from "@tanstack/react-query";
 import {
+  hashKey,
   queryOptions,
   useMutation,
   useQuery,
@@ -83,15 +88,25 @@ export function useRemoveMyAvatarMutation(): UseMutationResult<
   });
 }
 
+// signOutCache leaves nothing the signed-out user read in memory for whoever
+// uses the browser next, and makes "me" read signed out.
+export function signOutCache(queryClient: QueryClient): void {
+  // "me" is set, not removed: removing it leaves the screens that read it on
+  // the old user, so the route guard never sends them to the login page.
+  // A "me" fetch still in flight would land after this and put the old user
+  // back, so it is cancelled first.
+  void queryClient.cancelQueries({ queryKey: meQueryKey });
+  queryClient.setQueryData(meQueryKey, null);
+  const meHash = hashKey(meQueryKey);
+  queryClient.removeQueries({
+    predicate: (query) => query.queryHash !== meHash,
+  });
+}
+
 export function useLogoutMutation(): UseMutationResult<void, Error, void> {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: () => logout(),
-    // Nothing the signed-out user read stays in memory for whoever uses the
-    // browser next: every cached answer goes, then "me" reads signed out.
-    onSuccess: () => {
-      queryClient.removeQueries();
-      queryClient.setQueryData(meQueryKey, null);
-    },
+    onSuccess: () => signOutCache(queryClient),
   });
 }
