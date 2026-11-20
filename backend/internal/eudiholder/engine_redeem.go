@@ -2,10 +2,12 @@ package eudiholder
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"slices"
 	"strings"
 	"sync"
@@ -16,6 +18,7 @@ import (
 	"github.com/privacybydesign/irmago/eudi/credentials/sdjwtvc"
 	"github.com/privacybydesign/irmago/eudi/credentials/statuslist"
 	eudijwt "github.com/privacybydesign/irmago/eudi/jwt"
+	"github.com/privacybydesign/irmago/eudi/oauth2"
 	"github.com/privacybydesign/irmago/eudi/openid4vci"
 	"github.com/privacybydesign/irmago/eudi/sdjwt"
 	"github.com/privacybydesign/irmago/eudi/services"
@@ -43,7 +46,8 @@ const defaultHolderLocale = "en"
 // per-org holder storage (the same storage.Storage the engine caches). The flow
 // is auto-consented: over the authenticated QERDS channel there is no operator to
 // prompt, and no tx_code (org offers are minted without one — see
-// .ai/features/oid4vci-over-qerds.md §4). Only the pre-authorized-code grant is
+// .ai/features/oid4vci-over-qerds.md §4), except where the offer carries its own
+// value (offerTxCode). Only the pre-authorized-code grant is
 // accepted; an authorization-code offer is declined (it needs interactive auth).
 func (e *Engine) Redeem(ctx context.Context, orgID uuid.UUID, offerURI string) (Redeemed, error) {
 	st, err := e.engineFor(ctx, orgID)
@@ -122,7 +126,7 @@ func (e *Engine) Redeem(ctx context.Context, orgID uuid.UUID, offerURI string) (
 		client.AllowInsecureHttpForTesting()
 	}
 
-	handler := newRedeemHandler()
+	handler := newRedeemHandler(offerTxCode(offerURI))
 	sessionID := int(e.sessionCounter.Add(1))
 	client.NewSession(sessionID, offerURI, redirectURI, handler)
 
@@ -391,11 +395,38 @@ type redeemResult struct {
 // synchronous result. It auto-grants the pre-authorized-code flow (no tx_code)
 // and the add-to-wallet permission, and declines the authorization-code flow.
 type redeemHandler struct {
-	done chan redeemResult
+	done   chan redeemResult
+	txCode *string
 }
 
-func newRedeemHandler() *redeemHandler {
-	return &redeemHandler{done: make(chan redeemResult, 1)}
+func newRedeemHandler(txCode *string) *redeemHandler {
+	return &redeemHandler{done: make(chan redeemResult, 1), txCode: txCode}
+}
+
+// offerTxCode returns the tx_code value an offer carries itself, as the EU
+// reference issuer's offers do (a non-standard grants.<pre-auth>.tx_code.value);
+// nil when there is none.
+func offerTxCode(offerURI string) *string {
+	u, err := url.Parse(offerURI)
+	if err != nil {
+		return nil
+	}
+	var offer struct {
+		Grants map[string]struct {
+			TxCode *struct {
+				Value json.Number `json:"value"`
+			} `json:"tx_code"`
+		} `json:"grants"`
+	}
+	if json.Unmarshal([]byte(u.Query().Get("credential_offer")), &offer) != nil {
+		return nil
+	}
+	grant, ok := offer.Grants[oauth2.GrantTypePreAuthorizedCode]
+	if !ok || grant.TxCode == nil || grant.TxCode.Value == "" {
+		return nil
+	}
+	code := grant.TxCode.Value.String()
+	return &code
 }
 
 func (h *redeemHandler) Success(_ string, issued []*clientmodels.Credential) {
@@ -449,7 +480,7 @@ func (h *redeemHandler) RequestPreAuthorizedCodeFlowPermission(
 	_ *clientmodels.TrustedParty,
 	callback openid4vci.TokenPermissionHandler,
 ) {
-	callback(true, nil)
+	callback(true, h.txCode)
 }
 
 func (h *redeemHandler) RequestAuthorizationCodeFlowPermission(
