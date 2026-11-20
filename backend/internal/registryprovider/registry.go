@@ -83,24 +83,34 @@ func (s *SeededRegistry) audit(ctx context.Context, req ConsultRequest, legalNam
 	if validated {
 		action = audit.KVKRegistrationValidated
 	}
-	recordDecision(ctx, s.db, s.recorder, action, req, legalName, outcome(validated), reason)
+	recordDecision(ctx, s.db, s.recorder, req, decision{
+		action: action, legalName: legalName, outcome: outcome(validated), reason: reason,
+	})
+}
+
+// decision is what a register decided on one consult, as the audit log keeps it.
+type decision struct {
+	action    string
+	legalName string
+	outcome   string
+	reason    string
 }
 
 // recordDecision writes one register decision to the audit log, against the KVK
 // register organisation when it is seeded.
-func recordDecision(ctx context.Context, db database.DB, recorder audit.Recorder, action string, req ConsultRequest, legalName, outcome, reason string) {
+func recordDecision(ctx context.Context, db database.DB, recorder audit.Recorder, req ConsultRequest, d decision) {
 	after := map[string]any{
 		"kvkNumber":   req.KVKNumber,
 		"givenNames":  req.GivenNames,
 		"familyName":  req.FamilyName,
 		"dateOfBirth": req.DateOfBirth,
-		"outcome":     outcome,
+		"outcome":     d.outcome,
 	}
-	if legalName != "" {
-		after["legalName"] = legalName
+	if d.legalName != "" {
+		after["legalName"] = d.legalName
 	}
-	if reason != "" {
-		after["reason"] = reason
+	if d.reason != "" {
+		after["reason"] = d.reason
 	}
 
 	target := audit.Target{Type: audit.TargetKVKRegistration, ID: req.KVKNumber}
@@ -110,7 +120,7 @@ func recordDecision(ctx context.Context, db database.DB, recorder audit.Recorder
 	} else {
 		target.OrgID = &orgID
 	}
-	if err := recorder.Record(ctx, db, action, target, audit.Created(after)); err != nil {
+	if err := recorder.Record(ctx, db, d.action, target, audit.Created(after)); err != nil {
 		slog.ErrorContext(ctx, "registryprovider: record kvk decision failed",
 			slog.String("kvkNumber", req.KVKNumber), slog.String("error", err.Error()))
 	}

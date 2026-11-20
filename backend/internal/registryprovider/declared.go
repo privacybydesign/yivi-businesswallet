@@ -36,14 +36,18 @@ func (*DeclaredRegistry) Ping(context.Context) error { return nil }
 
 func (r *DeclaredRegistry) Consult(ctx context.Context, req ConsultRequest) (RegistrationAttestation, error) {
 	if !kvkNumberPattern.MatchString(req.KVKNumber) {
-		recordDecision(ctx, r.db, r.recorder, audit.KVKRegistrationNotValidated, req, "", outcome(false), reasonUnknownKVK)
+		recordDecision(ctx, r.db, r.recorder, req, decision{
+			action: audit.KVKRegistrationNotValidated, outcome: outcome(false), reason: reasonUnknownKVK,
+		})
 		return RegistrationAttestation{}, ErrUnknownKVK
 	}
 	legalName := strings.TrimSpace(req.LegalName)
 	if legalName == "" || len(legalName) > maxLegalNameLength {
 		return RegistrationAttestation{}, ErrLegalNameRequired
 	}
-	recordDecision(ctx, r.db, r.recorder, audit.KVKRegistrationDeclared, req, legalName, outcomeDeclared, "")
+	recordDecision(ctx, r.db, r.recorder, req, decision{
+		action: audit.KVKRegistrationDeclared, legalName: legalName, outcome: outcomeDeclared,
+	})
 	return RegistrationAttestation{
 		KVKNumber: req.KVKNumber,
 		LegalName: legalName,
