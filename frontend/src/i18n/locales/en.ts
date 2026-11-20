@@ -3813,7 +3813,7 @@ export const en = {
       custom: "Custom CSC endpoint",
     },
     sampleHint:
-      "The sample provider is the bundled reference QTSP. Run it with `docker compose --profile signer up`; it listens on http://localhost:8085.",
+      "The sample provider is our hosted demo QTSP at https://csc-signer.staging.yivi.app. Request credentials at support@yivi.app.",
     builtInHint:
       "The wallet's own signing service, and the default. Signers identify with the Yivi app, using their passport, identity card, residence permit or registered personal data (BRP), and sign with an advanced electronic signature. There is nothing to configure.",
     builtInUnavailable:
