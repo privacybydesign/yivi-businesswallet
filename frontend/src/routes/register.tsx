@@ -7,7 +7,8 @@ import { ApiError } from "../api/http";
 import { REGISTER_SESSION_URL, registerWallet } from "../api/wallet";
 import type { WalletEnrollment } from "../api/wallet";
 import { meQueryKey } from "../api/auth.queries";
-import { registeredMessage } from "../lib/representation";
+import { registeredMessage, statedCompanyError } from "../lib/representation";
+import { CompanyNameField } from "./company-name-field";
 import { usePreAuthOrgTheme } from "../lib/pre-auth-theme";
 import {
   Button,
@@ -44,11 +45,9 @@ function errorMessage(error: unknown, t: TFunction): string {
     if (code === "ebwoid_mismatch") {
       return t("register.ebwoidMismatch");
     }
-    if (code === "unknown_kvk") {
-      return t("register.unknownKvk");
-    }
-    if (code === "legal_name_required") {
-      return t("register.companyNameRequired");
+    const stated = statedCompanyError(code, t);
+    if (stated !== null) {
+      return stated;
     }
     if (code === "slug_taken") {
       return t("register.slugTaken");
@@ -245,19 +244,10 @@ export default function Register(): React.JSX.Element {
                       autoFocus
                     />
                   </label>
-                  <label className="flex flex-col gap-1.5">
-                    <span className="text-ink text-[13px] font-semibold">
-                      {t("register.companyName")}
-                    </span>
-                    <Input
-                      value={companyName}
-                      onChange={(event) => setCompanyName(event.target.value)}
-                      placeholder={t("register.companyNamePlaceholder")}
-                    />
-                    <span className="text-muted text-[12px]">
-                      {t("register.companyNameHint")}
-                    </span>
-                  </label>
+                  <CompanyNameField
+                    value={companyName}
+                    onChange={setCompanyName}
+                  />
                   <label className="flex flex-col gap-1.5">
                     <span className="text-ink text-[13px] font-semibold">
                       {t("register.slug")}

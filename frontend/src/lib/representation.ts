@@ -43,3 +43,18 @@ export function registeredMessage(
   const role = representationLabel(result, t);
   return role === "" ? t("register.startsInTestMode") : t(roleKey, { role });
 }
+
+// statedCompanyError is the message for a refused KVK number or company name,
+// null for any other error code.
+export function statedCompanyError(
+  code: string | null,
+  t: TFunction,
+): string | null {
+  if (code === "unknown_kvk") {
+    return t("register.unknownKvk");
+  }
+  if (code === "legal_name_required") {
+    return t("register.companyNameRequired");
+  }
+  return null;
+}

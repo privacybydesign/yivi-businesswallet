@@ -5,7 +5,8 @@ import type { TFunction } from "i18next";
 import { useEnrollWalletMutation } from "../api/wallet.queries";
 import type { WalletEnrollment } from "../api/wallet";
 import { ApiError } from "../api/http";
-import { registeredMessage } from "../lib/representation";
+import { registeredMessage, statedCompanyError } from "../lib/representation";
+import { CompanyNameField } from "./company-name-field";
 import { Button, Card, Input, Outcome, TopBar } from "../ui";
 import * as React from "react";
 
@@ -31,11 +32,9 @@ function errorMessage(error: Error, t: TFunction): string {
     if (code === "ebwoid_mismatch") {
       return t("enroll.ebwoidMismatch");
     }
-    if (code === "unknown_kvk") {
-      return t("register.unknownKvk");
-    }
-    if (code === "legal_name_required") {
-      return t("register.companyNameRequired");
+    const stated = statedCompanyError(code, t);
+    if (stated !== null) {
+      return stated;
     }
     if (code === "slug_taken") {
       return t("register.slugTaken");
@@ -128,19 +127,7 @@ export default function Enroll(): React.JSX.Element {
               />
             </label>
 
-            <label className="flex flex-col gap-1.5">
-              <span className="text-ink text-[13px] font-semibold">
-                {t("register.companyName")}
-              </span>
-              <Input
-                value={companyName}
-                onChange={(event) => setCompanyName(event.target.value)}
-                placeholder={t("register.companyNamePlaceholder")}
-              />
-              <span className="text-muted text-[12px]">
-                {t("register.companyNameHint")}
-              </span>
-            </label>
+            <CompanyNameField value={companyName} onChange={setCompanyName} />
 
             <label className="flex flex-col gap-1.5">
               <span className="text-ink text-[13px] font-semibold">
