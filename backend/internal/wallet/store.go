@@ -127,8 +127,18 @@ func (s *Store) RegisterOrganization(ctx context.Context, reg Registration) (org
 			return err
 		}
 
-		const insMember = `INSERT INTO memberships (organization_id, user_id, role) VALUES ($1, $2, $3)`
-		if _, err := q.Exec(ctx, insMember, org.ID, requestorUserID, organization.RoleAdmin); err != nil {
+		// The registration disclosure identifies the owner the way an accepted
+		// invitation does; a new org has no re-identification policy yet.
+		var verifiedAt, dateOfBirth *time.Time
+		if reg.Requester.Disclosed {
+			now := time.Now()
+			verifiedAt = &now
+			if dob, err := time.Parse(dobLayout, reg.Requester.DateOfBirth); err == nil {
+				dateOfBirth = &dob
+			}
+		}
+		const insMember = `INSERT INTO memberships (organization_id, user_id, role, identity_verified_at, date_of_birth) VALUES ($1, $2, $3, $4, $5)`
+		if _, err := q.Exec(ctx, insMember, org.ID, requestorUserID, organization.RoleAdmin, verifiedAt, dateOfBirth); err != nil {
 			return fmt.Errorf("wallet: add owner membership: %w", err)
 		}
 

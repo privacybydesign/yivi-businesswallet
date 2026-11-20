@@ -42,6 +42,8 @@ type Requester struct {
 	GivenNames  string
 	FamilyName  string
 	DateOfBirth string
+	// Disclosed marks a fresh wallet disclosure, which identifies the first owner.
+	Disclosed bool
 }
 
 // Representation is one authorised representative from the KVK attestation — the
@@ -64,6 +66,7 @@ type Representation struct {
 type Registration struct {
 	OrgID             uuid.UUID
 	RequestorUserID   uuid.UUID
+	Requester         Requester
 	Slug              string
 	DigitalAddress    string
 	KVKContactAddress string
