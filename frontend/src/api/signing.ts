@@ -390,6 +390,31 @@ export function externalDocumentUrl(token: string): string {
   return absoluteApiUrl(`${externalBase(token)}/document`);
 }
 
+// getExternalDocument fetches that document for the viewer on the signing page.
+export async function getExternalDocument(
+  token: string,
+  signal?: AbortSignal,
+): Promise<Blob> {
+  const { blob } = await requestBlob(`${externalBase(token)}/document`, {
+    signal,
+  });
+  return blob;
+}
+
+// getSigningDocumentPreview fetches the document a member is asked to sign, as
+// it stands now, for the viewer they read it in before signing.
+export async function getSigningDocumentPreview(
+  slug: string,
+  id: string,
+  signal?: AbortSignal,
+): Promise<Blob> {
+  const { blob } = await requestBlob(
+    `${base(slug)}/requests/${encodeURIComponent(id)}/preview`,
+    { signal },
+  );
+  return blob;
+}
+
 // downloadSignedDocument fetches the signed PDF and triggers a browser save,
 // using the server-suggested filename when present.
 export async function downloadSignedDocument(

@@ -14207,6 +14207,42 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/signing/requests/{id}/preview:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: Signing request id.
+    get:
+      tags: [signing]
+      summary: Read the document before signing
+      description: >-
+        Requires organisation membership. Returns the request's PDF as it stands now
+        (`application/pdf`, inline), with the signatures made so far, so a signer can
+        read it before signing. An admin, or a member the request involves; 404 otherwise.
+      responses:
+        '2XX':
+          description: The document.
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/v1/orgs/{slug}/signing/requests/{id}/document:
     parameters:
       - name: slug

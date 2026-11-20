@@ -2961,6 +2961,16 @@ export const nl: Translation<typeof en> = {
       "Upload een PDF. De hash wordt met je wallet geautoriseerd, door de provider ondertekend en de ondertekende PDF wordt aan je teruggegeven.",
     signNeedsCredential: "Koppel eerst een ondertekencertificaat.",
     signButton: "Document ondertekenen",
+    reviewButton: "Bekijken en ondertekenen",
+    viewer: {
+      label: "Document {{filename}}",
+      loading: "Het document wordt geladen…",
+      error:
+        "Het document kan niet worden getoond. Laad de pagina opnieuw voordat je ondertekent.",
+      page: "Pagina {{page}} van {{total}}",
+      previous: "Vorige pagina",
+      next: "Volgende pagina",
+    },
     requestTitle: "Ondertekenverzoek",
     requestPending: "Wachten tot je de handtekening in je wallet autoriseert…",
     requestCompleted: "{{filename}} is ondertekend.",
@@ -3128,7 +3138,7 @@ export const nl: Translation<typeof en> = {
       youLabel: "Je ondertekent als",
       progressLabel: "Handtekeningen",
       progress: "{{signed}} van {{total}}",
-      reviewDocument: "Het document openen",
+      reviewDocument: "Openen in een nieuw tabblad",
       needsCredential:
         "Koppel eerst je ondertekencertificaat. Daarvoor identificeer je je één keer met je wallet-app; daarna kun je ondertekenen.",
       linkButton: "Ondertekencertificaat koppelen",

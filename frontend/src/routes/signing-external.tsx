@@ -8,6 +8,7 @@ import {
   SIGNER_STATUS,
   SIGNING_STATUS,
   externalDocumentUrl,
+  getExternalDocument,
 } from "../api/signing";
 import {
   useDeclineExternalSignMutation,
@@ -20,6 +21,7 @@ import { modeLabel } from "../lib/signing-labels";
 import { toast } from "../lib/toast";
 import { Button, Card, Logo, Outcome, buttonClassName } from "../ui";
 import { DeclineDialog } from "./signing-decline-dialog";
+import { SigningDocumentViewer } from "./signing-document-viewer";
 
 // The external signing page. An external signee was added to a co-signing request by
 // name + e-mail, so they have no account here and no session: this page is reached
@@ -29,6 +31,8 @@ import { DeclineDialog } from "./signing-decline-dialog";
 // makes the finished PDF carry one signature per signer regardless of who is inside
 // the org. A signee sent here by another site (a request made over the signing API)
 // is offered a link back to it once they are done; they are never sent there unasked.
+// While the signee still has to sign, the document itself is on the page beside the
+// buttons, so what they sign is what they are looking at.
 
 const NOT_FOUND_STATUS = 404;
 
@@ -106,9 +110,31 @@ export default function SigningExternal(): React.JSX.Element {
     view.error instanceof ApiError &&
     view.error.status === NOT_FOUND_STATUS;
 
+  // The signee still has a decision to make: the only state the document is shown in.
+  const reviewing =
+    view.isSuccess &&
+    view.data.signerStatus !== SIGNER_STATUS.signed &&
+    view.data.signerStatus !== SIGNER_STATUS.declined &&
+    view.data.status !== SIGNING_STATUS.failed &&
+    view.data.status !== SIGNING_STATUS.declined;
+
   return (
-    <div className="bg-surface-2 flex min-h-screen items-center justify-center p-6">
-      <Card className="w-full max-w-md p-6 sm:p-8">
+    <div
+      className={
+        reviewing
+          ? "bg-surface-2 flex min-h-screen flex-col items-center gap-6 p-6 lg:flex-row lg:items-start lg:justify-center"
+          : "bg-surface-2 flex min-h-screen items-center justify-center p-6"
+      }
+    >
+      {reviewing && (
+        <Card className="w-full max-w-3xl min-w-0 p-4 lg:flex-1">
+          <SigningDocumentViewer
+            filename={view.data.filename}
+            load={(signal) => getExternalDocument(signToken, signal)}
+          />
+        </Card>
+      )}
+      <Card className="w-full max-w-md p-6 sm:p-8 lg:sticky lg:top-6">
         <div className="flex justify-center">
           <Logo />
         </div>

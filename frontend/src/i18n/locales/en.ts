@@ -2891,6 +2891,16 @@ export const en = {
       "Upload a PDF. Its hash is authorized with your wallet, signed by the provider, and the signed PDF is returned to you.",
     signNeedsCredential: "Link a signing credential first.",
     signButton: "Sign document",
+    reviewButton: "Review and sign",
+    viewer: {
+      label: "Document {{filename}}",
+      loading: "Loading the document…",
+      error:
+        "The document could not be shown. Reload the page to try again before you sign.",
+      page: "Page {{page}} of {{total}}",
+      previous: "Previous page",
+      next: "Next page",
+    },
     requestTitle: "Signing request",
     requestPending:
       "Waiting for you to authorize the signature in your wallet…",
@@ -3054,7 +3064,7 @@ export const en = {
       youLabel: "Signing as",
       progressLabel: "Signatures",
       progress: "{{signed}} of {{total}}",
-      reviewDocument: "Open the document",
+      reviewDocument: "Open in a new tab",
       needsCredential:
         "Link your signing certificate first. You identify with your wallet app once; after that you can sign.",
       linkButton: "Link signing certificate",

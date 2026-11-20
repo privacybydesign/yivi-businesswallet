@@ -32,6 +32,13 @@ a ceremony. So signing is split:
    credential id + certificate + chain per (org, user) in `signing_credentials`.
    The row records the provider it was linked at (`provider_base_url`): after the org
    changes provider the old credential no longer counts and the signer links again.
+
+A signee reads the document on the page they sign it from, not in another tab: the
+external signing page shows it beside the buttons, and a member's "To sign" entry opens
+it in a viewer whose footer holds Sign and Decline (`routes/signing-document-viewer`,
+pdf.js). Members read it from `GET /orgs/{slug}/signing/requests/{id}/preview`, external
+signees from `GET /signing/external/{token}/document`; both serve the document as it
+stands, with the signatures made so far.
 2. **Sign a document** (per doc, `POST /orgs/{slug}/signing/requests`): prepare the PDF against
    the cached cert to get the hash → `scope=credential` `authorize` binding that hash (SCAL2)
    → token → `signHash` → embed. One wallet scan per document.
