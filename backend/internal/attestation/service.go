@@ -221,6 +221,7 @@ func (s *Service) Issue(ctx context.Context, orgID uuid.UUID, issuedBy *uuid.UUI
 		// .ai/features/oid4vci-over-qerds.md §4).
 		UseTxCode:   in.Recipient.Kind == RecipientExternal,
 		AwaitRedeem: in.Recipient.Kind == RecipientOrganization,
+		Rulebook:    detail.SchemaRulebook != "",
 	})
 	if err != nil {
 		if failErr := s.store.MarkFailed(ctx, orgID, issued.ID); failErr != nil {

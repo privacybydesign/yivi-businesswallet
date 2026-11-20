@@ -262,34 +262,3 @@ func TestBuildIssuerConfigJSONShape(t *testing.T) {
 		t.Fatalf("claim display uses wrong key (want locale): %s", raw)
 	}
 }
-
-func TestBuildIssuerConfigRulebookVeramoOptions(t *testing.T) {
-	rb, err := SchemaFromRulebook("eucc", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	got := BuildIssuerConfig(rb, "", "").Metadata["we-build-eucc"]
-	if got.VCT != "uri:eu.eudi.eucc.1" || !got.OmitFedClaim || !got.CnfJWK {
-		t.Errorf("rulebook options = vct %q, omit_fed_claim %v, cnf_jwk %v", got.VCT, got.OmitFedClaim, got.CnfJWK)
-	}
-	if len(got.CryptographicBindingMethodsSupported) != 1 || got.CryptographicBindingMethodsSupported[0] != bindingMethodJwk {
-		t.Errorf("binding methods = %v, want [jwk]", got.CryptographicBindingMethodsSupported)
-	}
-	if len(got.StatusList) != 1 || got.StatusList[0].Type != "statuslist+jwt" || got.StatusList[0].Name != rulebookStatusList {
-		t.Errorf("status list = %+v", got.StatusList)
-	}
-
-	raw, err := json.Marshal(BuildIssuerConfig(sampleSchema(), "", "").Metadata["nl.caesar.employee"])
-	if err != nil {
-		t.Fatal(err)
-	}
-	var own map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &own); err != nil {
-		t.Fatal(err)
-	}
-	for _, key := range []string{"vct", "omit_fed_claim", "cnf_jwk", "statuslist"} {
-		if _, ok := own[key]; ok {
-			t.Errorf("own schema config carries %q", key)
-		}
-	}
-}

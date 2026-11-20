@@ -69,6 +69,9 @@ type OfferRequest struct {
 	// AwaitRedeem keeps a stub offer pending until the stub holder redeems it, as a
 	// real issuer does until a wallet collects the credential. Only the stub reads it.
 	AwaitRedeem bool
+	// Rulebook marks a WE BUILD rulebook credential, which RulebookRouter sends to
+	// the rulebook issuer.
+	Rulebook bool
 }
 
 // Offer is a created credential offer: the opaque issuance id we poll on plus the
