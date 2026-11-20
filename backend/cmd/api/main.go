@@ -68,6 +68,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/teamschannel"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/themesettings"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/verification"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/vog"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/wallet"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/walletunit"
@@ -757,6 +758,7 @@ type wiring struct {
 	requesterHandler      *openid4vprequester.Handler
 	requestTemplates      *openid4vprequester.TemplateHandler
 	attestationHandler    *attestation.Handler
+	verificationHandler   *verification.Handler
 	wscaWalletHandler     *wscawallet.Handler
 	walletUnitHandler     *walletunit.Handler
 	notificationsHandler  *notifications.Handler
@@ -1094,6 +1096,14 @@ func (w *wiring) buildAttestations(ctx context.Context) error {
 	// the org service is constructed before the attestation service.
 	w.orgService.SetOnboardingIssuer(attestation.NewOnboardingIssuer(attestationStore, attestationService))
 	w.attestationHandler = attestation.NewHandler(attestationStore, attestationService, issuerSettingsStore, w.orgStore, attestationIssuerURL(cfg), w.requireUser, w.orgHandler.Authorize)
+
+	// Verifications (#245): an organisation asking another business wallet to
+	// present a credential. The request is minted at the same hosted verifier the
+	// login flow uses and the disclosure is graded against the org's own issuance
+	// ledger, so it reuses the attestation store rather than a status list.
+	verificationStore := verification.NewStore(w.pool, w.recorder)
+	verificationService := verification.NewService(verificationStore, verificationStore, w.verifier, attestationStore, cfg.AppBaseURL, cfg.VerificationSessionTTL)
+	w.verificationHandler = verification.NewHandler(verificationStore, verificationService, w.requireUser, w.orgHandler.Authorize)
 
 	// Org-admin WSCA holder-wallet lifecycle (activate / rotate). It shares the
 	// sealed-secret store + keystore layout with the holder redeem path so a wallet
@@ -1477,6 +1487,7 @@ func (w *wiring) httpServer() *http.Server {
 		w.issuerSettingsHandler,
 		w.themeSettingsHandler,
 		w.attestationHandler,
+		w.verificationHandler,
 		w.wscaWalletHandler,
 		w.walletUnitHandler,
 		w.notificationsHandler,
