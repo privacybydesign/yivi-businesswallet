@@ -29,10 +29,6 @@ const (
 	// anyway, but we emit them so the fragment is a faithful drop-in).
 	sdjwtSigningAlg     = "ES256"
 	bindingMethodDidJwk = "did:jwk"
-	bindingMethodJwk    = "jwk"
-	// rulebookStatusList is the Token Status List every rulebook credential gets a
-	// bit on; Veramo shares a list by name, so one list serves every instance.
-	rulebookStatusList = "we-build-revocation"
 	// defaultVctLanguage is the primary language a VCT document declares.
 	defaultVctLanguage = "en"
 	// vctSelectiveDisclosure marks a claim as selectively disclosable in a VCT
@@ -92,21 +88,6 @@ type credentialConfiguration struct {
 	CredentialDefinition                 credentialDefinition `json:"credential_definition"`
 	CredentialMetadata                   credentialMetadata   `json:"credential_metadata"`
 	Display                              []localeDisplay      `json:"display,omitempty"`
-	// Veramo options a WE BUILD rulebook needs: its exact vct (not Veramo's URL),
-	// no non-standard fed claim, cnf.jwk holder binding and a Token Status List.
-	VCT          string             `json:"vct,omitempty"`
-	OmitFedClaim bool               `json:"omit_fed_claim,omitempty"`
-	CnfJWK       bool               `json:"cnf_jwk,omitempty"`
-	StatusList   []statusListOption `json:"statuslist,omitempty"`
-}
-
-// statusListOption is one entry of a Veramo credential config's statuslist.
-type statusListOption struct {
-	Name    string `json:"name"`
-	Size    int    `json:"size"`
-	BitSize int    `json:"bitSize"`
-	Purpose string `json:"purpose"`
-	Type    string `json:"type"`
 }
 
 // vctDocument is a conf/vct/*.json entry: the SD-JWT VC Type Metadata for a
@@ -165,13 +146,6 @@ func BuildIssuerConfig(s Schema, issuerURL, logoDataURI string) IssuerConfig {
 		},
 		CredentialMetadata: credentialMetadata{Display: credDisplay, Claims: claims},
 		Display:            credDisplay,
-	}
-	if rb, ok := rulebook.Get(s.Rulebook); ok {
-		cfg.CryptographicBindingMethodsSupported = []string{bindingMethodJwk}
-		cfg.VCT = rb.VCT
-		cfg.OmitFedClaim = true
-		cfg.CnfJWK = true
-		cfg.StatusList = []statusListOption{{Name: rulebookStatusList, Size: 131072, BitSize: 1, Purpose: "revocation", Type: "statuslist+jwt"}}
 	}
 
 	return IssuerConfig{

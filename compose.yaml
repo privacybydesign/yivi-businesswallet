@@ -106,6 +106,7 @@ services:
       ATTESTATION_ISSUER_INSTANCE: ${ATTESTATION_ISSUER_INSTANCE:-}
       ATTESTATION_ISSUER_ADMIN_TOKEN: ${ATTESTATION_ISSUER_ADMIN_TOKEN:-}
       ATTESTATION_ISSUER_PING_CREDENTIAL: ${ATTESTATION_ISSUER_PING_CREDENTIAL:-}
+      ATTESTATION_RULEBOOK_ISSUER_URL: ${ATTESTATION_RULEBOOK_ISSUER_URL:-}
       # Identity proofing runs in the backend's own engine (`engine`, the
       # default) or the in-memory `stub`. The encryption key (hex 32 bytes)
       # seals the sessions' evidence and the webhook secrets at rest.

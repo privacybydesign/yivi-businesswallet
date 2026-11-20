@@ -357,6 +357,17 @@ type attestationIssuer interface {
 }
 
 func newAttestationIssuer(cfg config.Config) (attestationIssuer, error) {
+	iss, err := newDefaultAttestationIssuer(cfg)
+	if err != nil || cfg.AttestationRulebookIssuerURL == "" {
+		return iss, err
+	}
+	return openid4vciissuer.RulebookRouter{
+		Default:   iss,
+		Rulebooks: openid4vciissuer.NewEudiIssuer(cfg.AttestationRulebookIssuerURL, &http.Client{Timeout: issuerHTTPTimeout}),
+	}, nil
+}
+
+func newDefaultAttestationIssuer(cfg config.Config) (attestationIssuer, error) {
 	switch cfg.AttestationIssuer {
 	case config.IssuerStub:
 		return openid4vciissuer.NewStubIssuerWithClaimDelay(cfg.AttestationStubClaimDelay), nil
