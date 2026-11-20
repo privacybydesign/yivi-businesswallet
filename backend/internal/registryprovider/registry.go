@@ -83,12 +83,18 @@ func (s *SeededRegistry) audit(ctx context.Context, req ConsultRequest, legalNam
 	if validated {
 		action = audit.KVKRegistrationValidated
 	}
+	recordDecision(ctx, s.db, s.recorder, action, req, legalName, outcome(validated), reason)
+}
+
+// recordDecision writes one register decision to the audit log, against the KVK
+// register organisation when it is seeded.
+func recordDecision(ctx context.Context, db database.DB, recorder audit.Recorder, action string, req ConsultRequest, legalName, outcome, reason string) {
 	after := map[string]any{
 		"kvkNumber":   req.KVKNumber,
 		"givenNames":  req.GivenNames,
 		"familyName":  req.FamilyName,
 		"dateOfBirth": req.DateOfBirth,
-		"outcome":     outcome(validated),
+		"outcome":     outcome,
 	}
 	if legalName != "" {
 		after["legalName"] = legalName
@@ -98,13 +104,13 @@ func (s *SeededRegistry) audit(ctx context.Context, req ConsultRequest, legalNam
 	}
 
 	target := audit.Target{Type: audit.TargetKVKRegistration, ID: req.KVKNumber}
-	if orgID, err := s.registerOrgID(ctx); err != nil {
+	if orgID, err := registerOrgID(ctx, db); err != nil {
 		slog.WarnContext(ctx, "registryprovider: resolve kvk register org for audit failed",
 			slog.String("kvkNumber", req.KVKNumber), slog.String("error", err.Error()))
 	} else {
 		target.OrgID = &orgID
 	}
-	if err := s.recorder.Record(ctx, s.db, action, target, audit.Created(after)); err != nil {
+	if err := recorder.Record(ctx, db, action, target, audit.Created(after)); err != nil {
 		slog.ErrorContext(ctx, "registryprovider: record kvk decision failed",
 			slog.String("kvkNumber", req.KVKNumber), slog.String("error", err.Error()))
 	}
@@ -112,9 +118,9 @@ func (s *SeededRegistry) audit(ctx context.Context, req ConsultRequest, legalNam
 
 // registerOrgID resolves the seeded KVK register organisation the decisions are
 // audited against.
-func (s *SeededRegistry) registerOrgID(ctx context.Context) (uuid.UUID, error) {
+func registerOrgID(ctx context.Context, db database.DB) (uuid.UUID, error) {
 	var id uuid.UUID
-	err := s.db.QueryRow(ctx,
+	err := db.QueryRow(ctx,
 		`SELECT id FROM organizations WHERE kvk_number = $1`, RegisterKVKNumber).Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return uuid.UUID{}, fmt.Errorf("kvk register organisation (kvk %s) not seeded", RegisterKVKNumber)

@@ -16,7 +16,7 @@ export type WalletEnrollment = z.infer<typeof walletEnrollmentSchema>;
 // dev) and, if the caller is a listed representative, creates the organization
 // (named from the register) and makes them an owner in one step.
 export function enrollWallet(
-  input: { kvkNumber: string; slug: string },
+  input: { kvkNumber: string; slug: string; legalName: string },
   signal?: AbortSignal,
 ): Promise<WalletEnrollment> {
   return request("/api/v1/wallet", {
@@ -33,7 +33,12 @@ export function enrollWallet(
 export const REGISTER_SESSION_URL = "/api/v1/register/session";
 
 export function registerWallet(
-  input: { disclosureToken: string; kvkNumber: string; slug: string },
+  input: {
+    disclosureToken: string;
+    kvkNumber: string;
+    slug: string;
+    legalName: string;
+  },
   signal?: AbortSignal,
 ): Promise<WalletEnrollment> {
   return request("/api/v1/register", {

@@ -20,7 +20,7 @@ import (
 type walletService interface {
 	OpenWallet(ctx context.Context, requestorUserID uuid.UUID, requester Requester, kvkNumber, slug string) (RegistrationResult, error)
 	StartRegisterSession(ctx context.Context) (auth.Session, error)
-	Register(ctx context.Context, disclosureToken, kvkNumber, slug string) (RegistrationOutcome, error)
+	Register(ctx context.Context, disclosureToken, kvkNumber, slug, companyName string) (RegistrationOutcome, error)
 	Representations(ctx context.Context, orgID uuid.UUID) ([]Representation, error)
 	ClaimRepresentation(ctx context.Context, orgID, repID, userID uuid.UUID) error
 	Suspend(ctx context.Context, orgID uuid.UUID) (organization.Organization, error)
@@ -101,6 +101,8 @@ type registerRequest struct {
 	DisclosureToken string `json:"disclosureToken"`
 	KVKNumber       string `json:"kvkNumber"`
 	Slug            string `json:"slug"`
+	// LegalName is read only where no register supplies the company's name.
+	LegalName string `json:"legalName"`
 }
 
 func (h *Handler) register(w http.ResponseWriter, r *http.Request) error {
@@ -117,7 +119,7 @@ func (h *Handler) register(w http.ResponseWriter, r *http.Request) error {
 		return badRequest("invalid_input", "kvkNumber is required")
 	}
 
-	outcome, err := h.service.Register(r.Context(), req.DisclosureToken, req.KVKNumber, req.Slug)
+	outcome, err := h.service.Register(r.Context(), req.DisclosureToken, req.KVKNumber, req.Slug, req.LegalName)
 	if e := mapError(err); e != nil {
 		return e
 	}
@@ -133,6 +135,7 @@ func (h *Handler) register(w http.ResponseWriter, r *http.Request) error {
 type openRequest struct {
 	KVKNumber string `json:"kvkNumber"`
 	Slug      string `json:"slug"`
+	LegalName string `json:"legalName"`
 }
 
 func (h *Handler) open(w http.ResponseWriter, r *http.Request) error {
@@ -148,7 +151,7 @@ func (h *Handler) open(w http.ResponseWriter, r *http.Request) error {
 	u := auth.UserFromContext(r.Context())
 	// The logged-in path has no fresh disclosure, so KVK matches on the stored
 	// name alone (no verified date of birth). See wallet.Requester.
-	requester := Requester{GivenNames: u.GivenNames, FamilyName: u.LastName}
+	requester := Requester{GivenNames: u.GivenNames, FamilyName: u.LastName, CompanyName: req.LegalName}
 	res, err := h.service.OpenWallet(r.Context(), u.ID, requester, req.KVKNumber, req.Slug)
 	if e := mapError(err); e != nil {
 		return e
@@ -216,6 +219,8 @@ func mapError(err error) error {
 		return &respond.APIError{Status: http.StatusForbidden, Code: "not_a_representative", Message: "you are not registered as a representative of this company"}
 	case errors.Is(err, ErrUnknownKVK):
 		return &respond.APIError{Status: http.StatusUnprocessableEntity, Code: "unknown_kvk", Message: "this KVK number is not in the register"}
+	case errors.Is(err, ErrCompanyNameRequired):
+		return badRequest("legal_name_required", "legalName is required, at most 200 characters")
 	case errors.Is(err, ErrEBWOIDMismatch):
 		return &respond.APIError{Status: http.StatusUnprocessableEntity, Code: "ebwoid_mismatch", Message: "the owner identification data does not match this company"}
 	case errors.Is(err, ErrAlreadyRegistered):

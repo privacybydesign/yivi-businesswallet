@@ -5,7 +5,7 @@ import type { TFunction } from "i18next";
 import { useEnrollWalletMutation } from "../api/wallet.queries";
 import type { WalletEnrollment } from "../api/wallet";
 import { ApiError } from "../api/http";
-import { representationLabel } from "../lib/representation";
+import { registeredMessage } from "../lib/representation";
 import { Button, Card, Input, Outcome, TopBar } from "../ui";
 import * as React from "react";
 
@@ -31,6 +31,12 @@ function errorMessage(error: Error, t: TFunction): string {
     if (code === "ebwoid_mismatch") {
       return t("enroll.ebwoidMismatch");
     }
+    if (code === "unknown_kvk") {
+      return t("register.unknownKvk");
+    }
+    if (code === "legal_name_required") {
+      return t("register.companyNameRequired");
+    }
     if (code === "slug_taken") {
       return t("register.slugTaken");
     }
@@ -50,12 +56,17 @@ export default function Enroll(): React.JSX.Element {
   const enroll = useEnrollWalletMutation();
   const [kvkNumber, setKvkNumber] = useState("");
   const [slug, setSlug] = useState("");
+  const [companyName, setCompanyName] = useState("");
   const [result, setResult] = useState<WalletEnrollment | null>(null);
 
   function handleSubmit(event: React.FormEvent<HTMLFormElement>): void {
     event.preventDefault();
     enroll.mutate(
-      { kvkNumber: kvkNumber.trim(), slug: slug.trim() },
+      {
+        kvkNumber: kvkNumber.trim(),
+        slug: slug.trim(),
+        legalName: companyName.trim(),
+      },
       { onSuccess: (data) => setResult(data) },
     );
   }
@@ -70,9 +81,7 @@ export default function Enroll(): React.JSX.Element {
               tone="success"
               icon="valid"
               title={t("enroll.registeredAt", { org: result.legalName })}
-              message={t("enroll.yourRole", {
-                role: representationLabel(result, t),
-              })}
+              message={registeredMessage(result, "enroll.yourRole", t)}
               action={
                 <Button
                   variant="primary"
@@ -89,7 +98,10 @@ export default function Enroll(): React.JSX.Element {
   }
 
   const canSubmit =
-    kvkNumber.trim() !== "" && slug.trim() !== "" && !enroll.isPending;
+    kvkNumber.trim() !== "" &&
+    companyName.trim() !== "" &&
+    slug.trim() !== "" &&
+    !enroll.isPending;
 
   return (
     <>
@@ -114,6 +126,20 @@ export default function Enroll(): React.JSX.Element {
                 className="font-mono"
                 autoFocus
               />
+            </label>
+
+            <label className="flex flex-col gap-1.5">
+              <span className="text-ink text-[13px] font-semibold">
+                {t("register.companyName")}
+              </span>
+              <Input
+                value={companyName}
+                onChange={(event) => setCompanyName(event.target.value)}
+                placeholder={t("register.companyNamePlaceholder")}
+              />
+              <span className="text-muted text-[12px]">
+                {t("register.companyNameHint")}
+              </span>
             </label>
 
             <label className="flex flex-col gap-1.5">

@@ -32,3 +32,14 @@ export function representationLabel(
     ];
   return authKey === undefined ? t(kindKey) : `${t(kindKey)} · ${t(authKey)}`;
 }
+
+// registeredMessage is what the confirmation says under the title: the role the
+// register stated, or, where it stated none, how the wallet starts.
+export function registeredMessage(
+  result: WalletEnrollment,
+  roleKey: "register.yourRole" | "enroll.yourRole",
+  t: TFunction,
+): string {
+  const role = representationLabel(result, t);
+  return role === "" ? t("register.startsInTestMode") : t(roleKey, { role });
+}

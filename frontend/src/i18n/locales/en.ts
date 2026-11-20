@@ -75,14 +75,13 @@ export const en = {
   },
   enroll: {
     title: "Register a business wallet",
-    subtitle:
-      "Register your organization's wallet via the Chamber of Commerce.",
+    subtitle: "Register your organization's wallet with its KVK number.",
     intro:
-      "Enter your organization's KVK number. We securely consult the KVK (Kamer van Koophandel) to confirm the company and to check that you are registered as an authorized representative. Only then is the wallet created and you become an owner.",
+      "Enter your organization's KVK number and name. The wallet is created for that company and you become an owner.",
     kvkNumber: "KVK number",
     kvkPlaceholder: "e.g. 94861412",
-    submit: "Consult KVK & register",
-    consulting: "Consulting KVK…",
+    submit: "Register",
+    consulting: "Registering…",
     registeredAt: "Wallet registered for {{org}}",
     yourRole: "The KVK lists you as: {{role}}",
     continue: "Go to {{org}}",
@@ -284,9 +283,17 @@ export const en = {
     title: "Register a business wallet",
     subtitle: "New here? Register your company — no account needed yet.",
     intro:
-      "Enter your organization's KVK number. You'll confirm your identity with your wallet, and we securely consult the KVK (Kamer van Koophandel) to check that you're a registered representative. If so, we create the wallet and log you in as an owner.",
+      "Enter your organization's KVK number and name. You'll confirm your identity with your wallet, and we create the wallet and log you in as an owner.",
     kvkNumber: "KVK number",
     kvkPlaceholder: "e.g. 94861412",
+    companyName: "Company name",
+    companyNamePlaceholder: "e.g. Yivi B.V.",
+    companyNameHint: "The name your company is registered under at the KVK.",
+    companyNameRequired: "Enter your company's name, at most 200 characters.",
+    unknownKvk:
+      "This KVK number was not accepted. Check that it is the 8 digits of your company's KVK number.",
+    startsInTestMode:
+      "Your wallet starts in test mode. Yivi switches it to live once your company is confirmed.",
     slug: "Wallet handle (slug)",
     slugPlaceholder: "e.g. yivi",
     slugHint: "Used in the URL. Lowercase letters, numbers and hyphens.",
@@ -305,16 +312,16 @@ export const en = {
     disclosure: {
       identityLabel: "Passport, ID card or residence permit",
       identityDetail:
-        "Confirms your name, date of birth and nationality, so we can match you to the company's registered representatives at the KVK.",
+        "Confirms your name, date of birth and nationality, so it is known who registered this company.",
       emailLabel: "Email address",
       emailDetail: "Becomes the address you sign in with.",
       phoneLabel: "Phone number",
       phoneDetail: "Added to your verified profile.",
     },
     disclosureFootnote:
-      "Nothing is stored beyond what's needed to create your wallet and match you at the Chamber of Commerce.",
+      "Nothing is stored beyond what's needed to create your wallet and record who registered it.",
     onboardTitle: "Onboarding your wallet",
-    registering: "Consulting KVK…",
+    registering: "Creating your wallet…",
     registeredAt: "Wallet registered for {{org}}",
     yourRole: "The KVK lists you as: {{role}}",
     enter: "Continue to {{org}}",
@@ -2626,6 +2633,8 @@ export const en = {
       wscaAccountRotated: "Rotated the wallet secret",
       kvkRegistrationValidated: "KVK validated registration",
       kvkRegistrationNotValidated: "KVK rejected registration",
+      kvkRegistrationDeclared:
+        "Company registered as stated, not checked at KVK",
       attestationSchemaCreated: "Created attestation schema",
       attestationSchemaUpdated: "Updated attestation schema",
       attestationSchemaDeleted: "Deleted attestation schema",

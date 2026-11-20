@@ -101,6 +101,9 @@ const (
 	// it consults its authentic source for a registration request.
 	KVKRegistrationValidated    = "kvk.registration_validated"
 	KVKRegistrationNotValidated = "kvk.registration_not_validated"
+	// KVKRegistrationDeclared is a company accepted as the requester stated it,
+	// with no register consulted.
+	KVKRegistrationDeclared = "kvk.registration_declared"
 
 	AttestationSchemaCreated   = "attestation.schema_created"
 	AttestationSchemaUpdated   = "attestation.schema_updated"

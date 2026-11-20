@@ -367,6 +367,8 @@ export function auditActionLabel(action: string, t: TFunction): string {
       return t("auditLog.actions.kvkRegistrationValidated");
     case "kvk.registration_not_validated":
       return t("auditLog.actions.kvkRegistrationNotValidated");
+    case "kvk.registration_declared":
+      return t("auditLog.actions.kvkRegistrationDeclared");
     case "attestation.schema_created":
       return t("auditLog.actions.attestationSchemaCreated");
     case "attestation.schema_updated":
