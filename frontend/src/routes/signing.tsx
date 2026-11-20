@@ -55,13 +55,15 @@ import { toast } from "../lib/toast";
 import { Avatar, Button, Card, Icon, Input, Modal, Tag, TopBar } from "../ui";
 import { SigningHistoryPanel } from "./signing-history";
 import { DeclineDialog } from "./signing-decline-dialog";
-import { SigningDocumentViewer } from "./signing-document-viewer";
 
-// The placement editor pulls in pdf.js, which is larger than the rest of the app put
-// together, so it is a chunk of its own: nobody who is not placing a signature on a
-// document should be made to download a PDF renderer.
+// The placement editor and the document viewer pull in pdf.js, which is larger than the
+// rest of the app put together, so each is a chunk of its own: nobody who is not placing
+// a signature on a document or reading one should be made to download a PDF renderer.
 const PlacementEditor = React.lazy(async () => ({
   default: (await import("./signing-placement")).PlacementEditor,
+}));
+const SigningDocumentViewer = React.lazy(async () => ({
+  default: (await import("./signing-document-viewer")).SigningDocumentViewer,
 }));
 
 const CONFLICT_STATUS = 409;
@@ -554,13 +556,19 @@ function ToSignTab({
             </>
           }
         >
-          <SigningDocumentViewer
-            key={reviewing.id}
-            filename={reviewing.filename}
-            load={(signal) =>
-              getSigningDocumentPreview(slug, reviewing.id, signal)
+          <React.Suspense
+            fallback={
+              <p className="text-ink-soft text-[13px]">{t("common.loading")}</p>
             }
-          />
+          >
+            <SigningDocumentViewer
+              key={reviewing.id}
+              filename={reviewing.filename}
+              load={(signal) =>
+                getSigningDocumentPreview(slug, reviewing.id, signal)
+              }
+            />
+          </React.Suspense>
         </Modal>
       )}
       {decliningId && (
