@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -65,6 +66,24 @@ func TestRequireUser_InvalidSession(t *testing.T) {
 		t.Fatalf("Lookup got %q, want the raw cookie token", lk.got)
 	}
 	assertUnauthBody(t, rec)
+}
+
+func TestRequireUser_LookupFailure_IsNotUnauthenticated(t *testing.T) {
+	lk := &fakeLookuper{err: errors.New("connection pool exhausted")}
+	called := false
+	next := http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true })
+
+	req := httptest.NewRequest(http.MethodGet, "/me", nil)
+	req.AddCookie(&http.Cookie{Name: cookieName, Value: "good"})
+	rec := httptest.NewRecorder()
+	RequireUser(lk)(next).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", rec.Code)
+	}
+	if called {
+		t.Fatal("next must not be called when the session lookup fails")
+	}
 }
 
 func TestRequireUser_ValidSession_InjectsUser(t *testing.T) {
