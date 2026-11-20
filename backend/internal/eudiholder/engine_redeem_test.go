@@ -2,6 +2,8 @@ package eudiholder
 
 import (
 	"errors"
+	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/privacybydesign/irmago/eudi/storage/db"
@@ -151,6 +153,26 @@ func TestBatchStatusStoreListsOneBatch(t *testing.T) {
 	for _, inst := range got {
 		if inst.BatchID != target {
 			t.Errorf("listed an instance of batch %s, want only %s", inst.BatchID, target)
+		}
+	}
+}
+
+func TestOfferTxCodeReadsTheValueTheOfferCarries(t *testing.T) {
+	withValue := "openid-credential-offer://?credential_offer=" + url.QueryEscape(
+		`{"credential_issuer":"https://i.example","grants":{"urn:ietf:params:oauth:grant-type:pre-authorized_code":{"pre-authorized_code":"c","tx_code":{"length":5,"value":12345}}}}`)
+	if got := offerTxCode(withValue); got == nil || *got != "12345" {
+		t.Errorf("offerTxCode = %v, want 12345", got)
+	}
+	asString := strings.Replace(withValue, url.QueryEscape(`12345`), url.QueryEscape(`"12345"`), 1)
+	if got := offerTxCode(asString); got == nil || *got != "12345" {
+		t.Errorf("offerTxCode(string value) = %v, want 12345", got)
+	}
+
+	withoutValue := "openid-credential-offer://?credential_offer=" + url.QueryEscape(
+		`{"credential_issuer":"https://i.example","grants":{"urn:ietf:params:oauth:grant-type:pre-authorized_code":{"pre-authorized_code":"c","tx_code":{"length":5}}}}`)
+	for _, uri := range []string{withoutValue, "openid-credential-offer://?credential_offer_uri=https%3A%2F%2Fi.example%2Fo", "%%"} {
+		if got := offerTxCode(uri); got != nil {
+			t.Errorf("offerTxCode(%q) = %q, want nil", uri, *got)
 		}
 	}
 }
