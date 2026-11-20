@@ -378,9 +378,8 @@ func TestPostDoesNotFollowRedirects(t *testing.T) {
 	}))
 	defer server.Close()
 
-	var delivery *DeliveryError
 	err := newChannel(server.URL+webhookPath).Notify(context.Background(), event())
-	if !errors.As(err, &delivery) {
+	if _, ok := errors.AsType[*DeliveryError](err); !ok {
 		t.Errorf("Notify = %v, want the redirect reported as a refusal", err)
 	}
 }

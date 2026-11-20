@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"slices"
 	"strings"
 	"sync"
 )
@@ -52,8 +53,8 @@ func (res Resolver) ClientIP(r *http.Request) string {
 		return client.String()
 	}
 	hops := forwardedHops(r.Header)
-	for i := len(hops) - 1; i >= 0; i-- {
-		hop, ok := parseHop(hops[i])
+	for _, hop := range slices.Backward(hops) {
+		hop, ok := parseHop(hop)
 		if !ok {
 			break
 		}

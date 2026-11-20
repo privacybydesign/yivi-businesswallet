@@ -52,7 +52,7 @@ func TestStandardFlowSpecMeetsStandard(t *testing.T) {
 			t.Errorf("%s with the age check meets the standard; want not", kind)
 		}
 	}
-	weak := proofingprovider.Flow{FlowSpec: proofingprovider.FlowSpec{Steps: []string{stepDocumentCapture, stepNFCRead}, RequestedAttributes: []string{attributeDocument}}}
+	weak := proofingprovider.Flow{Steps: []string{stepDocumentCapture, stepNFCRead}, RequestedAttributes: []string{attributeDocument}}
 	if meetsStandard(weak) {
 		t.Error("a flow without face check or level meets the standard; want not")
 	}

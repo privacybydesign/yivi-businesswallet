@@ -15,6 +15,7 @@ import (
 	"github.com/privacybydesign/irmago/eudi"
 	"github.com/privacybydesign/irmago/eudi/credentials/sdjwtvc"
 	"github.com/privacybydesign/irmago/eudi/credentials/statuslist"
+	"github.com/privacybydesign/irmago/eudi/credentials/vcdmsdjwt"
 	eudijwt "github.com/privacybydesign/irmago/eudi/jwt"
 	"github.com/privacybydesign/irmago/eudi/openid4vci"
 	"github.com/privacybydesign/irmago/eudi/sdjwt"
@@ -83,10 +84,10 @@ func (e *Engine) Redeem(ctx context.Context, orgID uuid.UUID, offerURI string) (
 		JwtVerifier:             sdjwt.NewJwxJwtVerifier(),
 		StatusChecker:           statusChecker,
 	}
-	// holderKeyBinder is required by NewClient (non-nil): the WSCA-backed binder
-	// when configured (holder key + proof of possession produced by the
-	// wallet-provider HSM, not software keys), otherwise irmago's default
-	// storage-backed software binder.
+	// holderKeyBinder is the registry's SD-JWT VC key binder (non-nil): the
+	// WSCA-backed binder when configured (holder key + proof of possession
+	// produced by the wallet-provider HSM, not software keys), otherwise irmago's
+	// default storage-backed software binder.
 	binder, err := e.holderKeyBinder(ctx, orgID, st)
 	if err != nil {
 		return Redeemed{}, err
@@ -99,28 +100,45 @@ func (e *Engine) Redeem(ctx context.Context, orgID uuid.UUID, offerURI string) (
 	// service is built on the shared status checker. The store is wrapped so this
 	// redemption learns the instance id of the batch it actually persisted — see
 	// storeRecorder.
-	credStore := &storeRecorder{CredentialStore: db.NewCredentialStore(st.Db())}
-	credentialService := services.NewCredentialService(
+	credStore := &storeRecorder{SdJwtVcStore: db.NewSdJwtVcStore(st.Db())}
+	credentialService := services.NewSdJwtVcCredentialService(
 		credStore,
 		db.NewHolderBindingKeyStore(st.Db()),
 		st.FileSystem(),
-		services.NewRevocationService(statusChecker, credStore),
+		services.NewRevocationService(statusChecker, nil, credStore),
 		currentLocale,
 	)
+	holderVerifier := sdjwtvc.NewHolderVerificationProcessor(verCtx)
+	// Only SD-JWT VC is registered: the held index, claims and presentation read
+	// the SD-JWT VC tables alone, so an mdoc or VCDM offer is refused rather than
+	// stored where nothing would find it.
+	formats := services.CredentialFormats{
+		models.CredentialFormatSdJwtVc: {
+			Parser: services.NewSdJwtVcCredentialFormatParser(holderVerifier),
+			Keys:   binder,
+			Store:  credentialService,
+		},
+	}
 	client, err := openid4vci.NewClient(
 		e.httpClient,
 		conf,
-		sdjwtvc.NewHolderVerificationProcessor(verCtx),
-		credentialService,
-		binder,
+		holderVerifier,
+		// NewClient requires a VCDM verifier even with no VCDM format registered.
+		vcdmsdjwt.NewHolderVerificationProcessor(vcdmsdjwt.VerificationContext{
+			X509VerificationContext: x509Context,
+			Clock:                   eudijwt.NewSystemClock(),
+			StatusChecker:           statusChecker,
+		}),
+		formats,
 		currentLocale,
 	)
 	if err != nil {
 		return Redeemed{}, fmt.Errorf("eudiholder: redeem client org %s: %w", orgID, err)
 	}
-	if e.redeem.AllowInsecureHTTP {
-		client.AllowInsecureHttpForTesting()
+	if e.walletUnit != nil {
+		client.SetWalletAttester(newOrgWalletAttester(ctx, orgID, e.walletUnit, e.keysInHSM))
 	}
+	client.SetAllowInsecureHttp(e.redeem.AllowInsecureHTTP)
 
 	handler := newRedeemHandler()
 	sessionID := int(e.sessionCounter.Add(1))
@@ -163,7 +181,7 @@ func (e *Engine) configuration(st irmastorage.Storage, orgID uuid.UUID) (*eudi.C
 		return nil, fmt.Errorf("eudiholder: config org %s: %w", orgID, err)
 	}
 	if e.redeem.StagingTrustAnchors {
-		conf.EnableStagingTrustAnchors()
+		conf.SetUseStagingTrustAnchors(true)
 	}
 	if err := conf.Reload(); err != nil {
 		return nil, fmt.Errorf("eudiholder: load trust anchors org %s: %w", orgID, err)
@@ -235,7 +253,7 @@ func (e *Engine) RefreshStatuses(ctx context.Context, orgID uuid.UUID) (int, err
 	if err != nil {
 		return 0, err
 	}
-	return e.refreshStatuses(ctx, orgID, st, db.NewCredentialStore(st.Db()))
+	return e.refreshStatuses(ctx, orgID, st, db.NewSdJwtVcStore(st.Db()))
 }
 
 // RefreshStatus is RefreshStatuses for the one credential ref names: only its
@@ -251,7 +269,7 @@ func (e *Engine) RefreshStatus(ctx context.Context, orgID uuid.UUID, ref string)
 	}
 	var batchIDs []datatypes.UUID
 	if err := st.Db().WithContext(ctx).
-		Model(&models.IssuedCredentialInstance{}).
+		Model(&models.SdJwtVcBatchInstance{}).
 		Where("id = ?", id).
 		Pluck("credential_batch_id", &batchIDs).Error; err != nil {
 		return 0, fmt.Errorf("eudiholder: batch of credential %s org %s: %w", ref, orgID, err)
@@ -259,11 +277,11 @@ func (e *Engine) RefreshStatus(ctx context.Context, orgID uuid.UUID, ref string)
 	if len(batchIDs) == 0 {
 		return 0, nil
 	}
-	return e.refreshStatuses(ctx, orgID, st, batchStatusStore{CredentialStore: db.NewCredentialStore(st.Db()), batchID: batchIDs[0]})
+	return e.refreshStatuses(ctx, orgID, st, batchStatusStore{SdJwtVcStore: db.NewSdJwtVcStore(st.Db()), batchID: batchIDs[0]})
 }
 
 // refreshStatuses runs irmago's status sweep over the credentials store lists.
-func (e *Engine) refreshStatuses(ctx context.Context, orgID uuid.UUID, st irmastorage.Storage, store db.CredentialStore) (int, error) {
+func (e *Engine) refreshStatuses(ctx context.Context, orgID uuid.UUID, st irmastorage.Storage, store db.SdJwtVcStore) (int, error) {
 	conf, err := e.configuration(st, orgID)
 	if err != nil {
 		return 0, err
@@ -272,7 +290,7 @@ func (e *Engine) refreshStatuses(ctx context.Context, orgID uuid.UUID, st irmast
 	if err != nil {
 		return 0, err
 	}
-	revocation := services.NewRevocationService(e.newStatusChecker(x509Context, st), store)
+	revocation := services.NewRevocationService(e.newStatusChecker(x509Context, st), nil, store)
 	changed, err := revocation.RefreshStatuses(ctx)
 	if err != nil {
 		return changed, fmt.Errorf("eudiholder: refresh statuses org %s: %w", orgID, err)
@@ -283,12 +301,12 @@ func (e *Engine) refreshStatuses(ctx context.Context, orgID uuid.UUID, st irmast
 // batchStatusStore narrows the instances irmago's status sweep visits to one
 // batch, the sweep's only read of what to check.
 type batchStatusStore struct {
-	db.CredentialStore
+	db.SdJwtVcStore
 	batchID datatypes.UUID
 }
 
 func (s batchStatusStore) ListInstancesWithStatusReference() ([]db.CredentialStatusInstance, error) {
-	all, err := s.CredentialStore.ListInstancesWithStatusReference()
+	all, err := s.SdJwtVcStore.ListInstancesWithStatusReference()
 	if err != nil {
 		return nil, err
 	}
@@ -327,7 +345,7 @@ func (e *Engine) trustContext(base eudijwt.X509VerificationContext) (eudijwt.X50
 // gap exactly: StoreBatch is where the ids are generated, and GORM writes them into
 // the struct it inserted.
 type storeRecorder struct {
-	db.CredentialStore
+	db.SdJwtVcStore
 
 	// mu guards batches: irmago stores one batch per credential configuration, and
 	// a caller may cancel while a store is in flight.
@@ -344,8 +362,8 @@ type storedBatch struct {
 	instanceID string
 }
 
-func (r *storeRecorder) StoreBatch(batch *models.CredentialBatch) error {
-	if err := r.CredentialStore.StoreBatch(batch); err != nil {
+func (r *storeRecorder) StoreBatch(batch *models.SdJwtVcBatch) error {
+	if err := r.SdJwtVcStore.StoreBatch(batch); err != nil {
 		return err
 	}
 	if len(batch.Instances) == 0 {

@@ -43,7 +43,9 @@ func (f fakeRepo) Delete(context.Context, uuid.UUID) error { return nil }
 func (f fakeRepo) SetTestMode(context.Context, uuid.UUID, bool) (Organization, error) {
 	return f.org, nil
 }
+
 func (f fakeRepo) ListForUser(context.Context, uuid.UUID) ([]Organization, error) { return nil, nil }
+
 func (f fakeRepo) GetMembership(context.Context, uuid.UUID, uuid.UUID) (Membership, error) {
 	return f.membership, f.membershipErr
 }
@@ -59,6 +61,7 @@ func (f fakeRepo) GetMemberAvatar(context.Context, uuid.UUID, uuid.UUID) (user.A
 func (f fakeRepo) ListMemberEntries(context.Context, uuid.UUID, MemberListParams) ([]MemberEntry, int, error) {
 	return nil, 0, nil
 }
+
 func (f fakeRepo) MemberStatusTotals(context.Context, uuid.UUID) (int, int, error) { return 0, 0, nil }
 func (f fakeRepo) RevokeInvitation(context.Context, uuid.UUID, uuid.UUID) error    { return nil }
 func (f fakeRepo) ResendInvitation(context.Context, uuid.UUID, uuid.UUID) (Invitation, error) {
@@ -70,6 +73,7 @@ func (f fakeRepo) UpdateMembership(context.Context, uuid.UUID, uuid.UUID, *strin
 }
 func (f fakeRepo) RemoveMembership(context.Context, uuid.UUID, uuid.UUID) error     { return nil }
 func (f fakeRepo) ListDepartments(context.Context, uuid.UUID) ([]Department, error) { return nil, nil }
+
 func (f fakeRepo) CreateDepartment(context.Context, uuid.UUID, string) (Department, error) {
 	return Department{}, nil
 }

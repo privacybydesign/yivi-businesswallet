@@ -185,6 +185,18 @@ func TestIssueSKA(t *testing.T) {
 	if statusOf(t, claims, "key_storage_status") == statusOf(t, bwia, "client_status") {
 		t.Error("BWIA and SKA share a status entry")
 	}
+	if _, ok := claims["nonce"]; ok {
+		t.Errorf("SKA without a c_nonce has nonce %v", claims["nonce"])
+	}
+
+	nonce := "c-nonce"
+	withNonce, err := e.provider.IssueSKA(ctx, org, []*ecdsa.PublicKey{newKey(t)}, &nonce)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, claims := e.parse(t, withNonce); claims["nonce"] != nonce {
+		t.Errorf("SKA nonce = %v, want %q", claims["nonce"], nonce)
+	}
 }
 
 func TestIssueRefusals(t *testing.T) {

@@ -163,8 +163,7 @@ func readDiplomaFiles(w http.ResponseWriter, r *http.Request, slots int) ([]Dipl
 // diplomaReadError is the answer to an upload that does not read: too large
 // past maxDiplomaUpload, else not well-formed multipart/form-data.
 func diplomaReadError(err error) error {
-	var tooLarge *http.MaxBytesError
-	if errors.As(err, &tooLarge) {
+	if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
 		return &respond.APIError{Status: http.StatusRequestEntityTooLarge, Code: "too_large", Message: "the upload is too large"}
 	}
 	return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_body", Message: "upload the extracts as multipart/form-data"}

@@ -2,6 +2,7 @@ package walletunit
 
 import (
 	"context"
+	"crypto/ecdsa"
 	"time"
 
 	"github.com/google/uuid"
@@ -27,23 +28,23 @@ func NewStubAttester(orgs orgReader, signer *Signer, cfg Config) *StubAttester {
 	return &StubAttester{orgs: orgs, signer: signer, cfg: cfg.normalized(), now: time.Now}
 }
 
-func (s *StubAttester) Issue(ctx context.Context, orgID uuid.UUID, req IssueRequest) (Issued, error) {
-	org, cnf, attested, err := s.cfg.prepare(ctx, s.orgs, orgID, req)
+func (s *StubAttester) IssueBWIA(ctx context.Context, orgID uuid.UUID, instanceKey *ecdsa.PublicKey) (string, error) {
+	org, cnf, err := bwiaSubject(ctx, s.orgs, orgID, instanceKey)
 	if err != nil {
-		return Issued{}, err
+		return "", err
 	}
-	now := s.now()
-	var out Issued
-	if out.BWIA, err = s.signer.sign(bwiaTyp, s.cfg.bwiaClaims("stub-"+orgID.String(), org, cnf, stubStatusIndex, now)); err != nil {
-		return Issued{}, err
+	return s.signer.sign(bwiaTyp, s.cfg.bwiaClaims("stub-"+orgID.String(), org, cnf, stubStatusIndex, s.now()))
+}
+
+func (s *StubAttester) IssueSKA(ctx context.Context, orgID uuid.UUID, keys []*ecdsa.PublicKey, nonce *string) (string, error) {
+	if s.cfg.SKA == nil || len(keys) == 0 {
+		return "", nil
 	}
-	if len(attested) == 0 {
-		return out, nil
+	attested, err := skaSubject(ctx, s.orgs, orgID, keys)
+	if err != nil {
+		return "", err
 	}
-	if out.SKA, err = s.signer.sign(skaTyp, s.cfg.skaClaims(attested, stubStatusIndex, now)); err != nil {
-		return Issued{}, err
-	}
-	return out, nil
+	return s.signer.sign(skaTyp, s.cfg.skaClaims(attested, stubStatusIndex, s.now(), nonce))
 }
 
 func (s *StubAttester) StatusList(_ context.Context, list int64) (string, error) {

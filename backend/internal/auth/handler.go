@@ -76,8 +76,7 @@ func (h *Handler) status(w http.ResponseWriter, r *http.Request) error {
 func (h *Handler) claim(w http.ResponseWriter, r *http.Request) error {
 	u, raw, err := h.svc.Authenticate(r.Context(), r.PathValue("id"))
 	if err != nil {
-		var invited *PendingInvitesError
-		if errors.As(err, &invited) {
+		if invited, ok := errors.AsType[*PendingInvitesError](err); ok {
 			respond.JSON(w, r, http.StatusOK, toPendingInvitationsResponse(invited.Invites))
 			return nil
 		}

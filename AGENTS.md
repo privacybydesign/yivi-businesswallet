@@ -20,7 +20,7 @@ It is a product heading for customers, not a demo.
 - `frontend/` — React 19 + Vite + TypeScript + react-router.
 - `regulation/` — the EU compliance source features are written against.
 - `dev-setup/` + `compose*.yaml` — the Docker dev stack. `npm run dev` from the repo root
-  starts all of it (`npm run dev:reset` wipes the DB volumes first). Go 1.26+, Node 26+.
+  starts all of it (`npm run dev:reset` wipes the DB volumes first). Go 1.27+, Node 26+.
 
 ## Repos a change here touches
 

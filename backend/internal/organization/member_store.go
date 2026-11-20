@@ -17,8 +17,7 @@ import (
 func (s *Store) AddMembership(ctx context.Context, orgID, userID uuid.UUID, role string, jobTitle *string, departmentID *uuid.UUID) (Member, error) {
 	const q = `INSERT INTO memberships (organization_id, user_id, role, job_title, department_id) VALUES ($1, $2, $3, $4, $5)`
 	_, err := s.db.Exec(ctx, q, orgID, userID, role, jobTitle, departmentID)
-	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) {
+	if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok {
 		switch {
 		case pgErr.Code == uniqueViolation:
 			return Member{}, ErrAlreadyMember
