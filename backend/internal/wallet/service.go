@@ -144,6 +144,7 @@ func (s *Service) Register(ctx context.Context, disclosureToken, kvkNumber, slug
 		GivenNames:  disclosed.Name.GivenNames,
 		FamilyName:  disclosed.Name.LastName,
 		DateOfBirth: disclosed.DateOfBirth,
+		Disclosed:   true,
 	}
 	result, err := s.OpenWallet(ctx, u.ID, requester, kvkNumber, slug)
 	if err != nil {
@@ -222,6 +223,7 @@ func (s *Service) OpenWallet(ctx context.Context, requestorUserID uuid.UUID, req
 	org, err := s.store.RegisterOrganization(ctx, Registration{
 		OrgID:             orgID,
 		RequestorUserID:   requestorUserID,
+		Requester:         requester,
 		Slug:              slug,
 		DigitalAddress:    digitalAddress,
 		KVKContactAddress: kvkSenderAddress,

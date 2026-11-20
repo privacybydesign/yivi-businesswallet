@@ -76,7 +76,9 @@ func TestRegisterOrganization(t *testing.T) {
 	const address = slug + "@qerds.localhost"
 	const kvkAddress = "kvk-" + stubKVK + "@qerds.localhost"
 
-	org, err := store.RegisterOrganization(ctx, registration(requester.ID, slug, address, kvkAddress, att))
+	reg := registration(requester.ID, slug, address, kvkAddress, att)
+	reg.Requester = wallet.Requester{GivenNames: "Alice", FamilyName: "Owner", DateOfBirth: "1980-01-02", Disclosed: true}
+	org, err := store.RegisterOrganization(ctx, reg)
 	if err != nil {
 		t.Fatalf("RegisterOrganization: %v", err)
 	}
@@ -110,6 +112,17 @@ func TestRegisterOrganization(t *testing.T) {
 	}
 	if role != organization.RoleAdmin {
 		t.Fatalf("owner role = %q, want admin", role)
+	}
+
+	// The registration disclosure counts as the owner's identification.
+	var identified bool
+	var dateOfBirth *string
+	if err := pool.QueryRow(ctx, `SELECT identity_verified_at IS NOT NULL, to_char(date_of_birth, 'YYYY-MM-DD') FROM memberships WHERE organization_id = $1 AND user_id = $2`,
+		org.ID, requester.ID).Scan(&identified, &dateOfBirth); err != nil {
+		t.Fatalf("owner identity: %v", err)
+	}
+	if !identified || dateOfBirth == nil || *dateOfBirth != "1980-01-02" {
+		t.Fatalf("owner identified = %v, date of birth = %v, want identified on 1980-01-02", identified, dateOfBirth)
 	}
 
 	// The org's default digital address matches the wallet address.
@@ -218,6 +231,34 @@ func TestRegisterOrganizationRejectsDuplicateKVK(t *testing.T) {
 	_, err = store.RegisterOrganization(ctx, registration(requester.ID, "second", "b@qerds.localhost", "kvk-b@qerds.localhost", att))
 	if err == nil {
 		t.Fatal("expected a duplicate-KVK registration to fail")
+	}
+}
+
+// TestRegisterOrganizationWithoutDisclosure covers the logged-in path: with no
+// fresh disclosure the owner is not marked identified.
+func TestRegisterOrganizationWithoutDisclosure(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	ctx := context.Background()
+
+	requester, err := user.NewStore(pool).Create(ctx, user.User{Email: "dave@example.com", GivenNames: "Dave", LastName: "Owner"})
+	if err != nil {
+		t.Fatalf("create requester: %v", err)
+	}
+	store := wallet.NewStore(pool, audit.NopRecorder{}, walletunit.NewStore(pool, audit.NopRecorder{}))
+	reg := registration(requester.ID, "dave-co", "d@qerds.localhost", "kvk-d@qerds.localhost", stubAttestation())
+	reg.Requester = wallet.Requester{GivenNames: "Dave", FamilyName: "Owner"}
+	org, err := store.RegisterOrganization(ctx, reg)
+	if err != nil {
+		t.Fatalf("RegisterOrganization: %v", err)
+	}
+
+	var identified bool
+	if err := pool.QueryRow(ctx, `SELECT identity_verified_at IS NOT NULL FROM memberships WHERE organization_id = $1 AND user_id = $2`,
+		org.ID, requester.ID).Scan(&identified); err != nil {
+		t.Fatalf("owner identity: %v", err)
+	}
+	if identified {
+		t.Fatal("owner marked identified without a disclosure")
 	}
 }
 
