@@ -128,7 +128,7 @@ type RegistrationOutcome struct {
 
 // Register authenticates the person via their disclosed identity (creating an
 // account if new), then registers the wallet for the KVK number under the slug.
-func (s *Service) Register(ctx context.Context, disclosureToken, kvkNumber, slug string) (RegistrationOutcome, error) {
+func (s *Service) Register(ctx context.Context, disclosureToken, kvkNumber, slug, companyName string) (RegistrationOutcome, error) {
 	disclosed, err := s.discloser.DiscloseIdentity(ctx, disclosureToken)
 	if err != nil {
 		return RegistrationOutcome{}, err
@@ -145,6 +145,7 @@ func (s *Service) Register(ctx context.Context, disclosureToken, kvkNumber, slug
 		FamilyName:  disclosed.Name.LastName,
 		DateOfBirth: disclosed.DateOfBirth,
 		Disclosed:   true,
+		CompanyName: companyName,
 	}
 	result, err := s.OpenWallet(ctx, u.ID, requester, kvkNumber, slug)
 	if err != nil {
@@ -188,12 +189,16 @@ func (s *Service) OpenWallet(ctx context.Context, requestorUserID uuid.UUID, req
 
 	att, err := s.registry.Consult(ctx, registryprovider.ConsultRequest{
 		KVKNumber:   kvkNumber,
+		LegalName:   requester.CompanyName,
 		GivenNames:  requester.GivenNames,
 		FamilyName:  requester.FamilyName,
 		DateOfBirth: requester.DateOfBirth,
 	})
 	if errors.Is(err, registryprovider.ErrUnknownKVK) {
 		return RegistrationResult{}, ErrUnknownKVK
+	}
+	if errors.Is(err, registryprovider.ErrLegalNameRequired) {
+		return RegistrationResult{}, ErrCompanyNameRequired
 	}
 	if err != nil {
 		return RegistrationResult{}, fmt.Errorf("wallet: consult registry: %w", err)
@@ -238,7 +243,8 @@ func (s *Service) OpenWallet(ctx context.Context, requestorUserID uuid.UUID, req
 	s.depositAttestation(ctx, org.ID, org.DigitalAddress, att)
 
 	res := RegistrationResult{Organization: org}
-	if att.RequesterRepresentativeIndex < len(att.Representatives) {
+	// A declared company has no register-stated role to report back.
+	if !att.Declared && att.RequesterRepresentativeIndex < len(att.Representatives) {
 		rep := att.Representatives[att.RequesterRepresentativeIndex]
 		res.RepresentationKind = rep.Kind
 		res.RepresentationAuthority = rep.Authority

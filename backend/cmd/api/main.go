@@ -154,6 +154,9 @@ func newRegistryProvider(cfg config.Config, db database.DB, recorder audit.Recor
 	switch cfg.WalletRegistryProvider {
 	case config.ProviderStub:
 		return registryprovider.NewSeededRegistry(db, recorder), nil
+	case config.ProviderDeclared:
+		slog.Warn("WALLET_REGISTRY_PROVIDER=declared; no register is consulted, a registrant's company name and KVK number are accepted as stated")
+		return registryprovider.NewDeclaredRegistry(db, recorder), nil
 	default:
 		return nil, fmt.Errorf("wallet registry provider %q is not implemented", cfg.WalletRegistryProvider)
 	}

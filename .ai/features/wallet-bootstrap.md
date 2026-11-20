@@ -17,6 +17,26 @@ requester the register does not list (`not_a_representative`). The demo KVK
 numbers (`900000xx`) are shared with `internal/seed`, so a seeded user resolves
 to a real representative entry.
 
+`WALLET_REGISTRY_PROVIDER=declared` (`registryprovider.DeclaredRegistry`) is for
+a deployment real companies register on while nothing connects to KVK: `stub`
+knows only the demo companies, so it refuses every real KVK number. It consults
+no register. The KVK number is checked for its form (8 digits) and the company
+name is the one the registrant types (`legalName` on `POST /register` and
+`POST /wallet`, at most 200 characters, else `legal_name_required`).
+- **Nothing confirms the company or the registrant's standing.** Anyone who can
+  complete the identity disclosure can register any KVK number under any name,
+  and holds that number from then on (`already_registered`). The checks are the
+  disclosure, which says who registered it, test mode, which every registered
+  org starts in until a platform admin makes it live, and the platform admin
+  deleting an org that is not what it says.
+- The registrant is recorded as the only representative, kind `overig`, never
+  `bestuurder`: nothing said they are a director. The response carries no
+  representation kind, and the confirmation screen says the wallet starts in
+  test mode.
+- The decision is audited as `kvk.registration_declared`, not `validated`. A
+  deployment that does not seed the KVK register org records it without an org.
+- The API logs a warning at boot while this provider is selected.
+
 Divergences from the async design below (deliberate, for this iteration):
 - **Consult is synchronous**, not a two-legged QERDS request+attestation. The
   faithful async path (outbound over QERDS, inbound webhook →

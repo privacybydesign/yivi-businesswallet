@@ -357,6 +357,9 @@ const (
 
 	// The wallet-bootstrap registry (KVK) provider. Reuses ProviderStub ("stub").
 	defaultWalletRegistryProvider = ProviderStub
+	// ProviderDeclared accepts the company a registrant states, consulting no
+	// register: for a deployment real companies register on, until KVK is connected.
+	ProviderDeclared = "declared"
 
 	// ProviderValidatieNL checks a VOG for real with validatie.nl, and is the
 	// default; ProviderStub accepts every VOG and runs only when set explicitly

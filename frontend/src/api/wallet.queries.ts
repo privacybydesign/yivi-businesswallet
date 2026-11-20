@@ -10,7 +10,7 @@ import { invalidateOrganizationLists } from "./organization.queries";
 export function useEnrollWalletMutation(): UseMutationResult<
   WalletEnrollment,
   Error,
-  { kvkNumber: string; slug: string }
+  { kvkNumber: string; slug: string; legalName: string }
 > {
   const queryClient = useQueryClient();
   return useMutation({

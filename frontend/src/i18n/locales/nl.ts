@@ -86,14 +86,13 @@ export const nl: Translation<typeof en> = {
   },
   enroll: {
     title: "Business wallet registreren",
-    subtitle:
-      "Registreer de wallet van je organisatie via de Kamer van Koophandel.",
+    subtitle: "Registreer de wallet van je organisatie met het KVK-nummer.",
     intro:
-      "Voer het KVK-nummer van je organisatie in. We raadplegen de KVK (Kamer van Koophandel) veilig om het bedrijf te bevestigen en te controleren of je als bevoegd vertegenwoordiger geregistreerd staat. Pas dan wordt de wallet aangemaakt en word je eigenaar.",
+      "Voer het KVK-nummer en de naam van je organisatie in. De wallet wordt voor dat bedrijf aangemaakt en je wordt eigenaar.",
     kvkNumber: "KVK-nummer",
     kvkPlaceholder: "bijv. 94861412",
-    submit: "KVK raadplegen & registreren",
-    consulting: "KVK raadplegen…",
+    submit: "Registreren",
+    consulting: "Registreren…",
     registeredAt: "Wallet geregistreerd voor {{org}}",
     yourRole: "De KVK vermeldt je als: {{role}}",
     continue: "Ga naar {{org}}",
@@ -297,9 +296,18 @@ export const nl: Translation<typeof en> = {
     title: "Business wallet registreren",
     subtitle: "Nieuw hier? Registreer je bedrijf — nog geen account nodig.",
     intro:
-      "Voer het KVK-nummer van je organisatie in. Je bevestigt je identiteit met je wallet, en we raadplegen de KVK (Kamer van Koophandel) veilig om te controleren of je een geregistreerde vertegenwoordiger bent. Zo ja, dan maken we de wallet aan en loggen we je in als eigenaar.",
+      "Voer het KVK-nummer en de naam van je organisatie in. Je bevestigt je identiteit met je wallet, en we maken de wallet aan en loggen je in als eigenaar.",
     kvkNumber: "KVK-nummer",
     kvkPlaceholder: "bijv. 94861412",
+    companyName: "Bedrijfsnaam",
+    companyNamePlaceholder: "bijv. Yivi B.V.",
+    companyNameHint:
+      "De naam waaronder je bedrijf bij de KVK staat ingeschreven.",
+    companyNameRequired: "Vul de naam van je bedrijf in, maximaal 200 tekens.",
+    unknownKvk:
+      "Dit KVK-nummer is niet geaccepteerd. Controleer of het de 8 cijfers van het KVK-nummer van je bedrijf zijn.",
+    startsInTestMode:
+      "Je wallet start in testmodus. Yivi zet hem op live zodra je bedrijf is bevestigd.",
     slug: "Wallet-handle (slug)",
     slugPlaceholder: "bijv. yivi",
     slugHint:
@@ -319,16 +327,16 @@ export const nl: Translation<typeof en> = {
     disclosure: {
       identityLabel: "Paspoort, identiteitskaart of verblijfsvergunning",
       identityDetail:
-        "Bevestigt je naam, geboortedatum en nationaliteit, zodat we je kunnen koppelen aan de bij de KVK geregistreerde vertegenwoordigers van het bedrijf.",
+        "Bevestigt je naam, geboortedatum en nationaliteit, zodat bekend is wie dit bedrijf heeft geregistreerd.",
       emailLabel: "E-mailadres",
       emailDetail: "Wordt het adres waarmee je inlogt.",
       phoneLabel: "Telefoonnummer",
       phoneDetail: "Wordt toegevoegd aan je geverifieerde profiel.",
     },
     disclosureFootnote:
-      "Er wordt niets opgeslagen behalve wat nodig is om je wallet aan te maken en je te koppelen bij de Kamer van Koophandel.",
+      "Er wordt niets opgeslagen behalve wat nodig is om je wallet aan te maken en vast te leggen wie hem heeft geregistreerd.",
     onboardTitle: "Je wallet instellen",
-    registering: "KVK raadplegen…",
+    registering: "Je wallet aanmaken…",
     registeredAt: "Wallet geregistreerd voor {{org}}",
     yourRole: "De KVK vermeldt je als: {{role}}",
     enter: "Doorgaan naar {{org}}",
@@ -2683,6 +2691,8 @@ export const nl: Translation<typeof en> = {
       wscaAccountRotated: "Wallet-geheim geroteerd",
       kvkRegistrationValidated: "KVK-registratie gevalideerd",
       kvkRegistrationNotValidated: "KVK-registratie afgewezen",
+      kvkRegistrationDeclared:
+        "Bedrijf geregistreerd zoals opgegeven, niet bij KVK gecontroleerd",
       attestationSchemaCreated: "Attestatieschema aangemaakt",
       attestationSchemaUpdated: "Attestatieschema bijgewerkt",
       attestationSchemaDeleted: "Attestatieschema verwijderd",
