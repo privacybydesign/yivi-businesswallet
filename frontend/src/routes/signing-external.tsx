@@ -195,7 +195,7 @@ export default function SigningExternal(): React.JSX.Element {
           />
         ) : (
           <>
-            <h1 className="mt-6 text-center text-[22px] font-bold">
+            <h1 className="mt-6 text-center text-[22px] font-bold wrap-anywhere">
               {view.data.filename}
             </h1>
             <p className="text-ink-soft mt-1 text-center text-[14px]">

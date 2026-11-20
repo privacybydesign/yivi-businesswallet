@@ -94,7 +94,9 @@ export function Modal({
         ].join(" ")}
       >
         <div className="border-line flex items-center justify-between gap-4 border-b px-5 py-3.5">
-          <h2 className="text-ink text-[16px] font-bold">{title}</h2>
+          <h2 className="text-ink min-w-0 text-[16px] font-bold wrap-anywhere">
+            {title}
+          </h2>
           <button
             type="button"
             onClick={onClose}
