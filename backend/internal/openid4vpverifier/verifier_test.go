@@ -253,6 +253,29 @@ func TestProofingRequestOffersTheAcceptedSources(t *testing.T) {
 	}
 }
 
+// A driving licence has no nationality, so it is asked everything a passport
+// is but that; the passport still is.
+func TestDrivingLicenceIsNotAskedNationality(t *testing.T) {
+	q := stagingVCTs.proofingRequestQuery(ProofingRequest{Sources: []string{SourcePassport, SourceDrivingLicence}, Claims: []string{ClaimPhoto, "over18"}})
+	claimNames := func(c dcqlCredential) []string {
+		var names []string
+		for _, claim := range c.Claims {
+			names = append(names, claim.Path[0])
+		}
+		return names
+	}
+	if got, want := claimNames(q.Credentials[0]), []string{ClaimGivenNames, ClaimFamilyName, ClaimNationality, ClaimPhoto, "over18"}; !slices.Equal(got, want) {
+		t.Errorf("passport claims = %v, want %v", got, want)
+	}
+	licence := q.Credentials[1]
+	if !slices.Equal(licence.Meta.VctValues, []string{"pbdf-staging.pbdf.drivinglicence"}) {
+		t.Errorf("licence vct = %v", licence.Meta.VctValues)
+	}
+	if got, want := claimNames(licence), []string{ClaimGivenNames, ClaimFamilyName, ClaimPhoto, "over18"}; !slices.Equal(got, want) {
+		t.Errorf("licence claims = %v, want %v", got, want)
+	}
+}
+
 // The personal data is asked its name and date of birth, never the photo, and
 // with the address the registered address is a second required set.
 func TestPersonalDataSource(t *testing.T) {

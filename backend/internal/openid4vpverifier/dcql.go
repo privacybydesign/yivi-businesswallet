@@ -280,7 +280,11 @@ func (v vcts) proofingRequestQuery(req ProofingRequest) dcqlQuery {
 	if !slices.ContainsFunc(req.Claims, isAgeClaim) {
 		names = append(names, ClaimDateOfBirth)
 	}
-	documentClaims := claimPaths(append(names, req.Claims...)...)
+	documentClaims := claimPaths(append(slices.Clone(names), req.Claims...)...)
+	// A driving licence has no nationality, so asking it would leave the
+	// holder unable to share one.
+	licenceNames := slices.DeleteFunc(slices.Clone(names), func(c string) bool { return c == ClaimNationality })
+	licenceClaims := claimPaths(append(licenceNames, req.Claims...)...)
 	personalNames := []string{ClaimPersonalFirstNames, ClaimPersonalPrefix, ClaimPersonalFamilyName, ClaimPersonalDateOfBirth}
 	if req.BSN {
 		personalNames = append(personalNames, ClaimPersonalBSN)
@@ -294,14 +298,17 @@ func (v vcts) proofingRequestQuery(req ProofingRequest) dcqlQuery {
 		q.Credentials = append(q.Credentials, dcqlCredential{ID: id, Format: formatSDJWT, Meta: dcqlMeta{[]string{vct}}, Claims: claims})
 		options = append(options, []string{id})
 	}
-	for _, c := range [...]struct{ source, id, vct string }{
-		{SourcePassport, credIDPassport, v.passport},
-		{SourceIdentityCard, credIDIDCard, v.idCard},
-		{SourceResidencePermit, credIDResidencePermit, v.residencePermit},
-		{SourceDrivingLicence, credIDDrivingLicence, v.drivingLicence},
+	for _, c := range [...]struct {
+		source, id, vct string
+		claims          []dcqlClaim
+	}{
+		{SourcePassport, credIDPassport, v.passport, documentClaims},
+		{SourceIdentityCard, credIDIDCard, v.idCard, documentClaims},
+		{SourceResidencePermit, credIDResidencePermit, v.residencePermit, documentClaims},
+		{SourceDrivingLicence, credIDDrivingLicence, v.drivingLicence, licenceClaims},
 	} {
 		if slices.Contains(sources, c.source) {
-			add(c.id, c.vct, documentClaims)
+			add(c.id, c.vct, c.claims)
 		}
 	}
 	if slices.Contains(sources, SourcePersonalData) {
