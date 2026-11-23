@@ -640,7 +640,9 @@ export const en = {
     address: {
       overview: {
         label: "Address",
-        detail: "After the identity check: the postal address you enter",
+        detail: "Your postal address, which you enter yourself after the check",
+        detailYivi:
+          "Your registered address from the BRP, which the Yivi app shares",
       },
       identityDone: "Your identity is verified.",
       heading: "Now enter your address",
@@ -669,7 +671,7 @@ export const en = {
       overview: {
         label: "Diplomas",
         detail:
-          "After the identity check: the diploma extracts you download from DUO, checked against DUO's signature and your name and date of birth",
+          "Your diploma extracts from DUO, which you upload after the check. We check DUO's signature and that they are in your name and date of birth.",
       },
       how: {
         login: "Log in to Mijn DUO with DigiD.",
@@ -691,7 +693,7 @@ export const en = {
       overview: {
         label: "Verzekeringsbericht",
         detail:
-          "After the identity check: the Verzekeringsbericht you download from UWV, checked against UWV's seal and your name and date of birth",
+          "Your Verzekeringsbericht from UWV, which you upload after the check. We check UWV's seal and that it is in your name and date of birth.",
       },
       how: {
         login: "Log in to Mijn UWV with DigiD.",
@@ -845,7 +847,7 @@ export const en = {
         "Your identity check is done. Someone will review it after you finish here.",
       steps: {
         overview: "What is collected",
-        document: "Photograph your ID",
+        document: "Photograph your document",
         method: "Choose an app",
         session: "Scan the QR code",
         address: "Address",
@@ -899,7 +901,19 @@ export const en = {
       },
       documentScan: {
         heading: "Photograph your ID",
-        hint: "Take a photo of the front and back of your ID card or driving licence, or of the photo page of your passport, in CM.com's secure scan below.",
+        headings: {
+          passport: "Photograph your passport",
+          identity_card: "Photograph your ID card",
+          residence_permit: "Photograph your residence permit",
+          drivers_license: "Photograph your driving licence",
+        },
+        hint: "Take a photo of {{documents}} in CM.com's secure scan below.",
+        sides: {
+          passport: "the photo page of your passport",
+          identity_card: "the front and back of your ID card",
+          residence_permit: "the front and back of your residence permit",
+          drivers_license: "the front and back of your driving licence",
+        },
         passportHint:
           "For a passport, open it like a book and turn it sideways, so the open passport fits the frame.",
         frameTitle: "CM.com ID scan",
@@ -1039,6 +1053,9 @@ export const en = {
         name: "Name",
         birthDate: "Date of birth",
         nationality: "Nationality",
+        dutch: "Dutch",
+        notDutch: "Not Dutch",
+        bsn: "BSN",
         ageOver: "{{age}} or older",
         ageOverYes: "Yes",
         ageOverNo: "No",

@@ -3,6 +3,7 @@ package proofingengine
 import (
 	"testing"
 
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/bsn"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/privacy"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/session"
 )
@@ -55,5 +56,23 @@ func TestResultDropsForeignPersonalNumber(t *testing.T) {
 		if doc.PlaceOfBirth != "Madrid" {
 			t.Errorf("%s: PlaceOfBirth = %q, want the DG11 extras kept", policy, doc.PlaceOfBirth)
 		}
+	}
+}
+
+// A photographed document's BSN follows the BSN policy alone; a chip's comes
+// only with DG11, which reads it.
+func TestResultPhotoBSNWithoutDG11(t *testing.T) {
+	const valid = "111222333"
+	req := appResultRequest{Document: &documentInfo{IssuingState: dutchIssuingState, PersonalNumber: valid}}
+	photo := session.Session{RequestedAttributes: []string{attrDocument}}
+	doc := buildResult(photo, req, nil, nil, privacy.BSNPolicyMask, privacy.RedactionPolicy{})["document"].(documentInfo)
+	if doc.PersonalNumber != bsn.Mask(valid) {
+		t.Errorf("photo: PersonalNumber = %q, want %q", doc.PersonalNumber, bsn.Mask(valid))
+	}
+	chip := photo
+	chip.Steps.NFC = &session.NFCStepEvidence{}
+	doc = buildResult(chip, req, nil, nil, privacy.BSNPolicyMask, privacy.RedactionPolicy{})["document"].(documentInfo)
+	if doc.PersonalNumber != "" {
+		t.Errorf("chip without DG11: PersonalNumber = %q, want none", doc.PersonalNumber)
 	}
 }

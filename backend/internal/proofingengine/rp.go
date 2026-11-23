@@ -525,7 +525,8 @@ type resultView struct {
 		} `json:"biometrics"`
 		FaceCheck  *faceCheckInfo `json:"faceCheck"`
 		Disclosure *struct {
-			Source string `json:"source"`
+			Source     string            `json:"source"`
+			Attributes map[string]string `json:"attributes"`
 		} `json:"disclosure"`
 		AgeOver           *pp.AgeOver        `json:"ageOver"`
 		Photo             *imageView         `json:"photo"`
@@ -634,12 +635,19 @@ func (s *Server) SessionResult(_ context.Context, t pp.Tenant, id, token string)
 
 // SessionIdentity reads who was proofed and on what evidence: never the
 // document number or place of birth.
-func (s *Server) SessionIdentity(_ context.Context, t pp.Tenant, id, token string) (pp.Identity, error) {
+func (s *Server) SessionIdentity(ctx context.Context, t pp.Tenant, id, token string) (pp.Identity, error) {
 	v, err := s.readResult(t, id, token)
 	if err != nil {
 		return pp.Identity{}, err
 	}
 	out := pp.Identity{Result: v.base()}
+	sess, err := s.session(t, id, token)
+	if err != nil {
+		return pp.Identity{}, err
+	}
+	if out.Asked, err = s.sessionAsked(ctx, sess); err != nil {
+		return pp.Identity{}, err
+	}
 	res := v.Result
 	if res == nil {
 		return out, nil
@@ -674,9 +682,23 @@ func (s *Server) SessionIdentity(_ context.Context, t pp.Tenant, id, token strin
 	addDocumentCheckEvidence(ev, res.DocumentCheck)
 	out.Evidence = ev
 	out.AgeOver = res.AgeOver
+	if d := res.Disclosure; d != nil {
+		out.DutchNationality = yesNo(d.Attributes[pp.AttributeDutchNationality])
+	}
 	out.Photo, out.Selfie, out.ReferencePhoto = res.Photo.image(), res.Selfie.image(), res.ReferencePhoto.image()
 	out.DocumentImage, out.DocumentImageBack = res.DocumentImage.image(), res.DocumentImageBack.image()
 	return out, nil
+}
+
+// yesNo reads a Yivi yes/no attribute; nil when absent or neither.
+func yesNo(v string) *bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "yes", "ja", "true":
+		return new(true)
+	case "no", "nee", "false":
+		return new(false)
+	}
+	return nil
 }
 
 // evidenceTypeOf is a result's pp.Evidence* type: a Yivi disclosure, a

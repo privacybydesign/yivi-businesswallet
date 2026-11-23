@@ -2,6 +2,7 @@ package proofing
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"math"
 	"net/http"
@@ -566,12 +567,15 @@ type apiResultResponse struct {
 }
 
 type apiIdentity struct {
-	GivenName   string `json:"givenName,omitempty"`
-	FamilyName  string `json:"familyName,omitempty"`
-	BirthDate   string `json:"birthDate,omitempty"`
-	Nationality string `json:"nationality,omitempty"`
+	GivenName   string        `json:"givenName,omitempty"`
+	FamilyName  string        `json:"familyName,omitempty"`
+	BirthDate   string        `json:"birthDate,omitempty"`
+	Nationality asked[string] `json:"nationality,omitzero"`
 	// BSN is the holder's BSN, for a flow whose BSN policy keeps or masks it.
-	BSN string `json:"bsn,omitempty"`
+	BSN asked[string] `json:"bsn,omitzero"`
+	// DutchNationality is the registered personal data's yes/no on whether the
+	// holder is Dutch.
+	DutchNationality asked[bool] `json:"dutchNationality,omitzero"`
 	// AgeOver is set for a flow that requests age_over, which releases it
 	// instead of the birth date.
 	AgeOver *apiAgeOver `json:"ageOver,omitempty"`
@@ -584,18 +588,69 @@ type apiAgeOver struct {
 }
 
 type apiEvidenceEntry struct {
-	Type         string   `json:"type"`
-	DocumentType string   `json:"documentType,omitempty"`
-	DocumentKind string   `json:"documentKind,omitempty"`
-	IssuingState string   `json:"issuingState,omitempty"`
-	ExpiryDate   string   `json:"expiryDate,omitempty"`
-	PassiveAuth  string   `json:"passiveAuth,omitempty"`
-	ActiveAuth   string   `json:"activeAuth,omitempty"`
-	FaceMatch    *float64 `json:"faceMatch,omitempty"`
-	Liveness     string   `json:"liveness,omitempty"`
+	Type         string         `json:"type"`
+	DocumentType string         `json:"documentType,omitempty"`
+	DocumentKind string         `json:"documentKind,omitempty"`
+	IssuingState string         `json:"issuingState,omitempty"`
+	ExpiryDate   string         `json:"expiryDate,omitempty"`
+	PassiveAuth  asked[string]  `json:"passiveAuth,omitzero"`
+	ActiveAuth   asked[string]  `json:"activeAuth,omitzero"`
+	FaceMatch    asked[float64] `json:"faceMatch,omitzero"`
+	Liveness     asked[string]  `json:"liveness,omitzero"`
 	// DocumentCheck is the document scan's result on a photographed
-	// document; absent without one.
-	DocumentCheck *apiDocumentCheck `json:"documentCheck,omitempty"`
+	// document.
+	DocumentCheck asked[apiDocumentCheck] `json:"documentCheck,omitzero"`
+}
+
+// asked is a result field its flow may ask for: absent when the flow did not
+// ask for it, null when it asked and got nothing.
+type asked[T any] struct {
+	on    bool
+	value *T
+}
+
+// askedField is value as a field the flow asked for when on.
+func askedField[T any](on bool, value *T) asked[T] {
+	if !on {
+		return asked[T]{}
+	}
+	return asked[T]{on: true, value: value}
+}
+
+// askedString is askedField for a string, empty being nothing.
+func askedString(on bool, value string) asked[string] {
+	if value == "" {
+		return askedField[string](on, nil)
+	}
+	return askedField(on, &value)
+}
+
+func (a asked[T]) IsZero() bool { return !a.on }
+
+func (a asked[T]) MarshalJSON() ([]byte, error) { return json.Marshal(a.value) }
+
+func (a *asked[T]) UnmarshalJSON(data []byte) error {
+	a.on = true
+	return json.Unmarshal(data, &a.value)
+}
+
+// Value is the field's value; nil when not asked or not got.
+func (a asked[T]) Value() *T { return a.value }
+
+// identityAsked is what identity's flow asked for; with its flow unknown,
+// whatever the identity carries.
+func identityAsked(identity proofingprovider.Identity) proofingprovider.Asked {
+	if identity.Asked != nil {
+		return *identity.Asked
+	}
+	ev := identity.Evidence
+	return proofingprovider.Asked{
+		Nationality: identity.Nationality != "", DutchNationality: identity.DutchNationality != nil,
+		BSN:           identity.PersonalNumber != "",
+		ChipChecks:    ev != nil && ev.Type == proofingprovider.EvidenceEMRTD,
+		Face:          ev != nil && (ev.FaceMatch != nil || ev.Liveness != ""),
+		DocumentCheck: ev != nil && ev.DocumentVerdict != "",
+	}
 }
 
 // apiDocumentCheck is a document scan's result: its verdict (authentic,
@@ -720,9 +775,12 @@ func newAdminImage(img *proofingprovider.Image) *adminImage {
 // newAPIIdentity is identity as a result shows it, the age check's answer
 // included.
 func newAPIIdentity(identity proofingprovider.Identity) *apiIdentity {
+	want := identityAsked(identity)
 	out := &apiIdentity{
-		GivenName: identity.GivenName, FamilyName: identity.FamilyName,
-		BirthDate: identity.BirthDate, Nationality: identity.Nationality, BSN: identity.PersonalNumber,
+		GivenName: identity.GivenName, FamilyName: identity.FamilyName, BirthDate: identity.BirthDate,
+		Nationality:      askedString(want.Nationality, identity.Nationality),
+		BSN:              askedString(want.BSN, identity.PersonalNumber),
+		DutchNationality: askedField(want.DutchNationality, identity.DutchNationality),
 	}
 	if a := identity.AgeOver; a != nil {
 		out.AgeOver = &apiAgeOver{Age: a.Age, Over: a.Over}
@@ -750,16 +808,19 @@ func newAPIResultResponse(req Request, identity proofingprovider.Identity, now t
 		out.withDocumentImages(identity)
 	}
 	if ev := identity.Evidence; ev != nil {
+		want := identityAsked(identity)
 		entry := apiEvidenceEntry{
 			Type: ev.Type, DocumentType: ev.DocumentType, DocumentKind: ev.DocumentKind, IssuingState: ev.IssuingState, ExpiryDate: ev.ExpiryDate,
-			FaceMatch: ev.FaceMatch, Liveness: ev.Liveness,
+			FaceMatch: askedField(want.Face, ev.FaceMatch), Liveness: askedString(want.Face, ev.Liveness),
+			PassiveAuth: askedField[string](want.ChipChecks, nil), ActiveAuth: askedField[string](want.ChipChecks, nil),
+			DocumentCheck: askedField[apiDocumentCheck](want.DocumentCheck, nil),
 		}
 		// Only a chip read has chip checks; on other evidence they never apply.
 		if ev.Type == proofingprovider.EvidenceEMRTD {
-			entry.PassiveAuth, entry.ActiveAuth = ev.PassiveAuth, ev.ActiveAuth
+			entry.PassiveAuth, entry.ActiveAuth = askedString(want.ChipChecks, ev.PassiveAuth), askedString(want.ChipChecks, ev.ActiveAuth)
 		}
 		if ev.DocumentVerdict != "" {
-			entry.DocumentCheck = &apiDocumentCheck{Verdict: ev.DocumentVerdict, Score: ev.DocumentScore, Fields: ev.DocumentFields, Zones: ev.DocumentZones}
+			entry.DocumentCheck = askedField(want.DocumentCheck, &apiDocumentCheck{Verdict: ev.DocumentVerdict, Score: ev.DocumentScore, Fields: ev.DocumentFields, Zones: ev.DocumentZones})
 		}
 		out.Evidence = append(out.Evidence, entry)
 	}

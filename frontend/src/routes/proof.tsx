@@ -166,6 +166,7 @@ function HostedFlow({
   // Only a choice of apps is a step: one app starts at once.
   const stages = verifyStages({
     app: !flow.browserOnly && methods.length > 1,
+    session: !flow.browserOnly,
     document: page.documentScan !== undefined,
     // The Yivi app shares the registered address: the person enters none.
     address: stepAsked(flow.addressMode) && method !== "yivi_app",
@@ -351,6 +352,7 @@ function HostedFlow({
               method={method}
               methods={methods}
               yiviPersonalData={flow.yiviPersonalData}
+              scanDocuments={flow.scanDocuments}
               onStage={setSessionStage}
               onMethod={setMethod}
               diplomaMode={flow.diplomaMode}

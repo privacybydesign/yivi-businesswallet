@@ -216,7 +216,7 @@ func TestYiviDisclosureWithDocumentPhoto(t *testing.T) {
 }
 
 // A document the Yivi app shares carries the BSN its photo read, as the
-// flow's BSN policy releases it and only with DG11 requested.
+// flow's BSN policy releases it, DG11 or not.
 func TestYiviDocumentCarriesPhotographedBSN(t *testing.T) {
 	const scannedBSN = "111222333"
 	for name, tc := range map[string]struct {
@@ -224,10 +224,10 @@ func TestYiviDocumentCarriesPhotographedBSN(t *testing.T) {
 		requested []string
 		want      string
 	}{
-		"kept":            {privacy.BSNPolicyRetrieve, []string{attrDocument, attrDG11}, scannedBSN},
-		"masked":          {privacy.BSNPolicyMask, []string{attrDocument, attrDG11}, bsn.Mask(scannedBSN)},
-		"left out":        {privacy.BSNPolicyOmit, []string{attrDocument, attrDG11}, ""},
-		"DG11 not wanted": {privacy.BSNPolicyRetrieve, []string{attrDocument}, ""},
+		"kept":         {privacy.BSNPolicyRetrieve, []string{attrDocument, attrDG11}, scannedBSN},
+		"masked":       {privacy.BSNPolicyMask, []string{attrDocument, attrDG11}, bsn.Mask(scannedBSN)},
+		"left out":     {privacy.BSNPolicyOmit, []string{attrDocument, attrDG11}, ""},
+		"without DG11": {privacy.BSNPolicyMask, []string{attrDocument}, bsn.Mask(scannedBSN)},
 	} {
 		t.Run(name, func(t *testing.T) {
 			ctx, tenant := context.Background(), pp.Tenant{ID: "org"}

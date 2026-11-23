@@ -432,6 +432,23 @@ export function acceptsPersonalData(flow: {
   return (flow.acceptedDocumentTypes ?? []).some(isPersonalData);
 }
 
+// The documents a flow's document photo takes, the personal data aside; empty
+// is any (proofing.scanDocuments).
+export function scanDocuments(flow: {
+  acceptedDocumentTypes?: readonly string[];
+}): string[] {
+  return (flow.acceptedDocumentTypes ?? []).filter((t) => !isPersonalData(t));
+}
+
+// The documents the document photo's text names: the flow's known kinds, or
+// every kind when it takes any.
+export function scanDocumentKinds(
+  documents: readonly string[],
+): DocumentKind[] {
+  const kinds = DOCUMENT_KINDS.filter((kind) => documents.includes(kind));
+  return kinds.length === 0 ? [...DOCUMENT_KINDS] : kinds;
+}
+
 // "" is no requirement.
 export type Inherit<T extends string> = "" | T;
 
@@ -1372,12 +1389,15 @@ export type VerifyStage =
 
 export function verifyStages({
   app = true,
+  session = true,
   document = false,
   address = false,
   documents,
 }: {
   // False for a flow the browser runs alone: there is no app to choose.
   app?: boolean;
+  // False for a flow the browser runs alone: there is no QR code to scan.
+  session?: boolean;
   // A flow that photographs the document, after the app's part.
   document?: boolean;
   address?: boolean;
@@ -1387,7 +1407,7 @@ export function verifyStages({
   return [
     "overview",
     ...(app ? (["method"] as const) : []),
-    "session",
+    ...(session ? (["session"] as const) : []),
     ...(document ? (["document"] as const) : []),
     ...(address ? (["address"] as const) : []),
     ...(documents ? (["documents"] as const) : []),
@@ -1674,6 +1694,52 @@ export function ageOverFact(
       ? t("identityProofing.sessions.identity.ageOverYes")
       : t("identityProofing.sessions.identity.ageOverNo"),
   };
+}
+
+// DigiD's yes or no on being Dutch, for a result without a document's
+// nationality; undefined when it has neither.
+export function dutchNationalityLabel(
+  identity: { dutchNationality?: boolean | null } | undefined,
+  t: TFunction,
+): string | undefined {
+  if (
+    identity?.dutchNationality === undefined ||
+    identity.dutchNationality === null
+  ) {
+    return undefined;
+  }
+  return identity.dutchNationality
+    ? t("identityProofing.sessions.identity.dutch")
+    : t("identityProofing.sessions.identity.notDutch");
+}
+
+// The BSN row, for a flow that asked for it: empty when it got none.
+export function registeredFacts(
+  identity: { bsn?: string | null } | undefined,
+  t: TFunction,
+): { label: string; value: string }[] {
+  if (identity?.bsn === undefined) {
+    return [];
+  }
+  return [
+    {
+      label: t("identityProofing.sessions.identity.bsn"),
+      value: identity.bsn ?? "—",
+    },
+  ];
+}
+
+// Whether a result has a nationality row: its flow asked for the nationality
+// or DigiD's yes or no on being Dutch.
+export function asksNationality(
+  identity:
+    | { nationality?: string | null; dutchNationality?: boolean | null }
+    | undefined,
+): boolean {
+  return (
+    identity?.nationality !== undefined ||
+    identity?.dutchNationality !== undefined
+  );
 }
 
 // Whether flow's result carries the holder's name and date of birth (the

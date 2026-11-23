@@ -16813,7 +16813,10 @@ components:
           description: When an approved session was verified.
         identity:
           type: object
-          description: Only for an approved session.
+          description: >-
+            Only for an approved session. `nationality`, `bsn` and `dutchNationality`, like
+            the evidence's checks, are absent when the session's flow does not ask for them,
+            and null when it asked and got nothing.
           properties:
             givenName:
               type: string
@@ -16823,13 +16826,22 @@ components:
               type: string
             nationality:
               type: string
+              nullable: true
             bsn:
               type: string
+              nullable: true
               description: >-
                 The person's BSN, for a flow whose BSN policy keeps it (`retrieve`, or `mask`
                 for a masked one): the registered one when the Yivi app shared the personal
                 data (DigiD), else the one a Dutch document's chip or photo carries. Another
                 country's personal number is never sent. Absent otherwise.
+            dutchNationality:
+              type: boolean
+              nullable: true
+              description: >-
+                Whether the person has Dutch nationality, as the registered personal data
+                (DigiD) says when the Yivi app shared it. It is a yes or no, not a
+                nationality. Absent when not shared.
             ageOver:
               type: object
               description: >-
@@ -16867,24 +16879,35 @@ components:
                 type: string
               passiveAuth:
                 type: string
+                nullable: true
                 enum: [valid, invalid, not_performed]
-                description: The chip's signature check; only on `emrtd` evidence.
+                description: >-
+                  The chip's signature check, for a flow that reads the chip in the Idem app;
+                  absent otherwise, null when the chip was not read.
               activeAuth:
                 type: string
+                nullable: true
                 enum: [valid, invalid, not_performed]
-                description: The chip's clone check; only on `emrtd` evidence.
+                description: The chip's clone check; present exactly when `passiveAuth` is.
               faceMatch:
                 type: number
-                description: The face match score, 0 to 1; absent when no face was matched.
+                nullable: true
+                description: >-
+                  The face match score, 0 to 1, for a flow that checks the face; absent
+                  otherwise, null when no face was matched.
               liveness:
                 type: string
+                nullable: true
                 enum: [passed, failed, not_performed]
+                description: For a flow that checks the face; absent otherwise.
               documentCheck:
                 type: object
+                nullable: true
                 description: >-
-                  The document scan's result on a photographed document (`document_photo`);
-                  absent without one. A `fake` document, or `fields` `invalid`, rejected the
-                  session; `doubtful`, or `zones` `invalid`, sent it to review.
+                  The document scan's result, for a flow that photographs the document
+                  (`document_photo`); absent otherwise, null when there is none. A `fake`
+                  document, or `fields` `invalid`, rejected the session; `doubtful`, or `zones`
+                  `invalid`, sent it to review.
                 properties:
                   verdict:
                     type: string

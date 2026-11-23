@@ -900,6 +900,18 @@ func acceptsPersonalData(f proofingprovider.Flow) bool {
 	})
 }
 
+// scanDocuments are the documents f's document photo takes, the personal data
+// aside; empty is any.
+func scanDocuments(f proofingprovider.Flow) []string {
+	documents := []string{}
+	for _, t := range f.AcceptedDocumentTypes {
+		if !strings.EqualFold(t, openid4vpverifier.SourcePersonalData) {
+			documents = append(documents, t)
+		}
+	}
+	return documents
+}
+
 // yiviSources are what f's Yivi disclosure offers the person, any one of:
 // the documents and personal data it accepts, or for a flow accepting any
 // document none, which asks the default documents. A document code the Yivi

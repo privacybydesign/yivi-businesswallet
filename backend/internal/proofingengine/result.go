@@ -96,9 +96,12 @@ func buildResult(sess session.Session, req appResultRequest, verifiedChipChecks 
 	if req.Document != nil && attrRequested(sess, attrDocument) {
 		doc := *req.Document
 		applyBSNPolicy(&doc, bsnPolicy)
+		// A photo's BSN follows the BSN policy alone; a chip's comes with DG11.
 		if !attrRequested(sess, attrDG11) {
-			doc.PersonalNumber = ""
 			doc.PlaceOfBirth = ""
+			if chipRead(sess) {
+				doc.PersonalNumber = ""
+			}
 		}
 		// The age check wins over the document data: the date of birth it
 		// answers from is never released next to it.

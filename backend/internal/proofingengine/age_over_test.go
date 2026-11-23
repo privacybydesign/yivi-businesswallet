@@ -145,3 +145,45 @@ func TestSessionIdentityAgeOver(t *testing.T) {
 		t.Errorf("identity carries %q %q, want no document data", id.GivenName, id.BirthDate)
 	}
 }
+
+func TestSessionIdentityDutchNationality(t *testing.T) {
+	for value, want := range map[string]*bool{"Yes": new(true), "Nee": new(false), "": nil, "maybe": nil} {
+		sess := session.Session{
+			ID: "nl", TenantID: "org", Token: "tok-nl", Status: session.StatusApproved,
+			Result: map[string]any{"assurance": map[string]any{}, "disclosure": disclosureInfo{
+				Source: referenceSourceOpenID4VP, Attributes: map[string]string{pp.AttributeDutchNationality: value},
+			}},
+		}
+		s := &Server{sessions: newMemSessions(sess)}
+		id, err := s.SessionIdentity(context.Background(), pp.Tenant{ID: "org"}, sess.ID, sess.Token)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if (id.DutchNationality == nil) != (want == nil) || (want != nil && *id.DutchNationality != *want) {
+			t.Errorf("%q: dutch nationality = %v, want %v", value, id.DutchNationality, want)
+		}
+	}
+}
+
+// A flow asks only for what its steps and documents can give.
+func TestAskedOf(t *testing.T) {
+	licence := flow.FlowDefinition{Steps: []flow.Step{flow.StepDocumentPhoto}, AcceptedDocumentTypes: []string{flow.DocumentTypeDrivingLicence}, BSNPolicy: privacy.BSNPolicyRetrieve}
+	digid := flow.FlowDefinition{Steps: []flow.Step{flow.StepDocumentCapture, flow.StepNFCRead}, Apps: []flow.App{flow.AppYivi}, AcceptedDocumentTypes: []string{flow.DocumentKindPersonalData}, BSNPolicy: privacy.BSNPolicyOmit}
+	chip := flow.FlowDefinition{Steps: []flow.Step{flow.StepDocumentCapture, flow.StepNFCRead, flow.StepFaceVerification}, BSNPolicy: privacy.BSNPolicyMask}
+	for name, tc := range map[string]struct {
+		fd     flow.FlowDefinition
+		method session.Method
+		attrs  []string
+		want   pp.Asked
+	}{
+		"driving licence":           {licence, session.MethodBrowser, []string{"dg1"}, pp.Asked{BSN: true, DocumentCheck: true}},
+		"DigiD without BSN":         {digid, session.MethodBiometricBoundLogin, []string{"dg1"}, pp.Asked{DutchNationality: true}},
+		"chip in the Idem app":      {chip, session.MethodNFCPassport, []string{"dg1"}, pp.Asked{Nationality: true, ChipChecks: true, Face: true}},
+		"chip flow in the Yivi app": {chip, session.MethodBiometricBoundLogin, []string{"dg1"}, pp.Asked{Nationality: true, Face: true}},
+	} {
+		got := askedOf(tc.fd, session.Session{Method: tc.method, RequestedAttributes: tc.attrs})
+		if *got != tc.want {
+			t.Errorf("%s: asked = %+v, want %+v", name, *got, tc.want)
+		}
+	}
+}
