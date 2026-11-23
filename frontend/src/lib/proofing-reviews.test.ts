@@ -409,6 +409,21 @@ describe("check decision", () => {
 });
 
 describe("automaticChecks", () => {
+  // Null is a check the flow asked for and did not get; absent, one it never
+  // asked for.
+  it("shows an asked-for check it did not get as not performed", () => {
+    expect(
+      automaticChecks({
+        type: "document_photo",
+        liveness: null,
+        faceMatch: null,
+      }),
+    ).toEqual([
+      { key: "livePerson", outcome: "notPerformed" },
+      { key: "faceMatch", outcome: "notPerformed" },
+    ]);
+  });
+
   it("lists the checks the engine reported, in the page's order", () => {
     expect(
       automaticChecks({
@@ -447,6 +462,12 @@ describe("provenWithParts", () => {
       provenWithParts({ type: "reference_photo", faceMatch: 0.9 }),
     ).toEqual(["faceMatch"]);
     expect(provenWithParts(undefined)).toEqual([]);
+  });
+
+  it("leaves out a part the flow asked for and did not get", () => {
+    expect(
+      provenWithParts({ type: "document", passiveAuth: null, faceMatch: null }),
+    ).toEqual([]);
   });
 });
 

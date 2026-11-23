@@ -522,10 +522,12 @@ export interface AutomaticCheck {
 type Evidence = ProofingResult["evidence"][number];
 
 // The service's words for a check's outcome; one it does not know has no
-// outcome here and is left out rather than guessed.
+// outcome here and is left out rather than guessed. Null is a check the flow
+// asked for and did not get.
 function automaticOutcome(
-  value: string | undefined,
+  value: string | null | undefined,
 ): AutomaticOutcome | undefined {
+  if (value === null) return "notPerformed";
   switch (value) {
     case "valid":
     case "passed":
@@ -553,7 +555,9 @@ export function automaticChecks(
   ];
   const checks = reported.filter((check) => check.outcome !== undefined);
 
-  if (evidence.faceMatch !== undefined) {
+  if (evidence.faceMatch === null) {
+    checks.push({ key: "faceMatch", outcome: "notPerformed" });
+  } else if (evidence.faceMatch !== undefined) {
     checks.push({
       key: "faceMatch",
       outcome: undefined,
@@ -572,8 +576,9 @@ export function provenWithParts(
 ): ProvenWithPart[] {
   if (!evidence) return [];
   const parts: ProvenWithPart[] = [];
-  if (evidence.passiveAuth !== undefined) parts.push("chip");
-  if (evidence.faceMatch !== undefined) parts.push("faceMatch");
+  // Null is a part the flow asked for and did not get.
+  if (evidence.passiveAuth != null) parts.push("chip");
+  if (evidence.faceMatch != null) parts.push("faceMatch");
   return parts;
 }
 
