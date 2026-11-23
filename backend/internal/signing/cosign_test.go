@@ -263,9 +263,45 @@ func TestDeliverToSignersMailsEachSignerOnce(t *testing.T) {
 	}
 
 	// Nobody to mail is a failed delivery, not a silent success.
-	s = &Service{deliverer: &fakeDeliverer{}}
+	s = &Service{members: members, deliverer: &fakeDeliverer{}}
 	if err := s.deliverToSigners(context.Background(), uuid.New(), Request{Signers: []Signer{memberSigner(gone)}}, "Doc.pdf", nil); err == nil {
 		t.Fatal("deliverToSigners with no addresses = nil, want an error")
+	}
+}
+
+// failingMemberDirectory is a member directory that cannot be read.
+type failingMemberDirectory struct{}
+
+func (failingMemberDirectory) ListMembers(context.Context, uuid.UUID) ([]OrgMember, error) {
+	return nil, errors.New("directory down")
+}
+
+// A directory that cannot be read leaves the members' addresses unknown. That
+// fails the delivery before anything is sent: mailing only the external signee
+// would record a delivery the members never got.
+func TestDeliverToSignersFailsWhenTheDirectoryCannotBeRead(t *testing.T) {
+	req := Request{Signers: []Signer{
+		memberSigner(uuid.New()),
+		externalSignerRow("bob@example.org"),
+	}}
+	fd := &fakeDeliverer{}
+	s := &Service{members: failingMemberDirectory{}, deliverer: fd}
+	if err := s.deliverToSigners(context.Background(), uuid.New(), req, "Doc.pdf", []byte("pdf")); err == nil {
+		t.Fatal("deliverToSigners = nil, want the directory failure reported")
+	}
+	if len(fd.to) != 0 {
+		t.Fatalf("mailed %v, want nobody mailed while the members are unknown", fd.to)
+	}
+
+	// With only external signees there is nothing to look up, so it is not asked.
+	fd = &fakeDeliverer{}
+	s = &Service{members: failingMemberDirectory{}, deliverer: fd}
+	external := Request{Signers: []Signer{externalSignerRow("bob@example.org")}}
+	if err := s.deliverToSigners(context.Background(), uuid.New(), external, "Doc.pdf", []byte("pdf")); err != nil {
+		t.Fatalf("deliverToSigners for external signees only = %v, want nil", err)
+	}
+	if !slices.Equal(fd.to, []string{"bob@example.org"}) {
+		t.Fatalf("mailed %v, want the external signee", fd.to)
 	}
 }
 

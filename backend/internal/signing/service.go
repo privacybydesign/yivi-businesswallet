@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/mail"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -634,8 +635,11 @@ func (s *Service) deliver(ctx context.Context, orgID, requestID uuid.UUID) {
 // organisation since signing gets no copy. One failed send does not stop the
 // others, and fails the delivery as a whole.
 func (s *Service) deliverToSigners(ctx context.Context, orgID uuid.UUID, req Request, filename string, doc []byte) error {
-	s.enrich(ctx, orgID, []*Request{&req})
-	recipients := signerAddresses(req.Signers)
+	signers, err := s.withMemberAddresses(ctx, orgID, req.Signers)
+	if err != nil {
+		return err
+	}
+	recipients := signerAddresses(signers)
 	if len(recipients) == 0 {
 		return errors.New("signing: no signer has an e-mail address to deliver to")
 	}
@@ -646,6 +650,39 @@ func (s *Service) deliverToSigners(ctx context.Context, orgID uuid.UUID, req Req
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// withMemberAddresses returns the signers with each member's name and address
+// filled in from the member directory; an external signee carries their own. It
+// is not enrich, which treats a directory failure as cosmetic: here the address
+// is who gets the document, so a directory that cannot be read is an error.
+// Without it the members would be skipped as if they had no address, and a
+// request that also has an external signee would be recorded as delivered.
+func (s *Service) withMemberAddresses(ctx context.Context, orgID uuid.UUID, signers []Signer) ([]Signer, error) {
+	out := slices.Clone(signers)
+	if !slices.ContainsFunc(out, func(sg Signer) bool { return sg.UserID != nil }) {
+		return out, nil
+	}
+	if s.members == nil {
+		return nil, errors.New("signing: no member directory to resolve the signers' addresses from")
+	}
+	members, err := s.members.ListMembers(ctx, orgID)
+	if err != nil {
+		return nil, fmt.Errorf("signing: resolve the signers' addresses: %w", err)
+	}
+	byID := make(map[uuid.UUID]OrgMember, len(members))
+	for _, m := range members {
+		byID[m.UserID] = m
+	}
+	for i := range out {
+		if out[i].UserID == nil {
+			continue
+		}
+		if m, ok := byID[*out[i].UserID]; ok {
+			out[i].Name, out[i].Email = m.Name, m.Email
+		}
+	}
+	return out, nil
 }
 
 // signerAddresses is the signers to mail, one per address: a member and an
