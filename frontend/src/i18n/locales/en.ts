@@ -4553,6 +4553,8 @@ export const en = {
       noSource: "No copy — enter a static value",
       sourcePrefill: "Copied from the recipient at issue time",
       error: "Could not save the template: {{message}}",
+      statusListRequired:
+        "A validity over 24 hours needs a status list to revoke the credential on, and this environment has none. Enter 86400 seconds or less.",
     },
     sources: {
       givenNames: "Recipient · first name",
@@ -4625,6 +4627,8 @@ export const en = {
         "One of the attributes is not part of this template's schema.",
       missingAttribute: "A required attribute is missing.",
       invalidClaims: "The claims do not match the rulebook. {{message}}",
+      statusListRequired:
+        "This template's validity is over 24 hours, which needs a status list to revoke the credential on, and this environment has none. Set the template's validity to 24 hours or less.",
       rulebookClaimsIntro:
         "This template follows a WE BUILD rulebook. Edit the claims as JSON. They start from the rulebook's example and are checked against the rulebook when you issue.",
       rulebookClaimsLabel: "Claims (JSON)",

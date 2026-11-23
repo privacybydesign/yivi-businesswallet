@@ -130,6 +130,8 @@ type Service struct {
 	holder     holderEngine
 	appBaseURL string
 	now        func() time.Time
+	// shortLivedOnly: see RequireStatusList.
+	shortLivedOnly bool
 }
 
 func NewService(store issuedStore, iss issuer, instances issuerInstanceResolver, email emailNotifier, qerds qerdsNotifier, held heldMutator, offers offerStore, holder holderEngine, appBaseURL string) *Service {
@@ -145,6 +147,18 @@ func NewService(store issuedStore, iss issuer, instances issuerInstanceResolver,
 		appBaseURL: strings.TrimRight(appBaseURL, "/"),
 		now:        time.Now,
 	}
+}
+
+// RequireStatusList makes the service refuse a validity that needs a Token
+// Status List, for a deployment whose issuer publishes none.
+func (s *Service) RequireStatusList() { s.shortLivedOnly = true }
+
+// CheckValidity refuses a template validity this deployment may not issue.
+func (s *Service) CheckValidity(validitySeconds *int) error {
+	if s.shortLivedOnly && needsStatusList(validitySeconds) {
+		return ErrStatusListRequired
+	}
+	return nil
 }
 
 // instanceFor resolves the org's issuer instance so offers route to that org's
@@ -184,11 +198,12 @@ func (s *Service) Issue(ctx context.Context, orgID uuid.UUID, issuedBy *uuid.UUI
 		in.Attributes = maps.Clone(in.Attributes)
 		in.Attributes[IdentifierClaim] = identifier
 	}
-
-	expirationSeconds := defaultExpirationSeconds
-	if detail.ValiditySeconds != nil {
-		expirationSeconds = *detail.ValiditySeconds
+	// Also here: a template saved before the rule, or by another deployment.
+	if err := s.CheckValidity(detail.ValiditySeconds); err != nil {
+		return IssueResult{}, err
 	}
+
+	expirationSeconds := expirationSecondsFor(detail.ValiditySeconds)
 	var expiresAt *time.Time
 	if expirationSeconds > 0 {
 		t := s.now().Add(time.Duration(expirationSeconds) * time.Second)

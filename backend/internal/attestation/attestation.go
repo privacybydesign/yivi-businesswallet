@@ -29,6 +29,9 @@ var (
 	ErrHeldNotFound          = errors.New("attestation: held attestation not found")
 	ErrOfferNotFound         = errors.New("attestation: credential offer not found")
 	ErrRecipientKindMismatch = errors.New("attestation: recipient kind does not match the schema subject type")
+	// ErrStatusListRequired means the validity is over 24 hours and the issuer
+	// publishes no Token Status List to revoke the credential on.
+	ErrStatusListRequired = errors.New("attestation: a validity over 24 hours needs an issuer status list")
 
 	// ErrUnknownAttribute and ErrMissingAttribute enforce data minimisation
 	// (Art 5(1)(b)): the schema's attribute list is the allow-list.

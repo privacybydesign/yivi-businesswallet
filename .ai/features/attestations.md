@@ -661,6 +661,19 @@ Two distinct terminal withdrawals, because they are different events:
     local flip (same fail-safe ordering as `DeleteHeld`). A deployment issuing
     without a status list, or a legacy claimed row with no captured uuid, flips
     locally only. Propagation to external validators beyond the status list is v2.
+- **A validity over 24 hours needs a status list** (WE BUILD CS-10, EBWOID rulebook;
+  YIV-532). The backend cannot see whether the issuer reserves a bit: `create-offer`
+  answers the same either way, and Veramo leaves the status list out of its metadata.
+  So the deployment says so with `ATTESTATION_ISSUER_STATUS_LIST=true`.
+  - Without it, and outside `DEV_MODE`, a validity over 24 hours is refused
+    (400 `status_list_required`): on saving a template and again on issuing, so a
+    template saved before the rule cannot issue either. No validity (the one-year
+    default) and a validity of 0 (never expires) count as over 24 hours.
+  - The stub issuer keeps no status list, so `true` with `ATTESTATION_ISSUER=stub`
+    fails at boot.
+  - Set it only where every issuer instance the deployment uses has a status list:
+    the instance's `statusLists` block or the credential config's `statuslist`, plus
+    a deployed `statuslist-agent` (`openid4vc-poc-ops`).
 
 ### 9.5 Receive / hold (holder side, Art 5(1)(a))
 Inbound EAAs land in the org's **irmago EUDI holder engine** (§6.5) with a
@@ -814,6 +827,7 @@ invalidation cascades. The screen is the mockup:
 | `ATTESTATION_ISSUER_URL` | Veramo issuer base (`veramo-issuer.openid4vc.staging.yivi.app`) | when `veramo` |
 | `ATTESTATION_ISSUER_ADMIN_TOKEN` | Veramo issuer Bearer admin token | when `veramo` |
 | `ATTESTATION_ISSUER_INSTANCE` | Veramo issuer instance name (`issuerName` in the path) | when `veramo` |
+| `ATTESTATION_ISSUER_STATUS_LIST` | `true` when the issuer puts every credential on a Token Status List (§9.4) | outside `DEV_MODE`, to issue a credential valid over 24 h |
 | `ATTESTATION_OFFER_TTL` | credential-offer lifetime before `expired` | no (has default) |
 | `ATTESTATION_VCT_NAMESPACE` | org `vct` namespace prefix (e.g. `nl.<org>`) | no (derived) |
 | `ATTESTATION_HOLDER_ENCRYPTION_KEY` | per-org holder at-rest key material (§6.5) | when holder enabled |

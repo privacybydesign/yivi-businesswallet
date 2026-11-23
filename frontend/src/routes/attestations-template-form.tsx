@@ -14,7 +14,7 @@ import {
   useUpdateAttestationTemplateMutation,
 } from "../api/attestations.queries";
 import { Button, Modal, Select } from "../ui";
-import { control } from "../lib/attestation-form";
+import { apiErrorCode, control } from "../lib/attestation-form";
 import { Field } from "./attestations-fields";
 import type { TFunction } from "i18next";
 
@@ -407,9 +407,11 @@ export function AttestationTemplateForm({
             role="alert"
             className="rounded-yivi bg-error-bg text-error px-3 py-2 text-[13px]"
           >
-            {t("attestations.templateForm.error", {
-              message: mutationError.message,
-            })}
+            {apiErrorCode(mutationError) === "status_list_required"
+              ? t("attestations.templateForm.statusListRequired")
+              : t("attestations.templateForm.error", {
+                  message: mutationError.message,
+                })}
           </p>
         )}
       </form>

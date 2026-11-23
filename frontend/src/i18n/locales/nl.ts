@@ -4658,6 +4658,8 @@ export const nl: Translation<typeof en> = {
       noSource: "Niet overnemen — voer een vaste waarde in",
       sourcePrefill: "Bij uitgifte overgenomen van de ontvanger",
       error: "Het sjabloon opslaan mislukt: {{message}}",
+      statusListRequired:
+        "Een geldigheid van meer dan 24 uur vereist een statuslijst om de credential op in te trekken, en die heeft deze omgeving niet. Vul 86400 seconden of minder in.",
     },
     sources: {
       givenNames: "Ontvanger · voornaam",
@@ -4731,6 +4733,8 @@ export const nl: Translation<typeof en> = {
         "Een van de attributen hoort niet bij het schema van dit sjabloon.",
       missingAttribute: "Een verplicht attribuut ontbreekt.",
       invalidClaims: "De claims voldoen niet aan het rulebook. {{message}}",
+      statusListRequired:
+        "De geldigheid van dit sjabloon is meer dan 24 uur. Dat vereist een statuslijst om de credential op in te trekken, en die heeft deze omgeving niet. Zet de geldigheid van het sjabloon op 24 uur of minder.",
       rulebookClaimsIntro:
         "Dit sjabloon volgt een WE BUILD-rulebook. Bewerk de claims als JSON. Ze beginnen bij het voorbeeld uit het rulebook en worden bij het uitgeven tegen het rulebook gecontroleerd.",
       rulebookClaimsLabel: "Claims (JSON)",

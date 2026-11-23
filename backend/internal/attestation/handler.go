@@ -58,6 +58,7 @@ type handlerStore interface {
 
 type issuanceService interface {
 	Issue(ctx context.Context, orgID uuid.UUID, issuedBy *uuid.UUID, orgName string, in IssueInput) (IssueResult, error)
+	CheckValidity(validitySeconds *int) error
 	Status(ctx context.Context, orgID, id uuid.UUID) (Issued, error)
 	ListIssued(ctx context.Context, orgID uuid.UUID) ([]Issued, error)
 	Revoke(ctx context.Context, orgID, id uuid.UUID) (Issued, error)
@@ -791,6 +792,10 @@ func (h *Handler) createTemplate(w http.ResponseWriter, r *http.Request) error {
 		return badRequest("invalid_input", "invalid keyMaterialId")
 	}
 
+	if err := h.checkValidity(req.ValiditySeconds); err != nil {
+		return err
+	}
+
 	org := organization.OrgFromContext(r.Context())
 	if len(req.AttributeSources) > 0 {
 		sc, err := h.schemas.GetSchema(r.Context(), org.ID, schemaID)
@@ -831,6 +836,13 @@ func (h *Handler) updateTemplate(w http.ResponseWriter, r *http.Request) error {
 	keyID, err := parseOptionalUUID(req.KeyMaterialID)
 	if err != nil {
 		return badRequest("invalid_input", "invalid keyMaterialId")
+	}
+
+	// Archiving keeps whatever validity the template already had.
+	if req.Status != TemplateArchived {
+		if err := h.checkValidity(req.ValiditySeconds); err != nil {
+			return err
+		}
 	}
 
 	org := organization.OrgFromContext(r.Context())
@@ -874,6 +886,20 @@ func (h *Handler) deleteTemplate(w http.ResponseWriter, r *http.Request) error {
 	}
 	w.WriteHeader(http.StatusNoContent)
 	return nil
+}
+
+// checkValidity answers a validity the deployment may not issue.
+func (h *Handler) checkValidity(validitySeconds *int) error {
+	if err := h.service.CheckValidity(validitySeconds); errors.Is(err, ErrStatusListRequired) {
+		return statusListRequired()
+	} else if err != nil {
+		return fmt.Errorf("checking template validity: %w", err)
+	}
+	return nil
+}
+
+func statusListRequired() error {
+	return badRequest("status_list_required", "a validity over 24 hours needs an issuer that publishes a status list")
 }
 
 func decodeTemplate(r *http.Request) (templateRequest, error) {
@@ -1065,6 +1091,8 @@ func (h *Handler) issue(w http.ResponseWriter, r *http.Request) error {
 		return badRequest("invalid_attribute", err.Error())
 	case errors.Is(err, rulebook.ErrInvalidClaims):
 		return badRequest("invalid_claims", err.Error())
+	case errors.Is(err, ErrStatusListRequired):
+		return statusListRequired()
 	case err != nil:
 		return fmt.Errorf("issuing attestation: %w", err)
 	}

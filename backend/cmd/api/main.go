@@ -1096,6 +1096,9 @@ func (w *wiring) buildAttestations(ctx context.Context) error {
 	attestationService := attestation.NewService(
 		attestationStore, attIssuer, issuerSettingsStore, w.emailService, qerdsOfferSender{svc: w.qerdsService, orgs: w.orgStore}, attestationStore, attestationStore, attHolder, cfg.AppBaseURL,
 	)
+	if !cfg.DevMode && !cfg.AttestationIssuerStatusList {
+		attestationService.RequireStatusList()
+	}
 	// Re-read the issuer status list of every held credential, so a credential
 	// revoked after it was received stops reading as valid. Deploys come more
 	// often than the interval, so it also runs at boot.

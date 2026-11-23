@@ -190,6 +190,9 @@ const (
 	// WE BUILD rulebook credentials, v0.9.4 up to v0.10.1 (see EudiIssuer). Empty
 	// sends them to the issuer above.
 	envAttestationRulebookIssuerURL = "ATTESTATION_RULEBOOK_ISSUER_URL"
+	// envAttestationIssuerStatusList says the issuer puts every credential on a
+	// Token Status List; without it only a local stack issues one valid over 24h.
+	envAttestationIssuerStatusList = "ATTESTATION_ISSUER_STATUS_LIST"
 
 	// Attestation holder (the "store, select" side). The irmago EUDI holder engine
 	// is backed by Postgres, one isolated schema per org; the storage dir holds
@@ -570,6 +573,8 @@ type Config struct {
 	// AttestationRulebookIssuerURL is the EU reference issuer for WE BUILD
 	// rulebook credentials; empty sends them to AttestationIssuer.
 	AttestationRulebookIssuerURL string
+	// AttestationIssuerStatusList is envAttestationIssuerStatusList.
+	AttestationIssuerStatusList bool
 	// AttestationStubClaimDelay is how long the stub issuer reports an offer
 	// pending; zero reports it issued at once.
 	AttestationStubClaimDelay time.Duration
@@ -954,7 +959,11 @@ func loadAttestationIssuer(c *Config) error {
 	c.AttestationIssuer = envOrDefault(envAttestationIssuer, defaultAttestationIssuer)
 	c.AttestationIssuerURL = os.Getenv(envAttestationIssuerURL)
 	c.AttestationIssuerInstance = os.Getenv(envAttestationIssuerInstance)
+	c.AttestationIssuerStatusList = strings.EqualFold(os.Getenv(envAttestationIssuerStatusList), "true")
 	if c.AttestationIssuer == IssuerStub {
+		if c.AttestationIssuerStatusList {
+			return fmt.Errorf("config: %s=true needs a real issuer: %s=%q keeps no status list", envAttestationIssuerStatusList, envAttestationIssuer, IssuerStub)
+		}
 		return nil
 	}
 	if c.AttestationIssuerURL == "" {

@@ -554,6 +554,25 @@ func TestLoadStubOutcomeNeedsStubProvider(t *testing.T) {
 	}
 }
 
+// The stub issuer keeps no status list, so it cannot claim one.
+func TestLoadStatusListNeedsRealIssuer(t *testing.T) {
+	if _, err := loadWith(t, map[string]string{envAttestationIssuerStatusList: "true"}); err == nil {
+		t.Errorf("%s=true with the stub issuer loaded, want an error", envAttestationIssuerStatusList)
+	}
+	cfg, err := loadWith(t, map[string]string{
+		envAttestationIssuerStatusList: "true",
+		envAttestationIssuer:           IssuerVeramo,
+		envAttestationIssuerURL:        "https://issuer.example",
+		envAttestationIssuerInstance:   "test-issuer",
+	})
+	if err != nil {
+		t.Fatalf("loading with a real issuer: %v", err)
+	}
+	if !cfg.AttestationIssuerStatusList {
+		t.Errorf("AttestationIssuerStatusList = false, want true")
+	}
+}
+
 // localStack is the APP_BASE_URL of a local developer stack.
 const localStack = "http://localhost:5173"
 

@@ -107,6 +107,9 @@ services:
       ATTESTATION_ISSUER_ADMIN_TOKEN: ${ATTESTATION_ISSUER_ADMIN_TOKEN:-}
       ATTESTATION_ISSUER_PING_CREDENTIAL: ${ATTESTATION_ISSUER_PING_CREDENTIAL:-}
       ATTESTATION_RULEBOOK_ISSUER_URL: ${ATTESTATION_RULEBOOK_ISSUER_URL:-}
+      # `true` when the issuer puts every credential on a Token Status List.
+      # Without it, a credential valid for more than 24 hours is refused.
+      ATTESTATION_ISSUER_STATUS_LIST: ${ATTESTATION_ISSUER_STATUS_LIST:-}
       # Identity proofing runs in the backend's own engine (`engine`, the
       # default) or the in-memory `stub`. The encryption key (hex 32 bytes)
       # seals the sessions' evidence and the webhook secrets at rest.
