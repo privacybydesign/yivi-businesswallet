@@ -199,7 +199,25 @@ func schemaClaims(s Schema) ([]claimConfig, []vctClaim) {
 		})
 		vctClaims = append(vctClaims, vctClaim{Path: []any{a.Key}, SD: vctSelectiveDisclosure})
 	}
+	if s.SubjectType == SubjectOrganization {
+		claims = append(claims, claimConfig{Path: []any{IdentifierClaim}, Mandatory: true, Display: identifierDisplay[IdentifierClaim]})
+		vctClaims = append(vctClaims, vctClaim{Path: []any{IdentifierClaim}, SD: vctSelectiveDisclosure})
+		for _, f := range identifierFields {
+			claims = append(claims, claimConfig{Path: []any{IdentifierClaim, f}, Display: identifierDisplay[f]})
+			vctClaims = append(vctClaims, vctClaim{Path: []any{IdentifierClaim, f}, SD: vctSelectiveDisclosure})
+		}
+	}
 	return claims, vctClaims
+}
+
+// identifierDisplay labels the shared identifier object and its members in the
+// issuer metadata, so a wallet shows them in the holder's language.
+var identifierDisplay = map[string][]localeDisplay{
+	IdentifierClaim: {{Name: "Identifier", Locale: "en"}, {Name: "Identificatie", Locale: "nl"}},
+	"euid":          {{Name: "EUID", Locale: "en"}, {Name: "EUID", Locale: "nl"}},
+	"lei":           {{Name: "LEI", Locale: "en"}, {Name: "LEI", Locale: "nl"}},
+	"tax":           {{Name: "Tax number", Locale: "en"}, {Name: "Fiscaal nummer", Locale: "nl"}},
+	"other":         {{Name: "Other identifier", Locale: "en"}, {Name: "Andere identificatie", Locale: "nl"}},
 }
 
 // --- Per-organization issuer bundle (full GitOps drop-in) ---

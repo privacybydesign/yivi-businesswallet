@@ -186,6 +186,10 @@ const (
 	// QR stays on screen for a recording; zero claims at once.
 	envAttestationStubClaimDelay = "ATTESTATION_STUB_CLAIM_DELAY"
 	envAttestationPingCredential = "ATTESTATION_ISSUER_PING_CREDENTIAL"
+	// envAttestationRulebookIssuerURL is the EU reference issuer that issues the
+	// WE BUILD rulebook credentials, v0.9.4 up to v0.10.1 (see EudiIssuer). Empty
+	// sends them to the issuer above.
+	envAttestationRulebookIssuerURL = "ATTESTATION_RULEBOOK_ISSUER_URL"
 
 	// Attestation holder (the "store, select" side). The irmago EUDI holder engine
 	// is backed by Postgres, one isolated schema per org; the storage dir holds
@@ -563,6 +567,9 @@ type Config struct {
 	AttestationIssuerToken    string
 	AttestationIssuerInstance string
 	AttestationPingCredential string
+	// AttestationRulebookIssuerURL is the EU reference issuer for WE BUILD
+	// rulebook credentials; empty sends them to AttestationIssuer.
+	AttestationRulebookIssuerURL string
 	// AttestationStubClaimDelay is how long the stub issuer reports an offer
 	// pending; zero reports it issued at once.
 	AttestationStubClaimDelay time.Duration
@@ -691,8 +698,9 @@ func Load() (Config, error) {
 		IdentityProofingEncryptionKey: os.Getenv(envIdentityProofingEncryptionKey),
 		IdentityProofingEDLCSCAPaths:  parseList(os.Getenv(envIdentityProofingEDLCSCAPaths)),
 
-		AttestationIssuerToken:    os.Getenv(envAttestationIssuerToken),
-		AttestationPingCredential: os.Getenv(envAttestationPingCredential),
+		AttestationIssuerToken:       os.Getenv(envAttestationIssuerToken),
+		AttestationPingCredential:    os.Getenv(envAttestationPingCredential),
+		AttestationRulebookIssuerURL: os.Getenv(envAttestationRulebookIssuerURL),
 
 		AttestationHolderTrustChain: os.Getenv(envAttestationHolderTrustChain),
 		AttestationHolderStagingAnchors: strings.EqualFold(
