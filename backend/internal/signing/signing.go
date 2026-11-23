@@ -68,6 +68,9 @@ const (
 	ChannelNone  = "none"
 	ChannelQERDS = "qerds"
 	ChannelEmail = "email"
+	// ChannelSigners mails the finished document to everyone who signed it. It
+	// names no recipient: the signers are the recipients.
+	ChannelSigners = "signers"
 )
 
 // Per-request delivery lifecycle (independent of the signing status).
@@ -265,8 +268,8 @@ type SignerInput struct {
 
 // RecipientInput is where the finished document is delivered, chosen at create time.
 type RecipientInput struct {
-	Channel string // ChannelNone | ChannelQERDS | ChannelEmail
-	Address string // email address or QERDS address; empty for ChannelNone
+	Channel string // ChannelNone | ChannelQERDS | ChannelEmail | ChannelSigners
+	Address string // email address or QERDS address; empty for ChannelNone and ChannelSigners
 	Name    string
 	Message string // cover message shown to the recipient
 }
@@ -338,6 +341,11 @@ func (o Origin) via() string {
 type Start struct {
 	RequestID    *uuid.UUID `json:"requestId,omitempty"`
 	AuthorizeURL string     `json:"authorizeUrl"`
+	// AuthorizeInApp says the authorization is the wallet's own signing service's,
+	// so the page that started it may show the Yivi step itself instead of sending
+	// the browser away: it asks AuthorizeURL for JSON and gets an authorization id.
+	// False for a remote provider, whose authorization page is its own.
+	AuthorizeInApp bool `json:"authorizeInApp,omitempty"`
 }
 
 // ExternalView is what an external signee sees behind their invitation link. It is

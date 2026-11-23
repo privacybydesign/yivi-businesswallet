@@ -10,6 +10,7 @@ import {
   externalDocumentUrl,
   getExternalDocument,
 } from "../api/signing";
+import type { SigningStart } from "../api/signing";
 import {
   useDeclineExternalSignMutation,
   useExternalSigningQuery,
@@ -21,6 +22,7 @@ import { modeLabel } from "../lib/signing-labels";
 import { toast } from "../lib/toast";
 import { Button, Card, Logo, Outcome, buttonClassName } from "../ui";
 import { DeclineDialog } from "./signing-decline-dialog";
+import { SigningAuthorizationDialog } from "./signing-authorization-dialog";
 import { SigningDocumentViewer } from "./signing-document-viewer";
 
 // The external signing page. An external signee was added to a co-signing request by
@@ -65,6 +67,12 @@ export default function SigningExternal(): React.JSX.Element {
   const sign = useStartExternalSignMutation(signToken);
   const decline = useDeclineExternalSignMutation(signToken);
   const [declining, setDeclining] = useState(false);
+  // The started link or signature whose Yivi step is shown here, in a dialog.
+  const [authorizing, setAuthorizing] = useState<SigningStart | null>(null);
+  const onStarted = (start: SigningStart): void => {
+    if (start.authorizeInApp) setAuthorizing(start);
+    else window.location.assign(start.authorizeUrl);
+  };
 
   // The ceremony returns here with ?link=ok|failed (credential link) or ?request=<id>
   // (signature). Announce the link outcome once, then strip the flag so a refresh does
@@ -86,13 +94,13 @@ export default function SigningExternal(): React.JSX.Element {
 
   const onLink = (): void =>
     link.mutate(undefined, {
-      onSuccess: (start) => window.location.assign(start.authorizeUrl),
+      onSuccess: onStarted,
       onError: () => toast.error(t("signing.external.startError")),
     });
 
   const onSign = (): void =>
     sign.mutate(undefined, {
-      onSuccess: (start) => window.location.assign(start.authorizeUrl),
+      onSuccess: onStarted,
       onError: () => toast.error(t("signing.external.startError")),
     });
 
@@ -296,6 +304,12 @@ export default function SigningExternal(): React.JSX.Element {
           busy={decline.isPending}
           onConfirm={onDecline}
           onClose={() => setDeclining(false)}
+        />
+      )}
+      {authorizing && (
+        <SigningAuthorizationDialog
+          start={authorizing}
+          onClose={() => setAuthorizing(null)}
         />
       )}
     </div>

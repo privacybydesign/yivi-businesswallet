@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/mail"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -207,7 +208,7 @@ func (s *Service) startLink(ctx context.Context, orgID uuid.UUID, ref signerRef,
 		baseURL: conn.baseURL, clientID: conn.clientID, clientSecret: conn.clientSecret,
 		issuer: info.OAuth2, pkceVerifier: pkce.Verifier, redirectURI: conn.redirectURI,
 	})
-	return Start{AuthorizeURL: authURL}, nil
+	return Start{AuthorizeURL: authURL, AuthorizeInApp: conn.hosted}, nil
 }
 
 // CreateRequest validates the selected signers, mode and recipient, stores the
@@ -451,7 +452,7 @@ func (s *Service) startSign(ctx context.Context, orgID uuid.UUID, req Request, r
 		issuer: info.OAuth2, pkceVerifier: pkce.Verifier, redirectURI: conn.redirectURI,
 		requestID: requestID, credentialID: cred.ID, digestB64: digestB64, pades: pades,
 	})
-	return Start{RequestID: &requestID, AuthorizeURL: authURL}, nil
+	return Start{RequestID: &requestID, AuthorizeURL: authURL, AuthorizeInApp: conn.hosted}, nil
 }
 
 // HandleCallback resolves the OAuth callback (correlated by state), completes the
@@ -612,6 +613,8 @@ func (s *Service) deliver(ctx context.Context, orgID, requestID uuid.UUID) {
 		err = s.deliverer.DeliverEmail(ctx, orgID, req.RecipientAddress, req.RecipientName, req.Message, filename, doc)
 	case ChannelQERDS:
 		err = s.deliverer.DeliverQERDS(ctx, orgID, req.RecipientAddress, req.RecipientName, filename, req.Message, filename, doc)
+	case ChannelSigners:
+		err = s.deliverToSigners(ctx, orgID, req, filename, doc)
 	default:
 		return
 	}
@@ -625,6 +628,77 @@ func (s *Service) deliver(ctx context.Context, orgID, requestID uuid.UUID) {
 	if err := s.store.SetDelivery(context.WithoutCancel(ctx), orgID, requestID, DeliveryDelivered, ""); err != nil {
 		slog.ErrorContext(ctx, "signing: record delivery", slog.String("error", err.Error()))
 	}
+}
+
+// deliverToSigners mails the finished document to every signer. A member's
+// address comes from the member directory, so a member who has left the
+// organisation since signing gets no copy. One failed send does not stop the
+// others, and fails the delivery as a whole.
+func (s *Service) deliverToSigners(ctx context.Context, orgID uuid.UUID, req Request, filename string, doc []byte) error {
+	signers, err := s.withMemberAddresses(ctx, orgID, req.Signers)
+	if err != nil {
+		return err
+	}
+	recipients := signerAddresses(signers)
+	if len(recipients) == 0 {
+		return errors.New("signing: no signer has an e-mail address to deliver to")
+	}
+	var errs []error
+	for _, to := range recipients {
+		if err := s.deliverer.DeliverEmail(ctx, orgID, to.Email, to.Name, req.Message, filename, doc); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// withMemberAddresses returns the signers with each member's name and address
+// filled in from the member directory; an external signee carries their own. It
+// is not enrich, which treats a directory failure as cosmetic: here the address
+// is who gets the document, so a directory that cannot be read is an error.
+// Without it the members would be skipped as if they had no address, and a
+// request that also has an external signee would be recorded as delivered.
+func (s *Service) withMemberAddresses(ctx context.Context, orgID uuid.UUID, signers []Signer) ([]Signer, error) {
+	out := slices.Clone(signers)
+	if !slices.ContainsFunc(out, func(sg Signer) bool { return sg.UserID != nil }) {
+		return out, nil
+	}
+	if s.members == nil {
+		return nil, errors.New("signing: no member directory to resolve the signers' addresses from")
+	}
+	members, err := s.members.ListMembers(ctx, orgID)
+	if err != nil {
+		return nil, fmt.Errorf("signing: resolve the signers' addresses: %w", err)
+	}
+	byID := make(map[uuid.UUID]OrgMember, len(members))
+	for _, m := range members {
+		byID[m.UserID] = m
+	}
+	for i := range out {
+		if out[i].UserID == nil {
+			continue
+		}
+		if m, ok := byID[*out[i].UserID]; ok {
+			out[i].Name, out[i].Email = m.Name, m.Email
+		}
+	}
+	return out, nil
+}
+
+// signerAddresses is the signers to mail, one per address: a member and an
+// external signee can be the same person under one address.
+func signerAddresses(signers []Signer) []Signer {
+	seen := make(map[string]bool, len(signers))
+	out := make([]Signer, 0, len(signers))
+	for _, sg := range signers {
+		key := strings.ToLower(strings.TrimSpace(sg.Email))
+		if key == "" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, sg)
+	}
+	return out
 }
 
 func (s *Service) setDeliveryFailed(ctx context.Context, orgID, requestID uuid.UUID, reason string) {
@@ -817,7 +891,11 @@ func (s *Service) linkedCredential(ctx context.Context, orgID uuid.UUID, subj su
 	return s.store.GetCredential(ctx, orgID, subj, conn.baseURL)
 }
 
-type connection struct{ baseURL, clientID, clientSecret, redirectURI string }
+type connection struct {
+	baseURL, clientID, clientSecret, redirectURI string
+	// hosted is true for the wallet's own signing service.
+	hosted bool
+}
 
 // Available reports whether the org has a signing provider configured and
 // enabled. It is member-safe, so the signing feature can be gated for members who
@@ -835,10 +913,11 @@ func (s *Service) connection(ctx context.Context, orgID uuid.UUID) (connection, 
 		return connection{}, ErrNotConfigured
 	}
 	redirectURI := s.redirectURI
-	if s.hostedBaseURL != "" && baseURL == s.hostedBaseURL {
+	hosted := s.hostedBaseURL != "" && baseURL == s.hostedBaseURL
+	if hosted {
 		redirectURI = s.hostedRedirectURI
 	}
-	return connection{baseURL: baseURL, clientID: clientID, clientSecret: clientSecret, redirectURI: redirectURI}, nil
+	return connection{baseURL: baseURL, clientID: clientID, clientSecret: clientSecret, redirectURI: redirectURI, hosted: hosted}, nil
 }
 
 // enrich fills CreatedByName and per-signer name/email from the member directory. A
@@ -1034,7 +1113,7 @@ func involves(req Request, userID uuid.UUID) bool {
 
 func validateRecipient(rec RecipientInput) error {
 	switch rec.Channel {
-	case ChannelNone:
+	case ChannelNone, ChannelSigners:
 		return nil
 	case ChannelQERDS, ChannelEmail:
 		if strings.TrimSpace(rec.Address) == "" {

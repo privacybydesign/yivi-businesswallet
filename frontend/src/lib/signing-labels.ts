@@ -96,6 +96,8 @@ export function channelLabel(t: TFunction, channel: string): string {
   switch (channel) {
     case RECIPIENT_CHANNEL.none:
       return t("signing.channel.none");
+    case RECIPIENT_CHANNEL.signers:
+      return t("signing.channel.signers");
     case RECIPIENT_CHANNEL.email:
       return t("signing.channel.email");
     case RECIPIENT_CHANNEL.qerds:

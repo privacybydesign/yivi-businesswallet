@@ -20,6 +20,7 @@ import type {
   SignerSelection,
   SigningMode,
   SigningRequest,
+  SigningStart,
 } from "../api/signing";
 import {
   useCreateSigningRequestMutation,
@@ -55,6 +56,7 @@ import { toast } from "../lib/toast";
 import { Avatar, Button, Card, Icon, Input, Modal, Tag, TopBar } from "../ui";
 import { SigningHistoryPanel } from "./signing-history";
 import { DeclineDialog } from "./signing-decline-dialog";
+import { SigningAuthorizationDialog } from "./signing-authorization-dialog";
 
 // The placement editor and the document viewer pull in pdf.js, which is larger than the
 // rest of the app put together, so each is a chunk of its own: nobody who is not placing
@@ -250,7 +252,9 @@ export default function Signing(): React.JSX.Element {
               activeTab === "new" ? "max-w-6xl" : "max-w-3xl"
             }`}
           >
-            {requestId && (
+            {/* The request the browser just returned from signing belongs with the
+                documents to sign, not above the new-request wizard or the credential. */}
+            {activeTab === "toSign" && requestId && (
               <ActiveRequestCard slug={slug} requestId={requestId} />
             )}
 
@@ -291,11 +295,17 @@ function ActiveRequestCard({
   const me = useMeQuery();
   const request = useSigningRequestQuery(slug, requestId, me.data?.id);
 
+  // The signed PDF is fetched whole before the browser saves it, so the browser
+  // shows no download of its own until it is done: the button carries the wait.
+  const [downloading, setDownloading] = useState(false);
+
   const onDownload = (): void => {
     if (!request.data) return;
+    setDownloading(true);
     void downloadSignedDocument(slug, request.data.id, request.data.filename)
       .then(() => toast.success(t("signing.downloadedToast")))
-      .catch(() => toast.error(t("signing.downloadError")));
+      .catch(() => toast.error(t("signing.downloadError")))
+      .finally(() => setDownloading(false));
   };
 
   return (
@@ -316,7 +326,7 @@ function ActiveRequestCard({
           </p>
           <SignerList request={request.data} />
           <div>
-            <Button type="button" onClick={onDownload}>
+            <Button type="button" onClick={onDownload} loading={downloading}>
               {t("signing.downloadButton")}
             </Button>
           </div>
@@ -427,11 +437,22 @@ function ToSignTab({
   // The request whose document is open: a member signs from the viewer, with the
   // document in front of them, never from the list.
   const [reviewingId, setReviewingId] = useState<string | null>(null);
+  // The started signature whose Yivi step is shown here, in a dialog.
+  const [authorizing, setAuthorizing] = useState<SigningStart | null>(null);
 
   const onSign = (id: string): void => {
     setSigningId(id);
     start.mutate(id, {
-      onSuccess: (s) => window.location.assign(s.authorizeUrl),
+      onSuccess: (s) => {
+        if (!s.authorizeInApp) {
+          window.location.assign(s.authorizeUrl);
+          return;
+        }
+        // The document was read; the Yivi step takes the viewer's place.
+        setReviewingId(null);
+        setSigningId(null);
+        setAuthorizing(s);
+      },
       onError: (error) => {
         setSigningId(null);
         toast.error(startError(error, t));
@@ -576,6 +597,12 @@ function ToSignTab({
           busy={decline.isPending}
           onConfirm={onDecline}
           onClose={() => setDecliningId(null)}
+        />
+      )}
+      {authorizing && (
+        <SigningAuthorizationDialog
+          start={authorizing}
+          onClose={() => setAuthorizing(null)}
         />
       )}
     </div>
@@ -828,7 +855,7 @@ function NewRequestTab({
   const [externalEmail, setExternalEmail] = useState("");
   const [mode, setMode] = useState<SigningMode>(SIGNING_MODE.parallel);
   const [channel, setChannel] = useState<RecipientChannel>(
-    RECIPIENT_CHANNEL.none,
+    RECIPIENT_CHANNEL.signers,
   );
   const [recipientAddress, setRecipientAddress] = useState("");
   const [recipientName, setRecipientName] = useState("");
@@ -889,7 +916,10 @@ function NewRequestTab({
   const removeSigner = (index: number): void =>
     setSigners((prev) => prev.filter((_, i) => i !== index));
 
-  const recipientNeedsAddress = channel !== RECIPIENT_CHANNEL.none;
+  // The signees are their own recipients; only a delivery to someone else names one.
+  const recipientNeedsAddress =
+    channel === RECIPIENT_CHANNEL.email || channel === RECIPIENT_CHANNEL.qerds;
+  const deliverySends = channel !== RECIPIENT_CHANNEL.none;
   // Placement is optional as a whole, but a request where only some signatures are
   // visible is a half-finished one — the backend would accept it, so it is caught here.
   const incomplete = placementsIncomplete(signers);
@@ -914,9 +944,10 @@ function NewRequestTab({
         signers,
         mode,
         recipientChannel: channel,
-        recipientAddress: recipientAddress.trim(),
-        recipientName: recipientName.trim(),
-        message,
+        // What was typed for another channel does not travel with this one.
+        recipientAddress: recipientNeedsAddress ? recipientAddress.trim() : "",
+        recipientName: recipientNeedsAddress ? recipientName.trim() : "",
+        message: deliverySends ? message : "",
       },
       {
         onSuccess: () => {
@@ -979,13 +1010,13 @@ function NewRequestTab({
   const totalMarks = signers.reduce((n, s) => n + s.placements.length, 0);
 
   // The delivery channels as a roving radio group: one tab stop, arrows move (and
-  // commit) the selection across the three cards.
+  // commit) the selection across the cards.
   const channelRefs = React.useRef<(HTMLButtonElement | null)[]>([]);
   const channelOptions = [
     {
-      value: RECIPIENT_CHANNEL.none,
-      title: channelLabel(t, RECIPIENT_CHANNEL.none),
-      description: t("signing.deliveryNoneDesc"),
+      value: RECIPIENT_CHANNEL.signers,
+      title: channelLabel(t, RECIPIENT_CHANNEL.signers),
+      description: t("signing.deliverySignersDesc"),
     },
     {
       value: RECIPIENT_CHANNEL.email,
@@ -996,6 +1027,11 @@ function NewRequestTab({
       value: RECIPIENT_CHANNEL.qerds,
       title: channelLabel(t, RECIPIENT_CHANNEL.qerds),
       description: t("signing.deliveryQerdsDesc"),
+    },
+    {
+      value: RECIPIENT_CHANNEL.none,
+      title: channelLabel(t, RECIPIENT_CHANNEL.none),
+      description: t("signing.deliveryNoneDesc"),
     },
   ];
   const onChannelKeyDown = (
@@ -1011,6 +1047,10 @@ function NewRequestTab({
     setChannel(channelOptions[next].value);
     channelRefs.current[next]?.focus();
   };
+
+  const messagePlaceholder = recipientNeedsAddress
+    ? t("signing.messagePlaceholder")
+    : t("signing.messageSignersPlaceholder");
 
   const steps = [
     t("signing.steps.document"),
@@ -1272,7 +1312,7 @@ function NewRequestTab({
                           aria-label={t("signing.searchMembers")}
                         />
                       </div>
-                      <div className="border-line bg-surface mt-3 max-h-56 overflow-y-auto rounded-md border">
+                      <div className="border-line bg-surface mt-3 max-h-[max(14rem,calc(100vh-30rem))] overflow-y-auto rounded-md border">
                         {members.isPending ? (
                           <p className="text-ink-soft p-3 text-[13px]">
                             {t("common.loading")}
@@ -1375,35 +1415,39 @@ function NewRequestTab({
                   ))}
                 </div>
 
-                {recipientNeedsAddress && (
+                {deliverySends && (
                   <div className="mt-4 flex flex-col gap-3">
-                    <Input
-                      value={recipientAddress}
-                      onChange={(e) => setRecipientAddress(e.target.value)}
-                      placeholder={
-                        channel === RECIPIENT_CHANNEL.email
-                          ? t("signing.recipientEmailPlaceholder")
-                          : t("signing.recipientQerdsPlaceholder")
-                      }
-                      aria-label={
-                        channel === RECIPIENT_CHANNEL.email
-                          ? t("signing.recipientEmailPlaceholder")
-                          : t("signing.recipientQerdsPlaceholder")
-                      }
-                    />
-                    <Input
-                      value={recipientName}
-                      onChange={(e) => setRecipientName(e.target.value)}
-                      placeholder={t("signing.recipientNamePlaceholder")}
-                      aria-label={t("signing.recipientNamePlaceholder")}
-                    />
+                    {recipientNeedsAddress && (
+                      <>
+                        <Input
+                          value={recipientAddress}
+                          onChange={(e) => setRecipientAddress(e.target.value)}
+                          placeholder={
+                            channel === RECIPIENT_CHANNEL.email
+                              ? t("signing.recipientEmailPlaceholder")
+                              : t("signing.recipientQerdsPlaceholder")
+                          }
+                          aria-label={
+                            channel === RECIPIENT_CHANNEL.email
+                              ? t("signing.recipientEmailPlaceholder")
+                              : t("signing.recipientQerdsPlaceholder")
+                          }
+                        />
+                        <Input
+                          value={recipientName}
+                          onChange={(e) => setRecipientName(e.target.value)}
+                          placeholder={t("signing.recipientNamePlaceholder")}
+                          aria-label={t("signing.recipientNamePlaceholder")}
+                        />
+                      </>
+                    )}
                     <textarea
                       className={CONTROL}
                       rows={3}
                       value={message}
                       onChange={(e) => setMessage(e.target.value)}
-                      placeholder={t("signing.messagePlaceholder")}
-                      aria-label={t("signing.messagePlaceholder")}
+                      placeholder={messagePlaceholder}
+                      aria-label={messagePlaceholder}
                     />
                   </div>
                 )}
@@ -1545,10 +1589,15 @@ function CredentialTab({
 }>): React.JSX.Element {
   const { t } = useTranslation();
   const link = useLinkSigningCredentialMutation(slug);
+  // The started link whose Yivi step is shown here, in a dialog.
+  const [authorizing, setAuthorizing] = useState<SigningStart | null>(null);
 
   const onLink = (): void => {
     link.mutate(undefined, {
-      onSuccess: (start) => window.location.assign(start.authorizeUrl),
+      onSuccess: (start) => {
+        if (start.authorizeInApp) setAuthorizing(start);
+        else window.location.assign(start.authorizeUrl);
+      },
       onError: (error) => toast.error(startError(error, t)),
     });
   };
@@ -1595,6 +1644,12 @@ function CredentialTab({
       <p className="text-ink-soft mt-3 text-[12px]">
         {t("signing.walletHint")}
       </p>
+      {authorizing && (
+        <SigningAuthorizationDialog
+          start={authorizing}
+          onClose={() => setAuthorizing(null)}
+        />
+      )}
     </Card>
   );
 }

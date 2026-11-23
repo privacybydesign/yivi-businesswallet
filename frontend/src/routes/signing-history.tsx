@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import * as React from "react";
 import { useSigningRequestsQuery } from "../api/signing.queries";
@@ -36,12 +37,6 @@ export function SigningHistoryPanel({
   const history = useSigningRequestsQuery(slug, enabled);
   const requests = history.data?.pages.flatMap((p) => p.requests ?? []) ?? [];
   const formatWhen = useWhenFormatter();
-
-  const onDownload = (req: SigningRequest): void => {
-    void downloadSignedDocument(slug, req.id, req.filename)
-      .then(() => toast.success(t("signing.downloadedToast")))
-      .catch(() => toast.error(t("signing.downloadError")));
-  };
 
   if (history.isError) {
     return (
@@ -136,12 +131,7 @@ export function SigningHistoryPanel({
                   </Table.Cell>
                   <Table.Cell>
                     {req.status === SIGNING_STATUS.completed ? (
-                      <Button
-                        variant="secondary"
-                        onClick={() => onDownload(req)}
-                      >
-                        {t("signedDocuments.download")}
-                      </Button>
+                      <DownloadButton slug={slug} req={req} />
                     ) : (
                       <span className="text-ink-soft text-[12.5px]">—</span>
                     )}
@@ -170,6 +160,31 @@ export function SigningHistoryPanel({
   );
 }
 
+// The signed PDF is fetched whole before the browser saves it, so the browser shows
+// no download of its own until it is done: the button carries the wait. Each row owns
+// its state, so one slow document does not hold up another row's download.
+function DownloadButton({
+  slug,
+  req,
+}: Readonly<{ slug: string; req: SigningRequest }>): React.JSX.Element {
+  const { t } = useTranslation();
+  const [downloading, setDownloading] = useState(false);
+
+  const onDownload = (): void => {
+    setDownloading(true);
+    void downloadSignedDocument(slug, req.id, req.filename)
+      .then(() => toast.success(t("signing.downloadedToast")))
+      .catch(() => toast.error(t("signing.downloadError")))
+      .finally(() => setDownloading(false));
+  };
+
+  return (
+    <Button variant="secondary" onClick={onDownload} loading={downloading}>
+      {t("signedDocuments.download")}
+    </Button>
+  );
+}
+
 function RecipientCell({
   req,
 }: Readonly<{ req: SigningRequest }>): React.JSX.Element {
@@ -177,11 +192,18 @@ function RecipientCell({
   if (req.recipientChannel === RECIPIENT_CHANNEL.none) {
     return <span className="text-ink-soft text-[12.5px]">—</span>;
   }
+  // A delivery to the signees names no recipient: the channel says who gets it.
+  const recipient = req.recipientName || req.recipientAddress;
+  if (!recipient) {
+    return (
+      <span className="text-ink text-[12.5px]">
+        {channelLabel(t, req.recipientChannel)}
+      </span>
+    );
+  }
   return (
     <div className="text-[12.5px]">
-      <span className="text-ink">
-        {req.recipientName || req.recipientAddress}
-      </span>
+      <span className="text-ink">{recipient}</span>
       <span className="text-ink-soft block">
         {channelLabel(t, req.recipientChannel)}
       </span>

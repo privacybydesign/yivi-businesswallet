@@ -187,6 +187,10 @@ co-signing object.
   `mailer` attachment support — `multipart/mixed`); `qerds` reuses `qerds.Service.Send` with the
   PDF as an attachment from the org's default QERDS address. Delivery is best-effort — a failure
   leaves the request `completed` with `delivery_status=failed`, surfaced in the history, not fatal.
+  A fourth channel, `signers`, names no recipient: `deliverToSigners` mails the PDF to every
+  signer, once per address (a member's address comes from the member directory, so one who has
+  left the organisation gets no copy). One failed send fails the delivery as a whole. It is the
+  wizard's default; the API's and the form's default stays `none`.
   The `signing` slice stays decoupled via consumer interfaces (`memberDirectory`,
   `documentDeliverer`) implemented by adapters in `cmd/api` (`signing_adapters.go`).
 - **UI.** The Sign page is tabbed: **To sign** (documents awaiting me → run my ceremony),
