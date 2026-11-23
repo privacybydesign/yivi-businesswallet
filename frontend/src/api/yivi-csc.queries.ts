@@ -3,14 +3,32 @@ import type { UseMutationResult, UseQueryResult } from "@tanstack/react-query";
 import {
   cancelYiviCscAuthorization,
   getYiviCscAuthorization,
+  startYiviCscAuthorization,
 } from "./yivi-csc";
-import type { YiviCscAuthorization } from "./yivi-csc";
+import type {
+  YiviCscAuthorization,
+  YiviCscAuthorizationStart,
+} from "./yivi-csc";
 import { authorizationPollContinues } from "../lib/signing-authorization";
 
 // The signer approves in the Yivi app, out of band, so the page polls until
 // the authorization is decided: the cadence of the other pages that watch a
 // wallet ceremony finish (signing.queries.ts, the on-screen proofing page).
 const POLL_INTERVAL_MS = 2_000;
+
+// Starting is a read that makes something: each call opens a new authorization.
+// So it runs once per authorize URL and is never refreshed, by focus or by age.
+export function useStartYiviCscAuthorizationQuery(
+  authorizeUrl: string,
+): UseQueryResult<YiviCscAuthorizationStart, Error> {
+  return useQuery({
+    queryKey: ["yivi-csc", "authorization-start", authorizeUrl],
+    queryFn: ({ signal }) => startYiviCscAuthorization(authorizeUrl, signal),
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+  });
+}
 
 export function yiviCscAuthorizationQueryKey(id: string): readonly string[] {
   return ["yivi-csc", "authorization", id];

@@ -361,6 +361,20 @@ func (s *Service) Authorize(ctx context.Context, req AuthorizeRequest) (string, 
 	return s.appBaseURL + AuthorizePagePath + url.PathEscape(id), nil
 }
 
+// pageAuthorizationID is the authorization id in an authorization page's URL,
+// or empty for any other location Authorize returns (the client's callback).
+func (s *Service) pageAuthorizationID(location string) string {
+	escaped, ok := strings.CutPrefix(location, s.appBaseURL+AuthorizePagePath)
+	if !ok {
+		return ""
+	}
+	id, err := url.PathUnescape(escaped)
+	if err != nil {
+		return ""
+	}
+	return id
+}
+
 // parseAuthorize checks an authorize request and returns the authorization it
 // asks for, not yet started. A request the client got wrong is an *Error.
 func (s *Service) parseAuthorize(ctx context.Context, client Client, req AuthorizeRequest) (*authorization, error) {

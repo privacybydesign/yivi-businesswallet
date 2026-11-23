@@ -13989,8 +13989,9 @@ paths:
         Requires organisation membership. Accepts a PDF in the `document` multipart
         field plus the chosen signers (`signers`, repeated, one JSON object each),
         the signing `mode` (`parallel` or `sequential`), and the recipient
-        (`recipientChannel` one of `none`/`qerds`/`email`, plus `recipientAddress`,
-        `recipientName`, `message`). A signer is either an internal member
+        (`recipientChannel` one of `none`/`signers`/`qerds`/`email`, plus
+        `recipientAddress`, `recipientName`, `message`; `signers` mails the finished
+        PDF to everyone who signed it and takes no address). A signer is either an internal member
         (`{"kind":"internal","userId":"<uuid>"}`) or an external signee
         (`{"kind":"external","email":"...","name":"..."}`); the order of the values is
         the signing order for sequential mode. Each signer object may carry
@@ -14032,7 +14033,7 @@ paths:
                   enum: [parallel, sequential]
                 recipientChannel:
                   type: string
-                  enum: [none, qerds, email]
+                  enum: [none, signers, qerds, email]
                 recipientAddress:
                   type: string
                 recipientName:
@@ -14107,7 +14108,9 @@ paths:
         Requires organisation membership, a linked signing credential, and that the
         caller is a pending signer whose turn it is. Prepares the current document,
         binds its hash into the authorization, and returns `{requestId, authorizeUrl}`;
-        the browser opens `authorizeUrl` to complete the wallet ceremony.
+        the browser opens `authorizeUrl` to complete the wallet ceremony. With the
+        built-in signing service the answer also carries `authorizeInApp: true`: the
+        page may then ask `authorizeUrl` for JSON and show the Yivi step itself.
       responses:
         '2XX':
           description: Successful response.
@@ -15617,8 +15620,10 @@ paths:
                   description: An https page of yours the signee is offered to return to when done.
                 recipientChannel:
                   type: string
-                  enum: [none, email, qerds]
-                  description: Where the finished PDF is delivered. Default none.
+                  enum: [none, signers, email, qerds]
+                  description: >-
+                    Where the finished PDF is delivered. `signers` mails it to everyone
+                    who signed it and takes no `recipientAddress`. Default none.
                 recipientAddress:
                   type: string
                 recipientName:
@@ -15861,7 +15866,11 @@ paths:
         (comma-separated base64url SHA-256 digests) and `hashAlgorithmOID`; the signer must
         then disclose the same identity the credential's certificate names. PKCE with
         `S256` is required. A `client_id` or `redirect_uri` the service does not know is
-        answered 400 and never redirected.
+        answered 400 and never redirected. A caller that accepts `application/json` and
+        not `text/html` (the wallet's own signing pages, which show the QR code
+        themselves) is answered 200 with `{authorizationId, redirectUrl}` instead of the
+        redirect; `authorizationId` is absent when no authorization was started, and
+        `redirectUrl` is then `redirect_uri` carrying the error.
       security: []
       parameters:
         - name: response_type
@@ -16283,7 +16292,7 @@ components:
           format: uri
         recipientChannel:
           type: string
-          enum: [none, email, qerds]
+          enum: [none, signers, email, qerds]
         recipientName:
           type: string
         recipientAddress:

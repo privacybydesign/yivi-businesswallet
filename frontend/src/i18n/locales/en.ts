@@ -2960,6 +2960,7 @@ export const en = {
     recipientQerdsPlaceholder: "QERDS address",
     recipientNamePlaceholder: "Recipient name (optional)",
     messagePlaceholder: "Message to the recipient (optional)",
+    messageSignersPlaceholder: "Message to the signees (optional)",
     createdToast: "Signing request created.",
     documentStepHint: "Upload the PDF that everyone will sign.",
     documentMeta_one: "{{count}} signee",
@@ -2977,6 +2978,7 @@ export const en = {
     deliveryStepHint:
       "This happens once everyone has signed. You can always download it from History.",
     deliveryNoneDesc: "Nothing is sent. Pick it up from History.",
+    deliverySignersDesc: "Everyone who signed gets the PDF by email.",
     deliveryEmailDesc: "Plain attachment to the recipient.",
     deliveryQerdsDesc: "Registered delivery to the named recipient.",
     summaryTitle: "Ready to send",
@@ -3032,7 +3034,8 @@ export const en = {
     },
     channel: {
       none: "Do not send (download only)",
-      email: "Email",
+      signers: "Email the signees",
+      email: "Email someone else",
       qerds: "QERDS (registered delivery)",
     },
     signerStatus: {
@@ -3126,6 +3129,8 @@ export const en = {
       openYivi: "Open the Yivi app",
       cancelError: "Could not cancel. Try again.",
       leaving: "Taking you back…",
+      finishing: "Approved. Finishing up…",
+      dialogTitle: "Approve in the Yivi app",
       denied: {
         title: "Not approved",
         identityMismatch:

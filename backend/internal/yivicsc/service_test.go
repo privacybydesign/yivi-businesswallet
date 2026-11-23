@@ -400,6 +400,48 @@ func TestLinkAndSignWithAPassport(t *testing.T) {
 }
 
 // Linking again finds the same credential: one person, one certificate.
+// The wallet's own page asks for JSON and shows the authorization itself.
+func TestAuthorizeAnswersAPageWithTheAuthorizationID(t *testing.T) {
+	b := newBench(t)
+	getJSON := func(scope string) authorizeStarted {
+		t.Helper()
+		params := serviceParams(newPKCE(t))
+		params.Scope = scope
+		req, err := http.NewRequest(http.MethodGet, b.client.AuthorizeURL(b.svc.BaseURL(), params), nil)
+		if err != nil {
+			t.Fatalf("new request: %v", err)
+		}
+		req.Header.Set(headerAccept, mediaTypeJSON)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("GET authorize: %v", err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("authorize status = %d, want 200", resp.StatusCode)
+		}
+		var started authorizeStarted
+		if err := json.NewDecoder(resp.Body).Decode(&started); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		return started
+	}
+
+	started := getJSON(signingprovider.ScopeService)
+	if started.AuthorizationID == "" || started.RedirectURL != testAppURL+AuthorizePagePath+started.AuthorizationID {
+		t.Fatalf("started = %+v, want an id and its page", started)
+	}
+	if view := b.view(started.AuthorizationID); view.Status != StatusPending {
+		t.Fatalf("authorization status = %q, want pending", view.Status)
+	}
+
+	// One that cannot start has no id: the page goes on to the client's callback.
+	refused := getJSON("nonsense")
+	if refused.AuthorizationID != "" || !strings.HasPrefix(refused.RedirectURL, testRedirectURI) {
+		t.Fatalf("refused = %+v, want no id and the callback", refused)
+	}
+}
+
 func TestLinkingTwiceKeepsTheCredential(t *testing.T) {
 	b := newBench(t)
 	first := b.link(passport("Jan", "Jansen", "1980-01-02"))

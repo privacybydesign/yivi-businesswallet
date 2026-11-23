@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { request } from "./http";
+import { authorizePath } from "../lib/signing-authorization-start";
 
 // The built-in signing service's authorization page. A signing ceremony sends
 // the signer's browser here with an authorization id: the signer approves it in
@@ -50,6 +51,30 @@ export const yiviCscAuthorizationSchema = z.object({
   redirectUrl: z.string().optional(),
 });
 export type YiviCscAuthorization = z.infer<typeof yiviCscAuthorizationSchema>;
+
+// What oauth2/authorize answers a page that asks for JSON instead of following
+// its redirect. No authorizationId means none was started: redirectUrl is then
+// the ceremony's callback carrying the error.
+export const yiviCscAuthorizationStartSchema = z.object({
+  authorizationId: z.string().optional(),
+  redirectUrl: z.string(),
+});
+export type YiviCscAuthorizationStart = z.infer<
+  typeof yiviCscAuthorizationStartSchema
+>;
+
+// Starts the authorization a ceremony's authorizeUrl names, for the page to
+// show itself. The URL is absolute and on the API; only its path and query are
+// used, so the request goes where every other API call goes.
+export function startYiviCscAuthorization(
+  authorizeUrl: string,
+  signal?: AbortSignal,
+): Promise<YiviCscAuthorizationStart> {
+  return request(authorizePath(authorizeUrl), {
+    schema: yiviCscAuthorizationStartSchema,
+    signal,
+  });
+}
 
 function base(id: string): string {
   return `/api/v1/yivi-csc/authorizations/${encodeURIComponent(id)}`;

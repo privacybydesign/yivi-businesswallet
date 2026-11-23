@@ -22,6 +22,9 @@ const (
 	maxRequestBody = 1 << 20
 
 	headerAuthorization = "Authorization"
+	headerAccept        = "Accept"
+	mediaTypeJSON       = "application/json"
+	mediaTypeHTML       = "text/html"
 	headerCacheControl  = "Cache-Control"
 	headerRetryAfter    = "Retry-After"
 	cacheNoStore        = "no-store"
@@ -64,6 +67,23 @@ func (h *Handler) info(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
+// authorizeStarted is what oauthAuthorize answers a caller that asked for JSON:
+// the wallet's own page, which shows the authorization itself instead of being
+// sent to the authorization page. AuthorizationID is absent when the
+// authorization could not be started; RedirectURL is then the client's callback
+// carrying the error, and otherwise the authorization page.
+type authorizeStarted struct {
+	AuthorizationID string `json:"authorizationId,omitempty"`
+	RedirectURL     string `json:"redirectUrl"`
+}
+
+// wantsJSON reports whether the caller is a page's own request and not a
+// browser navigating: it accepts JSON and does not accept a document.
+func wantsJSON(r *http.Request) bool {
+	accept := r.Header.Get(headerAccept)
+	return strings.Contains(accept, mediaTypeJSON) && !strings.Contains(accept, mediaTypeHTML)
+}
+
 // oauthAuthorize starts an authorization and sends the browser to its page, or
 // back to the client with an error. Only a client or callback the service does
 // not know is answered here, since there is nowhere safe to send that.
@@ -93,6 +113,10 @@ func (h *Handler) oauthAuthorize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set(headerCacheControl, cacheNoStore)
+	if wantsJSON(r) {
+		respond.JSON(w, r, http.StatusOK, authorizeStarted{AuthorizationID: h.svc.pageAuthorizationID(location), RedirectURL: location})
+		return
+	}
 	http.Redirect(w, r, location, http.StatusFound)
 }
 

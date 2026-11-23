@@ -3033,6 +3033,7 @@ export const nl: Translation<typeof en> = {
     recipientQerdsPlaceholder: "QERDS-adres",
     recipientNamePlaceholder: "Naam ontvanger (optioneel)",
     messagePlaceholder: "Bericht aan de ontvanger (optioneel)",
+    messageSignersPlaceholder: "Bericht aan de ondertekenaars (optioneel)",
     createdToast: "Ondertekenverzoek aangemaakt.",
     documentStepHint: "Upload de PDF die iedereen gaat ondertekenen.",
     documentMeta_one: "{{count}} ondertekenaar",
@@ -3050,6 +3051,8 @@ export const nl: Translation<typeof en> = {
     deliveryStepHint:
       "Dit gebeurt zodra iedereen heeft ondertekend. Je kunt het altijd downloaden bij Geschiedenis.",
     deliveryNoneDesc: "Er wordt niets verstuurd. Op te halen bij Geschiedenis.",
+    deliverySignersDesc:
+      "Iedereen die heeft ondertekend krijgt de pdf per e-mail.",
     deliveryEmailDesc: "Gewone bijlage aan de ontvanger.",
     deliveryQerdsDesc: "Aangetekende bezorging aan de genoemde ontvanger.",
     summaryTitle: "Klaar om te versturen",
@@ -3107,7 +3110,8 @@ export const nl: Translation<typeof en> = {
     },
     channel: {
       none: "Niet versturen (alleen downloaden)",
-      email: "E-mail",
+      signers: "E-mail naar de ondertekenaars",
+      email: "E-mail naar iemand anders",
       qerds: "QERDS (aangetekende bezorging)",
     },
     signerStatus: {
@@ -3205,6 +3209,8 @@ export const nl: Translation<typeof en> = {
       openYivi: "Open de Yivi-app",
       cancelError: "Kon niet annuleren. Probeer het opnieuw.",
       leaving: "Je wordt teruggebracht…",
+      finishing: "Goedgekeurd. Bezig met afronden…",
+      dialogTitle: "Keur goed in de Yivi-app",
       denied: {
         title: "Niet goedgekeurd",
         identityMismatch:
