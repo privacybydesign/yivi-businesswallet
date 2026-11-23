@@ -14462,7 +14462,9 @@ paths:
         The QTSP-registered redirect target the browser returns to after the wallet
         ceremony. Correlated by an unguessable `state` (so it needs no session); it
         completes the link or sign flow and 302-redirects the browser back to the
-        app. Not called directly by clients.
+        app. Not called directly by clients. A caller that accepts `application/json`
+        and not `text/html` (the wallet's own signing pages, which finish the ceremony
+        without leaving) is answered 200 with `{redirectUrl}` instead of the redirect.
       parameters:
         - name: code
           in: query

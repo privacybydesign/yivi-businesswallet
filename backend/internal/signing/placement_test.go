@@ -2,6 +2,7 @@ package signing
 
 import (
 	"errors"
+	"os"
 	"testing"
 )
 
@@ -159,5 +160,25 @@ func TestParaphTextInitialisesALongName(t *testing.T) {
 		if got := paraphText(name); got != want {
 			t.Fatalf("paraphText(%q) = %q, want %q", name, got, want)
 		}
+	}
+}
+
+// A document protected against editing opens without a password, so it parses,
+// but nothing can be appended to it that every reader then shows: it is refused
+// with its own error, at upload and again when a signing pass opens it.
+func TestAnEncryptedDocumentIsRefused(t *testing.T) {
+	encrypted, err := os.ReadFile("testdata/encrypted.pdf")
+	if err != nil {
+		t.Fatalf("read testdata: %v", err)
+	}
+	if _, err := readGeometry(encrypted); !errors.Is(err, ErrEncryptedPDF) {
+		t.Fatalf("readGeometry = %v, want ErrEncryptedPDF", err)
+	}
+	if _, err := openPDF(encrypted); !errors.Is(err, ErrEncryptedPDF) {
+		t.Fatalf("openPDF = %v, want ErrEncryptedPDF", err)
+	}
+	// A plain document is not mistaken for one.
+	if _, err := readGeometry(buildTestPDF(t, 1, false)); err != nil {
+		t.Fatalf("readGeometry of a plain document = %v", err)
 	}
 }

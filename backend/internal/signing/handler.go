@@ -399,7 +399,27 @@ func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 	code := r.URL.Query().Get("code")
 	state := r.URL.Query().Get("state")
 	dest := h.svc.HandleCallback(r.Context(), code, state)
+	// The wallet's own signing pages show the Yivi step in a dialog and finish the
+	// ceremony from there, without leaving: they ask for JSON and read where the
+	// browser would have been sent, whose query says how the ceremony ended.
+	if callerWantsJSON(r) {
+		w.Header().Set("Cache-Control", "no-store")
+		respond.JSON(w, r, http.StatusOK, callbackResult{RedirectURL: dest})
+		return
+	}
 	http.Redirect(w, r, dest, http.StatusFound)
+}
+
+// callbackResult is the callback's answer to a page that asked for JSON.
+type callbackResult struct {
+	RedirectURL string `json:"redirectUrl"`
+}
+
+// callerWantsJSON reports whether the caller is a page's own request and not a
+// browser navigating: it accepts JSON and does not accept a document.
+func callerWantsJSON(r *http.Request) bool {
+	accept := r.Header.Get("Accept")
+	return strings.Contains(accept, "application/json") && !strings.Contains(accept, "text/html")
 }
 
 // signerForm is one repeated `signers` multipart value. Each signer is sent as its
@@ -547,6 +567,8 @@ func mapStartError(err error) error {
 		return &respond.APIError{Status: http.StatusConflict, Code: "not_configured", Message: "configure a CSC signing provider in settings first"}
 	case errors.Is(err, ErrNoCredential):
 		return &respond.APIError{Status: http.StatusConflict, Code: "no_credential", Message: "link a signing credential before signing"}
+	case errors.Is(err, ErrEncryptedPDF):
+		return &respond.APIError{Status: http.StatusBadRequest, Code: "encrypted_pdf", Message: "the PDF is encrypted or protected against changes and cannot be signed; upload a copy without protection"}
 	case errors.Is(err, ErrInvalidPDF):
 		return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_pdf", Message: "the uploaded file is not a valid PDF"}
 	case errors.Is(err, ErrInvalidRequest):

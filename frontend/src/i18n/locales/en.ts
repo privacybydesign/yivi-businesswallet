@@ -2915,7 +2915,8 @@ export const en = {
     signTitle: "Sign a document",
     signDescription:
       "Upload a PDF. Its hash is authorized with your wallet, signed by the provider, and the signed PDF is returned to you.",
-    signNeedsCredential: "Link a signing credential first.",
+    signFirstTimeHint:
+      "The first time you sign, you identify yourself with Yivi to get your signing certificate. Then you approve the signature.",
     signButton: "Sign document",
     reviewButton: "Review and sign",
     viewer: {
@@ -2955,6 +2956,8 @@ export const en = {
     documentRemove: "Remove",
     documentNone: "No file chosen",
     documentTooLarge: "The document is larger than {{size}}.",
+    documentEncrypted:
+      "This PDF is protected (encrypted), so it cannot be signed. Upload a copy without protection, for example by printing it to a new PDF.",
     signersLabel: "Signers",
     signersHint:
       "Add everyone who must sign, in the order you want them to sign. A member signs from their own account; an external signee gets a link by email and signs with their own wallet.",
@@ -3094,9 +3097,8 @@ export const en = {
       progressLabel: "Signatures",
       progress: "{{signed}} of {{total}}",
       reviewDocument: "Open in a new tab",
-      needsCredential:
-        "Link your signing certificate first. You identify with your wallet app once; after that you can sign.",
-      linkButton: "Link signing certificate",
+      firstTimeHint:
+        "The first time you sign, you identify yourself with Yivi to get your signing certificate. Then you approve the signature.",
       signButton: "Sign document",
       declineButton: "Decline",
       notYourTurn:
@@ -3147,6 +3149,9 @@ export const en = {
       cancelError: "Could not cancel. Try again.",
       leaving: "Taking you back…",
       finishing: "Approved. Finishing up…",
+      cancelling: "Cancelling…",
+      dialogTitleStep:
+        "Step {{position}} of {{total}}: approve in the Yivi app",
       dialogTitle: "Approve in the Yivi app",
       denied: {
         title: "Not approved",

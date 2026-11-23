@@ -82,9 +82,29 @@ func openPDF(input []byte) (r *pdf.Reader, err error) {
 	}()
 	rdr, err := pdf.NewReader(bytes.NewReader(input), int64(len(input)))
 	if err != nil {
-		return nil, ErrInvalidPDF
+		return nil, unreadablePDF(input)
+	}
+	if isEncrypted(rdr) {
+		return nil, ErrEncryptedPDF
 	}
 	return rdr, nil
+}
+
+// isEncrypted reports whether the document's trailer names an encryption
+// dictionary. digitorus/pdf opens one that needs no password without saying so.
+func isEncrypted(rdr *pdf.Reader) bool {
+	return !rdr.Trailer().Key("Encrypt").IsNull()
+}
+
+// unreadablePDF is why a file the reader could not open is refused. One it could
+// not open because of its encryption (a password, or a cipher the reader does not
+// know) is still an encrypted document rather than a broken one, and saying so
+// tells the uploader what to do about it.
+func unreadablePDF(input []byte) error {
+	if bytes.Contains(input, []byte("/Encrypt")) {
+		return ErrEncryptedPDF
+	}
+	return ErrInvalidPDF
 }
 
 // signatureReason is the reason a signature states. It claims no more than the

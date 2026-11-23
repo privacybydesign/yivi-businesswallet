@@ -74,7 +74,10 @@ func readGeometry(input []byte) (geometry documentGeometry, err error) {
 	}()
 	rdr, err := pdf.NewReader(bytes.NewReader(input), int64(len(input)))
 	if err != nil {
-		return documentGeometry{}, ErrInvalidPDF
+		return documentGeometry{}, unreadablePDF(input)
+	}
+	if isEncrypted(rdr) {
+		return documentGeometry{}, ErrEncryptedPDF
 	}
 	count := rdr.NumPage()
 	if count < 1 {

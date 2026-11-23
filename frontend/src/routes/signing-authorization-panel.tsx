@@ -5,6 +5,7 @@ import {
   AUTHORIZATION_DENIAL,
   AUTHORIZATION_PURPOSE,
   AUTHORIZATION_SOURCE,
+  AUTHORIZATION_STATUS,
 } from "../api/yivi-csc";
 import type { YiviCscAuthorization } from "../api/yivi-csc";
 import type { SigningAuthorizationState } from "../lib/use-signing-authorization";
@@ -97,12 +98,14 @@ function Purpose({
 
 export function SigningAuthorizationPanel({
   state,
-  embedded = false,
+  onContinue,
 }: Readonly<{
   state: SigningAuthorizationState;
-  // True inside a dialog on one of the wallet's own pages.
-  embedded?: boolean;
+  // Given inside a dialog on one of the wallet's own pages, which ends a refused
+  // authorization itself. Without it the signer follows the redirect as a link.
+  onContinue?: (redirectUrl: string) => void;
 }>): React.JSX.Element {
+  const embedded = onContinue !== undefined;
   const { t } = useTranslation();
   const { authorization, view, secondsLeft, cancel } = state;
   const walletUrl =
@@ -116,9 +119,11 @@ export function SigningAuthorizationPanel({
       {view === "loading" && <p className={note}>{t("common.loading")}</p>}
       {view === "leaving" && (
         <output className={note}>
-          {embedded
-            ? t("signing.authorize.finishing")
-            : t("signing.authorize.leaving")}
+          {!embedded
+            ? t("signing.authorize.leaving")
+            : authorization?.status === AUTHORIZATION_STATUS.approved
+              ? t("signing.authorize.finishing")
+              : t("signing.authorize.cancelling")}
         </output>
       )}
       {view === "expired" && (
@@ -145,14 +150,22 @@ export function SigningAuthorizationPanel({
           title={t("signing.authorize.denied.title")}
           message={denialMessage(authorization.reason, t)}
           action={
-            authorization.redirectUrl !== undefined && (
+            authorization.redirectUrl !== undefined &&
+            (onContinue === undefined ? (
               <a
                 href={authorization.redirectUrl}
                 className={buttonClassName("primary")}
               >
                 {t("signing.authorize.denied.continue")}
               </a>
-            )
+            ) : (
+              <Button
+                type="button"
+                onClick={() => onContinue(authorization.redirectUrl ?? "")}
+              >
+                {t("common.close")}
+              </Button>
+            ))
           }
         />
       )}

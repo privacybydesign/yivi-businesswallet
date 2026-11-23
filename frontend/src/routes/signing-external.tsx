@@ -10,16 +10,17 @@ import {
   externalDocumentUrl,
   getExternalDocument,
 } from "../api/signing";
-import type { SigningStart } from "../api/signing";
 import {
   useDeclineExternalSignMutation,
   useExternalSigningQuery,
+  useInvalidateExternalSigning,
   useLinkExternalCredentialMutation,
   useStartExternalSignMutation,
 } from "../api/signing.queries";
 import { returnLinkHost } from "../lib/return-link";
 import { modeLabel } from "../lib/signing-labels";
 import { toast } from "../lib/toast";
+import { useSignCeremony } from "../lib/use-sign-ceremony";
 import { Button, Card, Logo, Outcome, buttonClassName } from "../ui";
 import { DeclineDialog } from "./signing-decline-dialog";
 import { SigningAuthorizationDialog } from "./signing-authorization-dialog";
@@ -55,6 +56,9 @@ function returnLink(
   );
 }
 
+// This page is about one request, so the ceremony has one thing to sign.
+const THIS_REQUEST = "request";
+
 export default function SigningExternal(): React.JSX.Element {
   const { t } = useTranslation();
   const { token } = useParams();
@@ -67,12 +71,18 @@ export default function SigningExternal(): React.JSX.Element {
   const sign = useStartExternalSignMutation(signToken);
   const decline = useDeclineExternalSignMutation(signToken);
   const [declining, setDeclining] = useState(false);
-  // The started link or signature whose Yivi step is shown here, in a dialog.
-  const [authorizing, setAuthorizing] = useState<SigningStart | null>(null);
-  const onStarted = (start: SigningStart): void => {
-    if (start.authorizeInApp) setAuthorizing(start);
-    else window.location.assign(start.authorizeUrl);
-  };
+  const invalidate = useInvalidateExternalSigning(signToken);
+  // Signing is one action: a signee with no signing certificate yet gets one on
+  // the way, in the same dialog. What happened shows in the state below.
+  const ceremony = useSignCeremony<typeof THIS_REQUEST>({
+    linked: view.data?.hasCredential ?? false,
+    startLink: () => link.mutateAsync(),
+    startSign: () => sign.mutateAsync(),
+    onLinked: invalidate,
+    onSigned: invalidate,
+    onLinkFailed: () => toast.error(t("signing.external.linkFailedToast")),
+    onError: () => toast.error(t("signing.external.startError")),
+  });
 
   // The ceremony returns here with ?link=ok|failed (credential link) or ?request=<id>
   // (signature). Announce the link outcome once, then strip the flag so a refresh does
@@ -91,18 +101,6 @@ export default function SigningExternal(): React.JSX.Element {
       { replace: true },
     );
   }, [linkResult, t, setSearchParams]);
-
-  const onLink = (): void =>
-    link.mutate(undefined, {
-      onSuccess: onStarted,
-      onError: () => toast.error(t("signing.external.startError")),
-    });
-
-  const onSign = (): void =>
-    sign.mutate(undefined, {
-      onSuccess: onStarted,
-      onError: () => toast.error(t("signing.external.startError")),
-    });
 
   const onDecline = (reason: string): void =>
     decline.mutate(reason, {
@@ -258,23 +256,21 @@ export default function SigningExternal(): React.JSX.Element {
                 </p>
               )}
 
-              {!view.data.hasCredential ? (
+              {(view.data.yourTurn ?? view.data.canSign) ? (
                 <>
-                  <p className="text-ink-soft text-[13px]">
-                    {t("signing.external.needsCredential")}
-                  </p>
+                  {!view.data.hasCredential && (
+                    <p className="text-ink-soft text-[13px]">
+                      {t("signing.external.firstTimeHint")}
+                    </p>
+                  )}
                   <Button
                     type="button"
-                    onClick={onLink}
-                    loading={link.isPending}
+                    onClick={() => ceremony.begin(THIS_REQUEST)}
+                    loading={ceremony.starting !== null}
                   >
-                    {t("signing.external.linkButton")}
+                    {t("signing.external.signButton")}
                   </Button>
                 </>
-              ) : view.data.canSign ? (
-                <Button type="button" onClick={onSign} loading={sign.isPending}>
-                  {t("signing.external.signButton")}
-                </Button>
               ) : (
                 <p className="text-ink-soft text-[13px]">
                   {t("signing.external.notYourTurn")}
@@ -306,10 +302,12 @@ export default function SigningExternal(): React.JSX.Element {
           onClose={() => setDeclining(false)}
         />
       )}
-      {authorizing && (
+      {ceremony.current && (
         <SigningAuthorizationDialog
-          start={authorizing}
-          onClose={() => setAuthorizing(null)}
+          start={ceremony.current.start}
+          step={ceremony.current}
+          onFinished={ceremony.finished}
+          onClose={ceremony.close}
         />
       )}
     </div>

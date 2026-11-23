@@ -26,6 +26,7 @@ import {
   useCreateSigningRequestMutation,
   useDeclineSignRequestMutation,
   useInvalidateSigningCredential,
+  useInvalidateSigningRequests,
   useLinkSigningCredentialMutation,
   usePendingSigningRequestsQuery,
   useSigningCredentialQuery,
@@ -50,9 +51,11 @@ import { formatBytes } from "../lib/format-bytes";
 import {
   MAX_DOCUMENT_BYTES,
   documentIsTooLarge,
+  pdfIsEncrypted,
 } from "../lib/signing-document";
 import { placementsIncomplete } from "../lib/placement";
 import { toast } from "../lib/toast";
+import { useSignCeremony } from "../lib/use-sign-ceremony";
 import { Avatar, Button, Card, Icon, Input, Modal, Tag, TopBar } from "../ui";
 import { SigningHistoryPanel } from "./signing-history";
 import { DeclineDialog } from "./signing-decline-dialog";
@@ -70,6 +73,8 @@ const SigningDocumentViewer = React.lazy(async () => ({
 
 const CONFLICT_STATUS = 409;
 const TOO_LARGE_STATUS = 413;
+// The backend's code for a PDF it will not sign because it is encrypted.
+const ENCRYPTED_PDF_CODE = "encrypted_pdf";
 const LABEL = "text-ink-soft text-[12px] font-semibold";
 const CONTROL =
   "border-line bg-surface text-ink w-full rounded-md border px-3 py-2 text-[13px]";
@@ -112,6 +117,15 @@ function startError(error: Error, t: TFunction): string {
     if (code === "already_signed") return t("signing.alreadySigned");
     if (code === "not_your_turn") return t("signing.notYourTurn");
     if (code === "sign_in_progress") return t("signing.signInProgress");
+  }
+  if (
+    error instanceof ApiError &&
+    error.body &&
+    typeof error.body === "object" &&
+    "code" in error.body &&
+    error.body.code === ENCRYPTED_PDF_CODE
+  ) {
+    return t("signing.documentEncrypted");
   }
   if (error instanceof ApiError && error.status === TOO_LARGE_STATUS) {
     return t("signing.documentTooLarge", {
@@ -262,7 +276,17 @@ export default function Signing(): React.JSX.Element {
               <ToSignTab
                 slug={slug}
                 isLinked={isLinked}
-                onGoLink={() => setTab("credential")}
+                onLinked={invalidateCredential}
+                onSigned={(id) =>
+                  setSearchParams(
+                    (prev) => {
+                      const next = new URLSearchParams(prev);
+                      next.set("request", id);
+                      return next;
+                    },
+                    { replace: true },
+                  )
+                }
               />
             )}
             {activeTab === "new" && (
@@ -273,6 +297,7 @@ export default function Signing(): React.JSX.Element {
                 slug={slug}
                 credential={credential}
                 isLinked={isLinked}
+                onLinked={invalidateCredential}
               />
             )}
           </div>
@@ -422,43 +447,42 @@ function SignerList({
 function ToSignTab({
   slug,
   isLinked,
-  onGoLink,
+  onLinked,
+  onSigned,
 }: Readonly<{
   slug: string;
   isLinked: boolean;
-  onGoLink: () => void;
+  // The member got their signing certificate on the way to signing.
+  onLinked: () => void;
+  // A signature ceremony ended for this request; its status says how.
+  onSigned: (requestId: string) => void;
 }>): React.JSX.Element {
   const { t } = useTranslation();
   const pending = usePendingSigningRequestsQuery(slug);
+  const link = useLinkSigningCredentialMutation(slug);
   const start = useStartSignRequestMutation(slug);
   const decline = useDeclineSignRequestMutation(slug);
-  const [signingId, setSigningId] = useState<string | null>(null);
+  const invalidateRequests = useInvalidateSigningRequests(slug);
   const [decliningId, setDecliningId] = useState<string | null>(null);
   // The request whose document is open: a member signs from the viewer, with the
   // document in front of them, never from the list.
   const [reviewingId, setReviewingId] = useState<string | null>(null);
-  // The started signature whose Yivi step is shown here, in a dialog.
-  const [authorizing, setAuthorizing] = useState<SigningStart | null>(null);
 
-  const onSign = (id: string): void => {
-    setSigningId(id);
-    start.mutate(id, {
-      onSuccess: (s) => {
-        if (!s.authorizeInApp) {
-          window.location.assign(s.authorizeUrl);
-          return;
-        }
-        // The document was read; the Yivi step takes the viewer's place.
-        setReviewingId(null);
-        setSigningId(null);
-        setAuthorizing(s);
-      },
-      onError: (error) => {
-        setSigningId(null);
-        toast.error(startError(error, t));
-      },
-    });
-  };
+  // Signing is one action: a member with no signing certificate yet gets one on
+  // the way, in the same dialog, instead of being sent to link one first.
+  const ceremony = useSignCeremony<string>({
+    linked: isLinked,
+    startLink: () => link.mutateAsync(),
+    startSign: (id) => start.mutateAsync(id),
+    onLinked,
+    onSigned: (id, requestId) => {
+      setReviewingId(null);
+      invalidateRequests();
+      onSigned(requestId ?? id);
+    },
+    onLinkFailed: () => toast.error(t("signing.linkFailedToast")),
+    onError: (error) => toast.error(startError(error, t)),
+  });
 
   const onDecline = (reason: string): void => {
     if (!decliningId) return;
@@ -479,20 +503,6 @@ function ToSignTab({
 
   return (
     <div className="flex flex-col gap-4">
-      {!isLinked && (
-        <Card className="p-5">
-          <p className="text-ink-soft text-[13px]">
-            {t("signing.signNeedsCredential")}{" "}
-            <button
-              type="button"
-              className="text-link underline"
-              onClick={onGoLink}
-            >
-              {t("signing.tabCredential")}
-            </button>
-          </p>
-        </Card>
-      )}
       {pending.isPending ? (
         <Card className="p-6">
           <p className="text-ink-soft text-[13px]">{t("common.loading")}</p>
@@ -541,7 +551,8 @@ function ToSignTab({
           </Card>
         ))
       )}
-      {reviewing && (
+      {/* The Yivi step takes the viewer's place while it is open. */}
+      {reviewing && ceremony.current === null && (
         <Modal
           wide
           title={reviewing.filename}
@@ -551,7 +562,7 @@ function ToSignTab({
             <>
               {!isLinked && (
                 <p className="text-ink-soft mr-auto text-[13px]">
-                  {t("signing.signNeedsCredential")}
+                  {t("signing.signFirstTimeHint")}
                 </p>
               )}
               <Button
@@ -566,11 +577,8 @@ function ToSignTab({
               </Button>
               <Button
                 type="button"
-                onClick={() => onSign(reviewing.id)}
-                loading={start.isPending && signingId === reviewing.id}
-                disabled={
-                  !isLinked || (start.isPending && signingId === reviewing.id)
-                }
+                onClick={() => ceremony.begin(reviewing.id)}
+                loading={ceremony.starting === reviewing.id}
               >
                 {t("signing.signButton")}
               </Button>
@@ -599,10 +607,12 @@ function ToSignTab({
           onClose={() => setDecliningId(null)}
         />
       )}
-      {authorizing && (
+      {ceremony.current && (
         <SigningAuthorizationDialog
-          start={authorizing}
-          onClose={() => setAuthorizing(null)}
+          start={ceremony.current.start}
+          step={ceremony.current}
+          onFinished={ceremony.finished}
+          onClose={ceremony.close}
         />
       )}
     </div>
@@ -847,6 +857,7 @@ function NewRequestTab({
   const [step, setStep] = useState(0);
   const [file, setFile] = useState<File | null>(null);
   const [fileTooLarge, setFileTooLarge] = useState(false);
+  const [fileEncrypted, setFileEncrypted] = useState(false);
   const [signers, setSigners] = useState<SignerSelection[]>([]);
   const [signerKind, setSignerKind] = useState<SignerKind>(
     SIGNER_KIND.internal,
@@ -972,10 +983,16 @@ function NewRequestTab({
       ? (nameById.get(signer.userId) ?? signer.userId)
       : signer.name || signer.email;
 
-  const onFile = (chosen: File | null): void => {
+  const onFile = async (chosen: File | null): Promise<void> => {
     const tooLarge = chosen !== null && documentIsTooLarge(chosen);
+    // A protected PDF cannot be signed; saying so now saves the rest of the wizard.
+    const encrypted =
+      chosen !== null &&
+      !tooLarge &&
+      pdfIsEncrypted(new Uint8Array(await chosen.arrayBuffer()));
     setFileTooLarge(tooLarge);
-    if (!tooLarge) {
+    setFileEncrypted(encrypted);
+    if (!tooLarge && !encrypted) {
       setFile(chosen);
       // Placements are rectangles on the pages of one document, so they mean
       // nothing once a different document is chosen.
@@ -988,7 +1005,7 @@ function NewRequestTab({
   // What each step needs before the wizard will advance past it. Placement is
   // optional, so its only gate is that no signature is left half-placed (incomplete).
   const stepReady = [
-    file != null && !fileTooLarge,
+    file != null && !fileTooLarge && !fileEncrypted,
     signers.length > 0,
     incomplete.length === 0,
     canSubmit,
@@ -1135,7 +1152,7 @@ function NewRequestTab({
                       accept="application/pdf"
                       className="sr-only"
                       onChange={(e) => {
-                        onFile(e.target.files?.[0] ?? null);
+                        void onFile(e.target.files?.[0] ?? null);
                         // Reset so picking the same file after removing it fires
                         // onChange again.
                         e.target.value = "";
@@ -1154,6 +1171,7 @@ function NewRequestTab({
                         // Clear any over-size error too, so it does not linger
                         // above "No file chosen".
                         setFileTooLarge(false);
+                        setFileEncrypted(false);
                       }}
                     >
                       {t("signing.documentRemove")}
@@ -1182,6 +1200,11 @@ function NewRequestTab({
                     {t("signing.documentTooLarge", {
                       size: formatBytes(MAX_DOCUMENT_BYTES),
                     })}
+                  </p>
+                )}
+                {fileEncrypted && (
+                  <p role="alert" className="text-error text-[12px]">
+                    {t("signing.documentEncrypted")}
                   </p>
                 )}
               </div>
@@ -1582,10 +1605,12 @@ function CredentialTab({
   slug,
   credential,
   isLinked,
+  onLinked,
 }: Readonly<{
   slug: string;
   credential: ReturnType<typeof useSigningCredentialQuery>;
   isLinked: boolean;
+  onLinked: () => void;
 }>): React.JSX.Element {
   const { t } = useTranslation();
   const link = useLinkSigningCredentialMutation(slug);
@@ -1647,6 +1672,15 @@ function CredentialTab({
       {authorizing && (
         <SigningAuthorizationDialog
           start={authorizing}
+          onFinished={(end) => {
+            setAuthorizing(null);
+            if (end.linked === true) {
+              toast.success(t("signing.linkedToast"));
+              onLinked();
+            } else {
+              toast.error(t("signing.linkFailedToast"));
+            }
+          }}
           onClose={() => setAuthorizing(null)}
         />
       )}

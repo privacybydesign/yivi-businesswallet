@@ -41,6 +41,9 @@ pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 // backing store only, so the overlay coordinates stay in CSS pixels.
 const MAX_PAGE_WIDTH = 620;
 const MAX_PIXEL_RATIO = 2;
+// A page's /Rotate is a multiple of 90; one that is not a multiple of this is
+// shown sideways.
+const HALF_TURN = 180;
 
 // pdf.js types both viewport conversions as `any[]`; each is always an [x, y] pair.
 function pointOf(values: unknown): { x: number; y: number } {
@@ -121,12 +124,14 @@ export function PlacementEditor({
         }
         const pageBoxes: PageBox[] = [];
         for (let number = 1; number <= doc.numPages; number++) {
-          const view: number[] = (await doc.getPage(number)).view;
+          const pdfPage = await doc.getPage(number);
+          const view: number[] = pdfPage.view;
           pageBoxes.push({
             minX: view[0],
             minY: view[1],
             maxX: view[2],
             maxY: view[3],
+            sideways: pdfPage.rotate % HALF_TURN !== 0,
           });
         }
         if (cancelled) {
@@ -252,7 +257,7 @@ export function PlacementEditor({
   const placeCentre = (centre: { x: number; y: number }): void => {
     if (box == null) return;
     const existing = findPlacement(activePlacements, kind, page);
-    const size = existing ?? defaultSize(kind);
+    const size = existing ?? defaultSize(kind, box);
     update(
       withPlacement(activePlacements, placeAt(kind, page, centre, size, box)),
     );
@@ -669,7 +674,10 @@ export function PlacementEditor({
                                 // Expand the current paraph across every page, or
                                 // seed one in the page centre when none is placed
                                 // yet, so "every page" always does something.
-                                const size = defaultSize(PLACEMENT_KIND.paraph);
+                                const size = defaultSize(
+                                  PLACEMENT_KIND.paraph,
+                                  box,
+                                );
                                 const rect = selected ?? {
                                   width: size.width,
                                   height: size.height,
