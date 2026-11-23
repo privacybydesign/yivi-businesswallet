@@ -187,7 +187,8 @@ const (
 	envAttestationStubClaimDelay = "ATTESTATION_STUB_CLAIM_DELAY"
 	envAttestationPingCredential = "ATTESTATION_ISSUER_PING_CREDENTIAL"
 	// envAttestationRulebookIssuerURL is the EU reference issuer that issues the
-	// WE BUILD rulebook credentials. Empty sends them to the issuer above.
+	// WE BUILD rulebook credentials, v0.9.4 up to v0.10.1 (see EudiIssuer). Empty
+	// sends them to the issuer above.
 	envAttestationRulebookIssuerURL = "ATTESTATION_RULEBOOK_ISSUER_URL"
 
 	// Attestation holder (the "store, select" side). The irmago EUDI holder engine

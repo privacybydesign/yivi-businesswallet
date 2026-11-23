@@ -30,6 +30,10 @@ const (
 // It has no admin API: offers are created over its unauthenticated
 // /credentialOfferReq2 endpoint, it keeps no queryable offer state and it runs no
 // status list.
+//
+// Supported: issuer v0.9.4 up to v0.10.1. From v0.11.0 /credentialOfferReq2 is a
+// test feature that wants a signed request and returns the offer and tx_code
+// separately, which this client does not do yet.
 type EudiIssuer struct {
 	baseURL string
 	http    *http.Client
