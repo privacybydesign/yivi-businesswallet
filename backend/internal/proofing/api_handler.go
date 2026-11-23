@@ -144,21 +144,7 @@ const bearerPrefix = "Bearer "
 // requireAPIKey authenticates the key in the Authorization header.
 func (h *Handler) requireAPIKey(scope string, next respond.HandlerFunc) http.Handler {
 	return respond.HandlerFunc(func(w http.ResponseWriter, r *http.Request) error {
-		raw, ok := strings.CutPrefix(r.Header.Get(headerAuthorization), bearerPrefix)
-		if !ok || raw == "" {
-			w.Header().Set(headerWWWAuthenticate, `Bearer realm="proofing"`)
-			return &respond.APIError{Status: http.StatusUnauthorized, Code: "unauthorized", Message: "send an API key as a Bearer token"}
-		}
-
-		caller, err := h.service.AuthenticateAPIKey(r.Context(), strings.TrimSpace(raw))
-		if errors.Is(err, ErrAPIKeyInvalid) {
-			if err := h.failureLimited(w, r); err != nil {
-				return err
-			}
-			w.Header().Set(headerWWWAuthenticate, `Bearer realm="proofing", error="invalid_token"`)
-			return &respond.APIError{Status: http.StatusUnauthorized, Code: "invalid_api_key", Message: "this API key is unknown or revoked"}
-		}
-
+		caller, err := h.authenticateAPIKey(w, r)
 		if err != nil {
 			return err
 		}
@@ -184,6 +170,25 @@ func (h *Handler) requireAPIKey(scope string, next respond.HandlerFunc) http.Han
 			audit.Actor{Label: APIKeyActorPrefix + caller.KeyPrefix})
 		return next(w, r.WithContext(ctx))
 	})
+}
+
+// authenticateAPIKey is the caller of the Bearer key r carries, or the 401
+// for a missing, unknown or revoked one.
+func (h *Handler) authenticateAPIKey(w http.ResponseWriter, r *http.Request) (APIKeyCaller, error) {
+	raw, ok := strings.CutPrefix(r.Header.Get(headerAuthorization), bearerPrefix)
+	if !ok || raw == "" {
+		w.Header().Set(headerWWWAuthenticate, `Bearer realm="proofing"`)
+		return APIKeyCaller{}, &respond.APIError{Status: http.StatusUnauthorized, Code: "unauthorized", Message: "send an API key as a Bearer token"}
+	}
+	caller, err := h.service.AuthenticateAPIKey(r.Context(), strings.TrimSpace(raw))
+	if !errors.Is(err, ErrAPIKeyInvalid) {
+		return caller, err
+	}
+	if err := h.failureLimited(w, r); err != nil {
+		return APIKeyCaller{}, err
+	}
+	w.Header().Set(headerWWWAuthenticate, `Bearer realm="proofing", error="invalid_token"`)
+	return APIKeyCaller{}, &respond.APIError{Status: http.StatusUnauthorized, Code: "invalid_api_key", Message: "this API key is unknown or revoked"}
 }
 
 // limitSessions holds session creation to APISessionLimit per org, on
