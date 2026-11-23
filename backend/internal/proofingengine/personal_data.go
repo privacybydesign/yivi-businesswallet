@@ -63,8 +63,8 @@ func personalDataDocument(sess session.Session, info disclosureInfo, bsnPolicy p
 }
 
 // photographedDocument is what the session's document photo read, its
-// personal number under the BSN policy and only when DG11 is requested; ok is
-// false without a usable photo.
+// personal number under the BSN policy alone; ok is false without a usable
+// photo.
 func photographedDocument(sess session.Session, bsnPolicy privacy.BSNPolicy, now time.Time) (documentInfo, bool) {
 	p := sess.Steps.DocumentPhoto
 	if p == nil || p.Check == nil {
@@ -76,9 +76,6 @@ func photographedDocument(sess session.Session, bsnPolicy privacy.BSNPolicy, now
 	}
 	doc := *scanned
 	applyBSNPolicy(&doc, bsnPolicy)
-	if !attrRequested(sess, attrDG11) {
-		doc.PersonalNumber = ""
-	}
 	return doc, true
 }
 

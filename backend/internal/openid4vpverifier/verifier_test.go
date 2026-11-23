@@ -285,8 +285,14 @@ func TestPersonalDataSource(t *testing.T) {
 		names = append(names, c.Path[0])
 	}
 	want := []string{ClaimPersonalFirstNames, ClaimPersonalPrefix, ClaimPersonalFamilyName, ClaimPersonalDateOfBirth, "over18"}
-	if !slices.Equal(names, want) {
-		t.Errorf("claims = %v, want %v", names, want)
+	if !slices.Equal(names, append(slices.Clone(want), ClaimPersonalNationality)) {
+		t.Errorf("claims = %v, want %v and the nationality", names, want)
+	}
+	// The nationality is optional in the credential: a holder without it
+	// shares the rest.
+	if sets := q.Credentials[0].ClaimSets; len(sets) != 2 ||
+		!slices.Equal(sets[0], append(slices.Clone(want), ClaimPersonalNationality)) || !slices.Equal(sets[1], want) {
+		t.Errorf("claim sets = %v, want with and without the nationality", sets)
 	}
 	if len(q.CredentialSets) != 2 || q.Credentials[1].ID != credIDAddress {
 		t.Errorf("with the address = %+v", q)

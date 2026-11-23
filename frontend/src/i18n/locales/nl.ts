@@ -664,7 +664,8 @@ export const nl: Translation<typeof en> = {
     address: {
       overview: {
         label: "Adres",
-        detail: "Na de identiteitscontrole: het postadres dat je invult",
+        detail: "Je postadres, dat je na de controle zelf invult",
+        detailYivi: "Je woonadres uit de BRP, dat de Yivi-app deelt",
       },
       identityDone: "Je identiteit is geverifieerd.",
       heading: "Vul nu je adres in",
@@ -693,7 +694,7 @@ export const nl: Translation<typeof en> = {
       overview: {
         label: "Diploma's",
         detail:
-          "Na de identiteitscontrole: de diploma-uittreksels die je bij DUO downloadt, gecontroleerd op de handtekening van DUO en op je naam en geboortedatum",
+          "Je diploma-uittreksels van DUO, die je na de controle uploadt. We controleren de handtekening van DUO en of ze op jouw naam en geboortedatum staan.",
       },
       how: {
         login: "Log in bij Mijn DUO met DigiD.",
@@ -715,7 +716,7 @@ export const nl: Translation<typeof en> = {
       overview: {
         label: "Verzekeringsbericht",
         detail:
-          "Na de identiteitscontrole: het Verzekeringsbericht dat je bij UWV downloadt, gecontroleerd op het zegel van UWV en op je naam en geboortedatum",
+          "Je Verzekeringsbericht van UWV, dat je na de controle uploadt. We controleren het zegel van UWV en of het op jouw naam en geboortedatum staat.",
       },
       how: {
         login: "Log in bij Mijn UWV met DigiD.",
@@ -871,7 +872,7 @@ export const nl: Translation<typeof en> = {
         "Je identiteitscontrole is klaar. Iemand beoordeelt hem nadat je hier klaar bent.",
       steps: {
         overview: "Wat er wordt verzameld",
-        document: "Je ID fotograferen",
+        document: "Je document fotograferen",
         method: "Kies een app",
         session: "Scan de QR-code",
         address: "Adres",
@@ -926,7 +927,19 @@ export const nl: Translation<typeof en> = {
       },
       documentScan: {
         heading: "Fotografeer je identiteitsbewijs",
-        hint: "Maak hieronder in de beveiligde scan van CM.com een foto van de voor- en achterkant van je ID-kaart of rijbewijs, of van de fotopagina van je paspoort.",
+        headings: {
+          passport: "Fotografeer je paspoort",
+          identity_card: "Fotografeer je ID-kaart",
+          residence_permit: "Fotografeer je verblijfsdocument",
+          drivers_license: "Fotografeer je rijbewijs",
+        },
+        hint: "Maak hieronder in de beveiligde scan van CM.com een foto van {{documents}}.",
+        sides: {
+          passport: "de fotopagina van je paspoort",
+          identity_card: "de voor- en achterkant van je ID-kaart",
+          residence_permit: "de voor- en achterkant van je verblijfsdocument",
+          drivers_license: "de voor- en achterkant van je rijbewijs",
+        },
         passportHint:
           "Voor een paspoort: sla het open als een boek en draai het een kwartslag, zodat het opengeslagen paspoort in het kader past.",
         frameTitle: "ID-scan van CM.com",
@@ -1070,6 +1083,9 @@ export const nl: Translation<typeof en> = {
         name: "Naam",
         birthDate: "Geboortedatum",
         nationality: "Nationaliteit",
+        dutch: "Nederlands",
+        notDutch: "Niet Nederlands",
+        bsn: "BSN",
         ageOver: "{{age}} jaar of ouder",
         ageOverYes: "Ja",
         ageOverNo: "Nee",

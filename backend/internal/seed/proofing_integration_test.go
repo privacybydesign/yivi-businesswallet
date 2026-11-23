@@ -72,8 +72,12 @@ func TestSeedProofingIsIdempotent(t *testing.T) {
 		if err != nil || sel.DefaultFlowID != ids[o.defaultFlow] {
 			t.Errorf("%s default flow = %q, %v; want %s", o.slug, sel.DefaultFlowID, err, o.defaultFlow)
 		}
+		seeded := map[string]time.Duration{}
+		for _, f := range o.seededFlows() {
+			seeded[f.def.Name] = f.def.RetentionOverride
+		}
 		for _, f := range flows {
-			if want := time.Duration(o.retentionDays) * day; f.RetentionOverride != want {
+			if want, ok := seeded[f.Name]; ok && f.RetentionOverride != want {
 				t.Errorf("%s %s retention = %v, want %v", o.slug, f.Name, f.RetentionOverride, want)
 			}
 		}
@@ -103,7 +107,7 @@ func TestSeedProofingIsIdempotent(t *testing.T) {
 		t.Fatalf("odixus flows: %v", err)
 	}
 	for _, f := range odixusFlows {
-		if f.Name != flowOdixusDigiD {
+		if f.Name != flowOdixusDigiD && f.Name != flowOdixusDigiDNoBSN {
 			continue
 		}
 		if mode, err := proofing.NewFlowAddressStore(pool, audit.NopRecorder{}).Get(ctx, odixusID, f.ID); err != nil || mode != proofing.AddressRequired {

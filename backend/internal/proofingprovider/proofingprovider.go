@@ -210,9 +210,15 @@ type Identity struct {
 	// PersonalNumber is the BSN as the flow's BSN policy releases it; empty
 	// when it omits it or none was read.
 	PersonalNumber string
+	// DutchNationality is whether the registered personal data says the
+	// holder is Dutch; nil when it was not disclosed.
+	DutchNationality *bool
 	// AgeOver is whether the holder is the flow's age or older, derived from
 	// the chip's date of birth; nil when the flow did not request age_over.
 	AgeOver *AgeOver
+	// Asked is what the session's flow asked for beyond name and date of
+	// birth; nil when its flow is no longer known.
+	Asked *Asked
 	// Evidence is what the identity rests on; nil while there is no result.
 	Evidence *Evidence
 	// Photo is the document's portrait (the chip's DG2, or the disclosed
@@ -228,6 +234,17 @@ type Identity struct {
 	// personal number page), the printed BSN blurred under the tenant's policy.
 	DocumentImage     *Image
 	DocumentImageBack *Image
+}
+
+// Asked is which parts of a result its flow asks for, so a part it asked for
+// but did not get shows as empty and one it never asked for not at all.
+type Asked struct {
+	Nationality      bool
+	DutchNationality bool
+	BSN              bool
+	ChipChecks       bool
+	Face             bool
+	DocumentCheck    bool
 }
 
 // AgeOver answers age_over: whether the holder is Age or older, without the
@@ -420,6 +437,10 @@ type Reference struct {
 	Photo      string
 	Attributes map[string]string
 }
+
+// AttributeDutchNationality is the Reference attribute holding the registered
+// personal data's yes/no on whether the holder is Dutch.
+const AttributeDutchNationality = "dutchNationality"
 
 // YiviDisclosure is the engine taking a Reference: OK approved the session,
 // OK false rejected it (Code says why: document_not_accepted, age_not_disclosed,

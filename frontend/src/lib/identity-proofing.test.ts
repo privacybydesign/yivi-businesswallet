@@ -34,6 +34,10 @@ import {
   matchingAddress,
   ageOverChoices,
   ageOverFact,
+  dutchNationalityLabel,
+  registeredFacts,
+  scanDocumentKinds,
+  scanDocuments,
   dataRequestRefusal,
   deliveriesPollInterval,
   hostedErrorMessage,
@@ -945,6 +949,45 @@ describe("ageOverFact", () => {
     );
     expect(ageOverFact({}, t)).toBeUndefined();
     expect(ageOverFact(undefined, t)).toBeUndefined();
+  });
+});
+
+describe("registeredFacts", () => {
+  it("shows the BSN row only for a flow that asked for it", () => {
+    expect(registeredFacts({ bsn: "******333" }, t)).toEqual([
+      { label: "BSN", value: "******333" },
+    ]);
+    // Asked for, but none got: the row shows, empty.
+    expect(registeredFacts({ bsn: null }, t)).toEqual([
+      { label: "BSN", value: "—" },
+    ]);
+    expect(registeredFacts({}, t)).toEqual([]);
+    expect(registeredFacts(undefined, t)).toEqual([]);
+  });
+});
+
+describe("scanDocumentKinds", () => {
+  it("names the flow's documents, or every kind when it takes any", () => {
+    expect(scanDocumentKinds(["drivers_license"])).toEqual(["drivers_license"]);
+    expect(scanDocumentKinds([])).toEqual([
+      "passport",
+      "identity_card",
+      "residence_permit",
+      "drivers_license",
+    ]);
+    expect(
+      scanDocuments({ acceptedDocumentTypes: ["personal_data", "passport"] }),
+    ).toEqual(["passport"]);
+  });
+});
+
+describe("dutchNationalityLabel", () => {
+  it("names DigiD's answer, and nothing without one", () => {
+    expect(dutchNationalityLabel({ dutchNationality: true }, t)).toBe("Dutch");
+    expect(dutchNationalityLabel({ dutchNationality: false }, t)).toBe(
+      "Not Dutch",
+    );
+    expect(dutchNationalityLabel({}, t)).toBeUndefined();
   });
 });
 
@@ -2626,6 +2669,18 @@ describe("app step", () => {
       "overview",
       "session",
     ]);
+  });
+
+  // Nor a QR code to scan: the photo and the selfie are its only step.
+  it("leaves the session out for a flow the browser runs alone", () => {
+    expect(
+      verifyStages({
+        app: false,
+        session: false,
+        document: true,
+        documents: false,
+      }),
+    ).toEqual(["overview", "document"]);
   });
 
   it("offers the Yivi app for an age check only at an age it answers", () => {

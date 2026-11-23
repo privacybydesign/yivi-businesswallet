@@ -1335,7 +1335,13 @@ const proofingResultSchema = z.object({
       givenName: z.string().optional(),
       familyName: z.string().optional(),
       birthDate: z.string().optional(),
-      nationality: z.string().optional(),
+      // These are absent when the flow did not ask for them, and null when it
+      // asked and got nothing.
+      nationality: z.string().nullable().optional(),
+      // Masked unless the flow retrieves it.
+      bsn: z.string().nullable().optional(),
+      // The registered personal data's yes or no on being Dutch (DigiD).
+      dutchNationality: z.boolean().nullable().optional(),
       // Only whether the holder is age or older, for a flow that asks it.
       ageOver: z.object({ age: z.number(), over: z.boolean() }).optional(),
     })
@@ -1347,10 +1353,12 @@ const proofingResultSchema = z.object({
       documentKind: z.string().optional(),
       issuingState: z.string().optional(),
       expiryDate: z.string().optional(),
-      passiveAuth: z.string().optional(),
-      activeAuth: z.string().optional(),
-      faceMatch: z.number().optional(),
-      liveness: z.string().optional(),
+      // These are absent when the flow did not ask for them, and null when it
+      // asked and got nothing.
+      passiveAuth: z.string().nullable().optional(),
+      activeAuth: z.string().nullable().optional(),
+      faceMatch: z.number().nullable().optional(),
+      liveness: z.string().nullable().optional(),
       // The document scan's result on a photographed document.
       documentCheck: z
         .object({
@@ -1359,6 +1367,7 @@ const proofingResultSchema = z.object({
           fields: z.string(),
           zones: z.string(),
         })
+        .nullable()
         .optional(),
     }),
   ),
@@ -1758,6 +1767,8 @@ const hostedProofingSchema = hostedProgressSchema.extend({
     idemAvailable: z.boolean(),
     // The Yivi app shares the registered personal data, not a document.
     yiviPersonalData: z.boolean(),
+    // The documents the document photo takes; empty is any.
+    scanDocuments: z.array(z.string()).optional(),
     // The page runs every step itself: no app is chosen.
     browserOnly: z.boolean(),
     diplomaMode: diplomaModeSchema,

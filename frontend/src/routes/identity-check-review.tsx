@@ -16,6 +16,9 @@ import { usePercentFormatter } from "../lib/format-percent";
 import { useWhenFormatter } from "../lib/format-when";
 import {
   ageOverFact,
+  asksNationality,
+  dutchNationalityLabel,
+  registeredFacts,
   assuranceLevelLabel,
   proofingErrorMessage,
   proofingMethodLabel,
@@ -313,12 +316,21 @@ function ChipData({
               label: t("identityProofing.sessions.identity.birthDate"),
               value: identity?.birthDate || none,
             },
-            {
-              label: t("identityProofing.sessions.identity.nationality"),
-              value: identity?.nationality
-                ? issuingCountryName(identity.nationality, i18n.language, t)
-                : none,
-            },
+            ...(asksNationality(identity)
+              ? [
+                  {
+                    label: t("identityProofing.sessions.identity.nationality"),
+                    value: identity?.nationality
+                      ? issuingCountryName(
+                          identity.nationality,
+                          i18n.language,
+                          t,
+                        )
+                      : (dutchNationalityLabel(identity, t) ?? none),
+                  },
+                ]
+              : []),
+            ...registeredFacts(identity, t),
             ...(ageOver ? [ageOver] : []),
             {
               label: t("identityProofing.sessions.identity.document"),
