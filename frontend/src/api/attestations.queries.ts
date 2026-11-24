@@ -112,15 +112,35 @@ export function issuedAttestationQueryKey(
   return ["organizations", "detail", slug, "attestations", "issued", issuedId];
 }
 
+// What an attestations event re-reads: the issued ledger (list and each
+// detail), the incoming offers, and the wallet an accepted offer lands in.
+// Schemas, templates and keys only change by the reader's own hand.
+export function attestationReads(
+  slug: string,
+): (query: { queryKey: readonly unknown[] }) => boolean {
+  const prefixes = [
+    issuedAttestationsQueryKey(slug),
+    credentialOffersQueryKey(slug),
+    heldAttestationsBaseQueryKey(slug),
+  ];
+  return ({ queryKey }) =>
+    prefixes.some((prefix) => prefix.every((part, i) => queryKey[i] === part));
+}
+
 export function attestationClaimQueryKey(token: string): readonly string[] {
   return ["attestations", "claim", token];
+}
+
+// The held list and each held credential's reads, in every language.
+function heldAttestationsBaseQueryKey(slug: string): readonly string[] {
+  return ["organizations", "detail", slug, "attestations", "held"];
 }
 
 export function heldAttestationsQueryKey(
   slug: string,
   lang: string,
 ): readonly string[] {
-  return ["organizations", "detail", slug, "attestations", "held", lang];
+  return [...heldAttestationsBaseQueryKey(slug), lang];
 }
 
 export function credentialOffersQueryKey(slug: string): readonly string[] {
@@ -260,6 +280,9 @@ export function useIssuedAttestationQuery(
     queryKey: issuedAttestationQueryKey(slug, issuedId),
     queryFn: ({ signal }) => getIssuedAttestation(slug, issuedId, signal),
     enabled: enabled && slug !== "" && issuedId !== "",
+    // Kept while the stream is up: the issuer cannot say an offer was
+    // claimed, so this read is what asks it. Its result reaches the other
+    // pages through the stream.
     refetchInterval: (query) =>
       query.state.data?.status === OFFERED_STATUS
         ? OFFERED_POLL_INTERVAL_MS

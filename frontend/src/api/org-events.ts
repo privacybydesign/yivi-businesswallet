@@ -20,6 +20,7 @@ export const ORG_EVENT_KINDS = [
   "webhooks",
   "qerds",
   "signing",
+  "attestations",
 ] as const;
 
 export type OrgEventKind = (typeof ORG_EVENT_KINDS)[number];

@@ -321,6 +321,8 @@ export function auditActionLabel(action: string, t: TFunction): string {
       return t("auditLog.actions.qerdsMessageSent");
     case "qerds.message_received":
       return t("auditLog.actions.qerdsMessageReceived");
+    case "qerds.message_read":
+      return t("auditLog.actions.qerdsMessageRead");
     case "qerds.address_provisioned":
       return t("auditLog.actions.qerdsAddressProvisioned");
     case "qerds.address_default_changed":

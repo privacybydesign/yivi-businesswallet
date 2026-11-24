@@ -15104,6 +15104,32 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/qerds/messages/unread:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+    get:
+      tags: [qerds]
+      summary: Count unread inbound QERDS messages
+      description: Requires membership of the organisation.
+      responses:
+        '200':
+          description: How many inbound messages no member has opened.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  unread:
+                    type: integer
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /api/v1/orgs/{slug}/qerds/messages/{id}:
     parameters:
       - name: slug
@@ -15135,6 +15161,31 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/qerds/messages/{id}/read:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Resource identifier.
+    post:
+      tags: [qerds]
+      summary: Mark an inbound QERDS message read
+      description: Requires membership of the organisation. The first member to open an inbound message reads it for the whole organisation; an outbound or already read message is left as it is.
+      responses:
+        '204':
+          description: Marked read, or nothing to change.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /api/v1/orgs/{slug}/qerds/messages/{id}/attachments/{attachmentId}:
     parameters:
       - name: slug

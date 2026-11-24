@@ -8,6 +8,8 @@ import { useReviewItemCountsQuery } from "../api/identity-proofing.queries";
 import { waitingCount } from "../lib/proofing-reviews";
 import { listedCount } from "../lib/identity-proofing";
 import { useSigningAvailabilityQuery } from "../api/signing.queries";
+import { useCredentialOffersQuery } from "../api/attestations.queries";
+import { useQerdsUnreadQuery } from "../api/qerds.queries";
 import { personInitials, fullName } from "../lib/name";
 import { Icon } from "./icon";
 import { Avatar } from "./avatar";
@@ -44,7 +46,11 @@ interface NavItem {
   children?: NavChild[];
   // How many things wait on the reader here, shown beside the name.
   count?: number;
+  // What count counts, read aloud after it; waiting unless said.
+  countLabelKey?: CountLabelKey;
 }
+
+type CountLabelKey = "nav.reviewsWaiting" | "nav.messagesUnread";
 
 type NavChild = Omit<NavItem, "icon" | "children">;
 
@@ -59,6 +65,10 @@ interface OrgNavVisibility {
   reviewer: boolean;
   // What waits for the reader's decision under Identity proofing › Reviews.
   waitingReviews: number;
+  // Credential offers waiting for an admin's accept or decline.
+  waitingOffers: number;
+  // Inbound secure-delivery messages no member has opened.
+  unreadMessages: number;
 }
 
 function orgNavItems(slug: string, visible: OrgNavVisibility): NavItem[] {
@@ -97,11 +107,18 @@ function orgNavItems(slug: string, visible: OrgNavVisibility): NavItem[] {
     count: visible.waitingReviews,
   });
   items.push(
-    { to: `/${slug}/qerds`, labelKey: "nav.qerds", icon: "email" },
+    {
+      to: `/${slug}/qerds`,
+      labelKey: "nav.qerds",
+      icon: "email",
+      count: visible.unreadMessages,
+      countLabelKey: "nav.messagesUnread",
+    },
     {
       to: `/${slug}/attestations`,
       labelKey: "nav.attestations",
       icon: "valid",
+      count: visible.waitingOffers,
     },
     { to: `/${slug}/postguard`, labelKey: "nav.postguard", icon: "lock" },
   );
@@ -145,14 +162,16 @@ const NAV_ICON_SIZE = 16;
 // The number of things that wait, read aloud with what it counts.
 function CountBadge({
   count,
+  labelKey = "nav.reviewsWaiting",
 }: Readonly<{
   count: number;
+  labelKey?: CountLabelKey;
 }>): React.JSX.Element {
   const { t } = useTranslation();
   return (
     <span className="bg-ink text-surface ml-auto min-w-5 rounded-full px-1.5 text-center text-[11.5px] leading-5">
       {listedCount(count, false, t)}
-      <span className="sr-only"> {t("nav.reviewsWaiting")}</span>
+      <span className="sr-only"> {t(labelKey)}</span>
     </span>
   );
 }
@@ -218,6 +237,12 @@ export function Sidebar({
   const waiting = useReviewItemCountsQuery(activeSlug ?? "", {
     enabled: activeSlug !== undefined,
   });
+  // Only an admin decides an offer, so only an admin is counted it.
+  const offers = useCredentialOffersQuery(activeSlug ?? "", isOrgAdmin);
+  const unread = useQerdsUnreadQuery(
+    activeSlug ?? "",
+    activeOrg.data !== undefined,
+  );
   // Every member follows what changes in the org, once the org is known to be
   // theirs to read.
   useOrgEvents(activeSlug ?? "", activeOrg.data !== undefined);
@@ -227,6 +252,8 @@ export function Sidebar({
         admin: isOrgAdmin,
         reviewer: canReview,
         waitingReviews: waiting.data ? waitingCount(waiting.data) : 0,
+        waitingOffers: offers.data?.length ?? 0,
+        unreadMessages: unread.data?.unread ?? 0,
       })
     : me.isPlatformAdmin
       ? ADMIN_NAV_ITEMS
@@ -282,8 +309,11 @@ export function Sidebar({
                   {/* Open, the section lists its pages and the count sits on Reviews. */}
                   {item.count !== undefined &&
                     item.count > 0 &&
-                    !isWithin(pathname, item.to) && (
-                      <CountBadge count={item.count} />
+                    !(item.children && isWithin(pathname, item.to)) && (
+                      <CountBadge
+                        count={item.count}
+                        labelKey={item.countLabelKey}
+                      />
                     )}
                 </>
               )}

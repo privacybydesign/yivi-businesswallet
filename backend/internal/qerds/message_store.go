@@ -192,3 +192,37 @@ func (s *Store) GetWithEvidence(ctx context.Context, orgID, id uuid.UUID) (Messa
 	}
 	return MessageWithEvidence{Message: m, Attachments: attachments, Evidence: evidence}, nil
 }
+
+// MarkRead moves an inbound message from received to read: a member opened it.
+// The inbox is the org's, so the first member to open it reads it for all. It
+// reports whether the message moved; an outbound or already read one does not.
+func (s *Store) MarkRead(ctx context.Context, orgID, id uuid.UUID) (bool, error) {
+	var moved bool
+	err := database.InTx(ctx, s.db, func(q database.Querier) error {
+		const update = `UPDATE qerds_messages SET status = $4, updated_at = now()
+			WHERE organization_id = $1 AND id = $2 AND direction = $3 AND status = $5`
+		tag, err := q.Exec(ctx, update, orgID, id, DirectionInbound, StatusRead, StatusReceived)
+		if err != nil {
+			return fmt.Errorf("qerds: mark message %s read: %w", id, err)
+		}
+		if tag.RowsAffected() == 0 {
+			return nil
+		}
+		moved = true
+		return s.audit.Record(ctx, q, audit.QerdsMessageRead,
+			audit.Target{Type: audit.TargetQerdsMessage, ID: id.String(), OrgID: &orgID},
+			audit.Updated(map[string]any{"status": StatusReceived}, map[string]any{"status": StatusRead}))
+	})
+	return moved, err
+}
+
+// CountUnread is how many inbound messages no member has opened yet.
+func (s *Store) CountUnread(ctx context.Context, orgID uuid.UUID) (int, error) {
+	const query = `SELECT count(*) FROM qerds_messages
+		WHERE organization_id = $1 AND direction = $2 AND status = $3`
+	var n int
+	if err := s.db.QueryRow(ctx, query, orgID, DirectionInbound, StatusReceived).Scan(&n); err != nil {
+		return 0, fmt.Errorf("qerds: count unread org %s: %w", orgID, err)
+	}
+	return n, nil
+}

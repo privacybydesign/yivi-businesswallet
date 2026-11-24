@@ -8,12 +8,6 @@ import { useOrganizationQuery } from "../api/organization.queries";
 import { accessMessage } from "../lib/access-message";
 import { useWhenFormatter } from "../lib/format-when";
 import { qerdsStatusTone } from "../lib/qerds";
-import {
-  loadSeenIds,
-  pruneSeen,
-  saveSeenIds,
-  unreadInboundIds,
-} from "../lib/qerds-unread";
 import { Button, Card, Icon, Table, Tag, TopBar } from "../ui";
 import * as React from "react";
 
@@ -49,49 +43,19 @@ export default function Qerds(): React.JSX.Element {
       : message.direction === "outbound",
   );
 
-  const inboundIds = React.useMemo(
+  // Unread is the org-wide read state: an inbound message nobody has opened.
+  const unreadIds = React.useMemo(
     () =>
-      (messages.data ?? [])
-        .filter((message) => message.direction === "inbound")
-        .map((message) => message.id),
+      new Set(
+        (messages.data ?? [])
+          .filter(
+            (message) =>
+              message.direction === "inbound" && message.status === "received",
+          )
+          .map((message) => message.id),
+      ),
     [messages.data],
   );
-
-  // Which inbound messages this browser has already seen. null until the first
-  // load resolves, so we can baseline a first visit (everything already seen)
-  // instead of flashing the whole inbox as new.
-  const [seen, setSeen] = React.useState<string[] | null>(() =>
-    loadSeenIds(slug),
-  );
-
-  // Baseline and prune the seen set whenever the inbox contents change, using
-  // the "adjust state during render" pattern rather than an effect: a first
-  // visit baselines the whole inbox as already seen, and later fetches drop ids
-  // that have left the inbox so the stored set stays bounded by the inbox size.
-  const inboundKey = inboundIds.join(",");
-  const [trackedKey, setTrackedKey] = React.useState<string | null>(null);
-  if (messages.data !== undefined && trackedKey !== inboundKey) {
-    setTrackedKey(inboundKey);
-    setSeen((prev) => pruneSeen(prev ?? inboundIds, inboundIds));
-  }
-
-  // Persist the seen set (side effect only, never a state update).
-  React.useEffect(() => {
-    if (seen !== null) saveSeenIds(slug, seen);
-  }, [slug, seen]);
-
-  const unreadIds = React.useMemo(
-    () => new Set(unreadInboundIds(inboundIds, seen ?? inboundIds)),
-    [inboundIds, seen],
-  );
-
-  const markSeen = (id: string): void => {
-    setSeen((prev) => {
-      const current = prev ?? inboundIds;
-      if (current.includes(id)) return current;
-      return [...current, id];
-    });
-  };
 
   const setBox = (value: Box): void => {
     setSearchParams((prev) => {
@@ -223,7 +187,6 @@ export default function Qerds(): React.JSX.Element {
                       <Table.Row
                         key={message.id}
                         onClick={() => {
-                          markSeen(message.id);
                           void navigate(`/${slug}/qerds/${message.id}`);
                         }}
                         className="hover:bg-surface-3 cursor-pointer transition-colors"

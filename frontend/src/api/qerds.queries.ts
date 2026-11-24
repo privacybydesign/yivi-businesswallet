@@ -10,6 +10,8 @@ import {
   getQerdsContacts,
   getQerdsMessage,
   getQerdsMessages,
+  getQerdsUnread,
+  markQerdsMessageRead,
   pollQerdsInbox,
   sendQerdsMessage,
   setDefaultQerdsAddress,
@@ -20,6 +22,7 @@ import type {
   QerdsMessage,
   QerdsMessageWithEvidence,
   QerdsPollResult,
+  QerdsUnread,
 } from "./qerds";
 import { useOrgStreamConnected } from "./org-events";
 import { toast } from "../lib/toast";
@@ -31,6 +34,11 @@ const MESSAGES_REFETCH_INTERVAL_MS = 30_000;
 
 export function qerdsMessagesQueryKey(slug: string): readonly string[] {
   return ["organizations", "detail", slug, "qerds", "messages"];
+}
+
+// Under the messages key, so whatever re-reads the inbox re-counts it too.
+export function qerdsUnreadQueryKey(slug: string): readonly string[] {
+  return [...qerdsMessagesQueryKey(slug), "unread"];
 }
 
 export function qerdsMessageQueryKey(
@@ -66,6 +74,36 @@ export function useQerdsMessageQuery(
     queryKey: qerdsMessageQueryKey(slug, messageId),
     queryFn: ({ signal }) => getQerdsMessage(slug, messageId, signal),
     enabled: enabled && slug !== "" && messageId !== "",
+  });
+}
+
+export function useQerdsUnreadQuery(
+  slug: string,
+  enabled = true,
+): UseQueryResult<QerdsUnread, Error> {
+  return useQuery({
+    queryKey: qerdsUnreadQueryKey(slug),
+    queryFn: ({ signal }) => getQerdsUnread(slug, signal),
+    enabled: enabled && slug !== "",
+  });
+}
+
+export function useMarkQerdsMessageReadMutation(
+  slug: string,
+): UseMutationResult<void, Error, { messageId: string }> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ messageId }) => markQerdsMessageRead(slug, messageId),
+    // Opening a message is not something to toast about when it fails.
+    meta: { suppressErrorToast: true },
+    onSuccess: (_data, { messageId }) => {
+      void queryClient.invalidateQueries({
+        queryKey: qerdsMessagesQueryKey(slug),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: qerdsMessageQueryKey(slug, messageId),
+      });
+    },
   });
 }
 

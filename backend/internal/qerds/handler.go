@@ -31,6 +31,7 @@ const (
 	multipartMemoryBytes    = 8 << 20 // buffer in memory before spilling to a temp file
 	multipartOverheadBytes  = 1 << 20 // headroom over the payload cap for framing + text fields
 	defaultContentType      = "application/octet-stream"
+	invalidMessageID        = "invalid message id"
 )
 
 type sender interface {
@@ -43,6 +44,8 @@ type reader interface {
 	List(ctx context.Context, orgID uuid.UUID) ([]Message, error)
 	GetWithEvidence(ctx context.Context, orgID, id uuid.UUID) (MessageWithEvidence, error)
 	GetAttachmentContent(ctx context.Context, orgID, messageID, attachmentID uuid.UUID) (AttachmentContent, error)
+	MarkRead(ctx context.Context, orgID, id uuid.UUID) (bool, error)
+	CountUnread(ctx context.Context, orgID uuid.UUID) (int, error)
 }
 
 type addressManager interface {
@@ -131,7 +134,9 @@ func (h *Handler) Register(mux *http.ServeMux) {
 
 	mux.Handle("GET /orgs/{slug}/qerds/messages", orgScoped(respond.HandlerFunc(h.listMessages)))
 	mux.Handle("POST /orgs/{slug}/qerds/messages", orgScoped(respond.HandlerFunc(h.sendMessage)))
+	mux.Handle("GET /orgs/{slug}/qerds/messages/unread", orgScoped(respond.HandlerFunc(h.unreadCount)))
 	mux.Handle("GET /orgs/{slug}/qerds/messages/{id}", orgScoped(respond.HandlerFunc(h.getMessage)))
+	mux.Handle("POST /orgs/{slug}/qerds/messages/{id}/read", orgScoped(respond.HandlerFunc(h.markRead)))
 	mux.Handle("GET /orgs/{slug}/qerds/messages/{id}/attachments/{attachmentId}", orgScoped(respond.HandlerFunc(h.downloadAttachment)))
 	mux.Handle("POST /orgs/{slug}/qerds/poll", orgScoped(respond.HandlerFunc(h.poll)))
 
@@ -276,7 +281,7 @@ func readMultipartFile(fh *multipart.FileHeader) ([]byte, error) {
 func (h *Handler) downloadAttachment(w http.ResponseWriter, r *http.Request) error {
 	messageID, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
-		return badRequest("invalid_id", "invalid message id")
+		return badRequest("invalid_id", invalidMessageID)
 	}
 	attachmentID, err := uuid.Parse(r.PathValue("attachmentId"))
 	if err != nil {
@@ -305,7 +310,7 @@ func (h *Handler) downloadAttachment(w http.ResponseWriter, r *http.Request) err
 func (h *Handler) getMessage(w http.ResponseWriter, r *http.Request) error {
 	id, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
-		return badRequest("invalid_id", "invalid message id")
+		return badRequest("invalid_id", invalidMessageID)
 	}
 
 	org := organization.OrgFromContext(r.Context())
@@ -319,6 +324,35 @@ func (h *Handler) getMessage(w http.ResponseWriter, r *http.Request) error {
 	msg.Message = h.annotateOffer(r.Context(), org.ID, msg.Message)
 
 	respond.JSON(w, r, http.StatusOK, msg)
+	return nil
+}
+
+// markRead is sent when a member opens an inbound message; opening one that is
+// already read, or an outbound one, changes nothing.
+func (h *Handler) markRead(w http.ResponseWriter, r *http.Request) error {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		return badRequest("invalid_id", invalidMessageID)
+	}
+	org := organization.OrgFromContext(r.Context())
+	if _, err := h.messages.MarkRead(r.Context(), org.ID, id); err != nil {
+		return fmt.Errorf("marking qerds message read: %w", err)
+	}
+	w.WriteHeader(http.StatusNoContent)
+	return nil
+}
+
+type unreadResponse struct {
+	Unread int `json:"unread"`
+}
+
+func (h *Handler) unreadCount(w http.ResponseWriter, r *http.Request) error {
+	org := organization.OrgFromContext(r.Context())
+	n, err := h.messages.CountUnread(r.Context(), org.ID)
+	if err != nil {
+		return fmt.Errorf("counting unread qerds messages: %w", err)
+	}
+	respond.JSON(w, r, http.StatusOK, unreadResponse{Unread: n})
 	return nil
 }
 

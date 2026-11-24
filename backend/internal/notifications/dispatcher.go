@@ -2,7 +2,6 @@ package notifications
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -12,10 +11,6 @@ import (
 )
 
 const (
-	// DefaultPollInterval is how often the dispatcher looks for queued events.
-	// Notifications are not interactive, so a few seconds of latency is fine and
-	// a short interval would poll an empty table all day.
-	DefaultPollInterval = 15 * time.Second
 	// DefaultNotifyTimeout bounds how long the dispatcher waits for one channel's
 	// delivery attempt. It is enforced, not just offered: notify stops waiting when
 	// it expires, because a hung SMTP or webhook call that ignores its context would
@@ -88,27 +83,19 @@ func NewDispatcher(outbox outboxClaimer, subscriptions subscriptionReader) *Disp
 // one; call it before Start.
 func (d *Dispatcher) Register(c Channel) { d.channels[c.ID()] = c }
 
-// Start drains the outbox every interval in the background until ctx is
-// cancelled. It returns immediately.
-func (d *Dispatcher) Start(ctx context.Context, interval time.Duration) {
-	if interval <= 0 {
-		interval = DefaultPollInterval
-	}
-	ticker := time.NewTicker(interval)
-	go func() {
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				if _, err := d.DispatchPending(ctx); err != nil && !errors.Is(err, context.Canceled) {
-					slog.ErrorContext(ctx, "notifications: dispatch pass failed",
-						slog.String("error", err.Error()))
-				}
-			}
+// Run drains the outbox, a batch at a time, until it is empty. It is a
+// database.RunOnNotify job on OutboxChannel: Enqueue wakes it, and nothing
+// queued wakes it on its own.
+func (d *Dispatcher) Run(ctx context.Context) (time.Time, error) {
+	for {
+		n, err := d.DispatchPending(ctx)
+		if err != nil {
+			return time.Time{}, err
 		}
-	}()
+		if n == 0 || n < d.batch {
+			return time.Time{}, nil
+		}
+	}
 }
 
 // DispatchPending claims one batch of queued events and delivers each to the
@@ -198,7 +185,7 @@ func (d *Dispatcher) deliver(ctx context.Context, e Event, channels []ChannelID)
 // package: the context is a request to stop, not a guarantee it will. A channel
 // that never looks at it — an SMTP dial or a webhook POST sitting on a half-open
 // socket — would otherwise hold its delivery slot for good, and once every slot is
-// held the pass never returns and the poll loop behind it stops ticking, so one
+// held the pass never returns and the drain behind it stops, so one
 // wedged channel takes down delivery for every org. Abandoning the wait leaks the
 // goroutine until the channel does return, which is bounded by the event: delivery
 // is at most once, so a claimed event is never attempted a second time.
