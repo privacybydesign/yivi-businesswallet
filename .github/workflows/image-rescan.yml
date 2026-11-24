@@ -13,7 +13,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        component: [business-wallet, postguard-sidecar, devverifier]
+        component: [business-wallet, postguard-sidecar, devverifier, eudi-issuer]
     uses: privacybydesign/github-workflows/.github/workflows/image-rescan.yml@v1
     permissions:
       contents: read
