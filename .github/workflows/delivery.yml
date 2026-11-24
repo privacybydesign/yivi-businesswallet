@@ -51,6 +51,9 @@ jobs:
       dockerfile: ${{ matrix.dockerfile }}
       # The old Delivery tagged :latest on every stable release; keep doing so.
       tag-latest: true
+      # The EU issuer's upstream 0.9.4 image ships CVEs we cannot fix without
+      # replacing its signing libraries; reported, not blocking, for that image only.
+      scan-fail-build: ${{ matrix.component != 'eudi-issuer' }}
     secrets:
       # The business-wallet image builds the API with -tags wsca, which clones
       # the private wallet-provider repo (RUN --mount=type=secret). Quoted so

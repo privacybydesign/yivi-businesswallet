@@ -149,6 +149,8 @@ jobs:
       context: ${{ matrix.context }}
       dockerfile: ${{ matrix.dockerfile }}
       push-image: false
+      # See delivery.yml: the EU issuer's upstream CVEs are reported, not blocking.
+      scan-fail-build: ${{ matrix.component != 'eudi-issuer' }}
     secrets:
       # The business-wallet image builds the API with -tags wsca, which clones
       # the private wallet-provider repo (RUN --mount=type=secret). Quoted so
