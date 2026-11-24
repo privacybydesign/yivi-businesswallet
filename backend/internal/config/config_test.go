@@ -315,6 +315,9 @@ func TestLoadOrgRequestDefaults(t *testing.T) {
 	if cfg.OpenID4VPRequesterPublicURL != "https://wallet.example.org" {
 		t.Errorf("requester public URL = %q, want it to default to APP_BASE_URL", cfg.OpenID4VPRequesterPublicURL)
 	}
+	if cfg.AttestationStatusListBaseURL != "https://wallet.example.org" {
+		t.Errorf("status list base URL = %q, want it to default to APP_BASE_URL", cfg.AttestationStatusListBaseURL)
+	}
 	if cfg.OpenID4VPOrgRequestTTL.Hours() != 168 {
 		t.Errorf("org request TTL = %v, want a week", cfg.OpenID4VPOrgRequestTTL)
 	}
@@ -484,7 +487,8 @@ func TestLoadSensitiveURLsNeedHTTPS(t *testing.T) {
 	} {
 		for _, key := range []string{
 			envIdentityProofingPublicURL, envRegulaFaceAPIPublicURL, envVogValidatorURL, envIDScanAPIURL,
-			envAppBaseURL, envOpenID4VPRequesterPublicURL, envAddressLookupURL, envSigningRedirectURI,
+			envAppBaseURL, envOpenID4VPRequesterPublicURL, envAttestationStatusListBaseURL, envAddressLookupURL,
+			envSigningRedirectURI,
 		} {
 			t.Run(key+"="+raw, func(t *testing.T) {
 				if _, err := loadWith(t, map[string]string{key: raw}); (err == nil) != ok {

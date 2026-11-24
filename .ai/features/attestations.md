@@ -859,6 +859,7 @@ invalidation cascades. The screen is the mockup:
 | `ATTESTATION_ISSUER_INSTANCE` | Veramo issuer instance name (`issuerName` in the path) | when `veramo` |
 | `ATTESTATION_ISSUER_STATUS_LIST` | `true` when the issuer puts every credential on a Token Status List (§9.4) | outside `DEV_MODE`, to issue a credential valid over 24 h |
 | `ATTESTATION_RULEBOOK_STATUS_LIST_API_KEY` | key the rulebook issuer reserves status list entries with (its `revocation.api_key`, §9.4) | outside `DEV_MODE`, to issue rulebook credentials |
+| `ATTESTATION_STATUS_LIST_BASE_URL` | base URL (no `/api/v1`) of the status lists our backend keeps; the dev stack sets `http://host.docker.internal:8080`, since the containers cannot reach `localhost:5173` | no, defaults to `APP_BASE_URL` |
 | `ATTESTATION_RULEBOOK_ISSUER_CERT` / `_KEY` | the rulebook issuer's certificate (PEM chain) and key, which sign its status lists | with the API key |
 | `ATTESTATION_OFFER_TTL` | credential-offer lifetime before `expired` | no (has default) |
 | `ATTESTATION_VCT_NAMESPACE` | org `vct` namespace prefix (e.g. `nl.<org>`) | no (derived) |

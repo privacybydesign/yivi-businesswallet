@@ -55,6 +55,9 @@ services:
       ATTESTATION_RULEBOOK_ISSUER_CERT: ${ATTESTATION_RULEBOOK_ISSUER_CERT:-}
       ATTESTATION_RULEBOOK_ISSUER_KEY: ${ATTESTATION_RULEBOOK_ISSUER_KEY:-}
       ATTESTATION_ISSUER_STATUS_LIST: ${ATTESTATION_ISSUER_STATUS_LIST:-}
+      # The lists must be reachable from the containers (the holder, the EU
+      # issuer), which localhost:5173 is not.
+      ATTESTATION_STATUS_LIST_BASE_URL: ${ATTESTATION_STATUS_LIST_BASE_URL:-http://host.docker.internal:8080}
       EMAIL_ENCRYPTION_KEY: ${EMAIL_ENCRYPTION_KEY:-}
       # Holder wallet: stub by default. Set ATTESTATION_HOLDER=irmago (+ master key)
       # in .env to actually hold received credentials in the irmago EUDI engine.

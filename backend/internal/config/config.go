@@ -75,6 +75,7 @@ const (
 	envWalletUnitSKAKeyStorage       = "WALLET_UNIT_SKA_KEY_STORAGE"
 	envWalletUnitSKAUserAuth         = "WALLET_UNIT_SKA_USER_AUTHENTICATION"
 	envOpenID4VPRequesterPublicURL   = "OPENID4VP_REQUESTER_PUBLIC_URL"
+	envAttestationStatusListBaseURL  = "ATTESTATION_STATUS_LIST_BASE_URL"
 
 	envPlatformAdminEmails = "PLATFORM_ADMIN_EMAILS"
 
@@ -491,6 +492,10 @@ type Config struct {
 	// wallet fetches request_uri from and posts the response to. Defaults to
 	// AppBaseURL.
 	OpenID4VPRequesterPublicURL string
+	// AttestationStatusListBaseURL is the base URL (no /api/v1) written into
+	// the status list references of the credentials this wallet issues.
+	// Defaults to AppBaseURL.
+	AttestationStatusListBaseURL string
 
 	QerdsProvider             string
 	QerdsProviderURL          string
@@ -1048,6 +1053,10 @@ func loadURLs(c *Config) error {
 	if err := requireAbsoluteHTTPURL(envOpenID4VPRequesterPublicURL, c.OpenID4VPRequesterPublicURL); err != nil {
 		return err
 	}
+	c.AttestationStatusListBaseURL = envOrDefault(envAttestationStatusListBaseURL, c.AppBaseURL)
+	if err := requireAbsoluteHTTPURL(envAttestationStatusListBaseURL, c.AttestationStatusListBaseURL); err != nil {
+		return err
+	}
 	c.IdentityProofingPublicURL = envOrDefault(envIdentityProofingPublicURL, c.AppBaseURL)
 	if err := requireAbsoluteHTTPURL(envIdentityProofingPublicURL, c.IdentityProofingPublicURL); err != nil {
 		return err
@@ -1082,14 +1091,15 @@ func requireProductionSettings(c *Config) error {
 	// address register: over the network only with https. Plain http to this
 	// machine never leaves it.
 	for key, raw := range map[string]string{
-		envIdentityProofingPublicURL:   c.IdentityProofingPublicURL,
-		envRegulaFaceAPIPublicURL:      c.RegulaFaceAPIPublicURL,
-		envVogValidatorURL:             c.VogValidatorURL,
-		envIDScanAPIURL:                c.IDScanAPIURL,
-		envAppBaseURL:                  c.AppBaseURL,
-		envOpenID4VPRequesterPublicURL: c.OpenID4VPRequesterPublicURL,
-		envAddressLookupURL:            c.AddressLookupURL,
-		envSigningRedirectURI:          c.SigningRedirectURI,
+		envIdentityProofingPublicURL:    c.IdentityProofingPublicURL,
+		envRegulaFaceAPIPublicURL:       c.RegulaFaceAPIPublicURL,
+		envVogValidatorURL:              c.VogValidatorURL,
+		envIDScanAPIURL:                 c.IDScanAPIURL,
+		envAppBaseURL:                   c.AppBaseURL,
+		envOpenID4VPRequesterPublicURL:  c.OpenID4VPRequesterPublicURL,
+		envAttestationStatusListBaseURL: c.AttestationStatusListBaseURL,
+		envAddressLookupURL:             c.AddressLookupURL,
+		envSigningRedirectURI:           c.SigningRedirectURI,
 	} {
 		if raw != "" && !strings.HasPrefix(strings.ToLower(raw), "https://") && !localhostURL(raw) {
 			return fmt.Errorf("config: %s %q must be https outside %s=true (a local stack)", key, raw, envDevMode)

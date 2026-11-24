@@ -381,7 +381,7 @@ func newRulebookStatusList(cfg config.Config, pool database.DB) (*issuerstatus.S
 	if err != nil {
 		return nil, fmt.Errorf("rulebook issuer status list signer: %w", err)
 	}
-	return issuerstatus.NewService(issuerstatus.NewStore(pool), signer, cfg.AppBaseURL), nil
+	return issuerstatus.NewService(issuerstatus.NewStore(pool), signer, cfg.AttestationStatusListBaseURL), nil
 }
 
 func newDefaultAttestationIssuer(cfg config.Config) (attestationIssuer, error) {
