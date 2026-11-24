@@ -49,7 +49,7 @@ func countInstances(t *testing.T, pool *pgxpool.Pool, orgID uuid.UUID) int {
 	return countRows(t, pool, orgID, "issued_credential_instances")
 }
 
-// countBatches reads the CredentialBatch count from an org's schema. Store
+// countBatches reads the SdJwtVcBatch count from an org's schema. Store
 // persists one batch per credential (BatchSize:1), and the batch — not the
 // instance — carries the decoded SD-JWT payload, so Delete must leave it at 0.
 func countBatches(t *testing.T, pool *pgxpool.Pool, orgID uuid.UUID) int {

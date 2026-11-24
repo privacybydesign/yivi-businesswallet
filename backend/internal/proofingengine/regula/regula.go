@@ -229,8 +229,7 @@ func (c *Client) do(ctx context.Context, method, target string, body []byte) (*h
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		// *url.Error prints the full URL, whose query holds the transaction id.
-		var urlErr *url.Error
-		if errors.As(err, &urlErr) {
+		if urlErr, ok := errors.AsType[*url.Error](err); ok {
 			err = urlErr.Err
 		}
 		return nil, fmt.Errorf("regula: %s %s: %w", method, req.URL.Path, err)

@@ -1898,8 +1898,7 @@ func (s *Service) cancelOnce(ctx context.Context, req Request) error {
 		tenant := requestTenant(req)
 		endSession = func(ctx context.Context) error {
 			if err := s.ips.CancelSession(ctx, tenant, sess.ID, sess.Token); err != nil {
-				var rejected *proofingprovider.RejectedError
-				if errors.As(err, &rejected) {
+				if _, ok := errors.AsType[*proofingprovider.RejectedError](err); ok {
 					// The engine decided it first; the notified outcome records that.
 					return ErrSessionOver
 				}
@@ -1979,10 +1978,8 @@ func heldToVerdict(req Request, identity proofingprovider.Identity) proofingprov
 		return identity
 	}
 	return proofingprovider.Identity{
-		Result: proofingprovider.Result{
-			Method: identity.Method, Status: proofingprovider.StatusRejected, ErrorCode: req.ErrorCode,
-			AssuranceLevel: identity.AssuranceLevel, EIDASLevel: identity.EIDASLevel, CompletedAt: identity.CompletedAt,
-		},
+		Method: identity.Method, Status: proofingprovider.StatusRejected, ErrorCode: req.ErrorCode,
+		AssuranceLevel: identity.AssuranceLevel, EIDASLevel: identity.EIDASLevel, CompletedAt: identity.CompletedAt,
 		Evidence: identity.Evidence,
 	}
 }

@@ -18,7 +18,7 @@ COPY frontend/ ./
 RUN npm run build
 
 # ---------- Backend build ----------
-FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS build
+FROM --platform=$BUILDPLATFORM golang:1.27-alpine AS build
 
 WORKDIR /app
 

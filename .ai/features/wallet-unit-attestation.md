@@ -1,7 +1,7 @@
 # Feature: Wallet unit attestation (WE BUILD CS-05)
 
-**Status:** provider side built (YIV-304 part 1). Nothing sends the attestations yet: the
-holder needs irmago support first (part 2, below).
+**Status:** built (YIV-304). The provider issues the attestations (part 1), and the holder
+sends them to an issuer when an organization receives a credential (part 2).
 
 ## What it is
 
@@ -50,6 +50,22 @@ holder needs irmago support first (part 2, below).
   public, `application/statuslist+jwt`). The Vite dev proxy forwards only `/api`, so a
   root path would hit the SPA in dev. The URI is built from `APP_BASE_URL`.
 
+## Sending them
+
+- `eudiholder.Engine.SetWalletUnitAttester` hands irmago a `WalletAttester` per redemption
+  (`eudiholder/walletunit_attester.go`). irmago then (privacybydesign/irmago#800):
+  - authenticates at PAR and token with the BWIA (`OAuth-Client-Attestation` + PoP),
+    `client_id` = the BWIA `sub`;
+  - binds the access token with DPoP under the attestation key;
+  - puts the SKA in the `key_attestation` header of each `jwt` proof;
+  - asks for one credential per request, since an SKA is per key.
+- **A fresh instance key per redemption.** Each BWIA is single-use and never shared across
+  issuers, so two issuers cannot link the org's sessions by its key.
+- **An org that cannot be attested still receives.** No EUID, an inactive org or a revoked
+  unit wrap `ErrNotAttestable`: the redemption goes without an attestation and logs a
+  warning. Issuers that require one refuse it themselves.
+- **SKA only for HSM keys.** With software keys (no WSCA) `KeyAttestation` returns none.
+
 ## Configuration
 
 - `WALLET_UNIT_PROVIDER_CERT` / `WALLET_UNIT_PROVIDER_KEY`:
@@ -57,21 +73,13 @@ holder needs irmago support first (part 2, below).
   - unset mints an ephemeral self-signed certificate at boot, which nobody trusts and
     which changes on restart.
 - `WALLET_UNIT_VERSION`: the BWIA `wallet_version` (default `unreleased`).
-- `WALLET_UNIT_CERTIFICATION_INFO`: the wallet solution certification. CS-05 requires it,
+- `WALLET_UNIT_CERTIFICATION_INFO`: the wallet solution certification, a JSON object. CS-05 requires it,
   and there is none yet, so it stays empty.
 - `WALLET_UNIT_SKA_CERTIFICATION_URL`, `WALLET_UNIT_SKA_KEY_STORAGE`,
   `WALLET_UNIT_SKA_USER_AUTHENTICATION`: all three set, or none (no SKA).
 
 ## Not built
 
-- **Sending them (part 2).** The pinned irmago has none of these:
-  - attestation-based client authentication (`OAuth-Client-Attestation` + PoP) at PAR and
-    token;
-  - the `key_attestation` header on the `jwt` proof;
-  - DPoP.
-
-  It also rejects issuers that publish `key_attestations_required`. Single-use and
-  never-shared-across-issuers tracking belong with that caller.
 - **Trust.** The provider certificate is not on the WE BUILD Wallet Provider Trust List
   (YIV-518). Until it is, a relying party can only trust it by adding the root.
 - CS-05 discovery registry (Annex C) and the throughput profile.

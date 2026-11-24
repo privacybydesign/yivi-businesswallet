@@ -12,10 +12,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lestrrat-go/jwx/v3/jwa"
-	"github.com/lestrrat-go/jwx/v3/jwe"
-	"github.com/lestrrat-go/jwx/v3/jwk"
-	"github.com/lestrrat-go/jwx/v3/jws"
+	"github.com/lestrrat-go/jwx/v4/jwa"
+	"github.com/lestrrat-go/jwx/v4/jwe"
+	"github.com/lestrrat-go/jwx/v4/jwk"
+	"github.com/lestrrat-go/jwx/v4/jws"
 	"github.com/privacybydesign/irmago/eudi/credentials/sdjwtvc"
 	"github.com/privacybydesign/irmago/eudi/didjwk"
 	"github.com/privacybydesign/irmago/eudi/didkey"
@@ -107,7 +107,9 @@ func VerifyVPToken(token map[string][]string, issuerTrust eudijwt.X509Verificati
 			} else {
 				p.Verified = true
 				p.VCT = verified.IssuerSignedJwtPayload.VerifiableCredentialType
-				p.Issuer = verified.IssuerSignedJwtPayload.Issuer
+				if iss := verified.IssuerSignedJwtPayload.Issuer; iss != nil {
+					p.Issuer = *iss
+				}
 				p.Claims = contentClaims(verified.ProcessedSdJwtPayload)
 			}
 			out = append(out, p)
@@ -218,7 +220,7 @@ func holderKeyFromCnf(cnf any) (jwk.Key, error) {
 		if err != nil {
 			return nil, err
 		}
-		return jwk.Import(pub)
+		return jwk.Import[jwk.Key](pub)
 	default:
 		return nil, fmt.Errorf("cnf has neither jwk nor a resolvable kid (%q)", kid)
 	}

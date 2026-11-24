@@ -80,7 +80,10 @@ func TestStopEndsOpenStreams(t *testing.T) {
 	}
 	hub.Stop()
 	select {
-	case <-done:
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Serve: %v", err)
+		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("Stop left the stream open")
 	}

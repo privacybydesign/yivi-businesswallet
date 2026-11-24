@@ -10,7 +10,7 @@ import (
 
 // WSCAConfig enables WSCA-backed holder binding on the redeem path: the SD-JWT VC
 // holder binding keys are generated and their OpenID4VCI proofs signed by the
-// wallet-provider WSCA/HSM (irmabinding over walletmobile) instead of software
+// wallet-provider WSCA/HSM (wscaHolderSigner over walletmobile) instead of software
 // keys, so the holder private key never enters this process. Optional; when the
 // engine has no WSCAConfig the default software binder is used (backwards
 // compatible). See .ai/features/wsca-holder-binding.md.
@@ -41,7 +41,10 @@ type WSCAConfig struct {
 
 // SetWSCA enables WSCA-backed holder binding. nil (the default) keeps software
 // keys. Set once at boot before serving.
-func (e *Engine) SetWSCA(cfg *WSCAConfig) { e.wsca = cfg }
+func (e *Engine) SetWSCA(cfg *WSCAConfig) {
+	e.wsca = cfg
+	e.keysInHSM = cfg != nil
+}
 
 // OrgKeystoreDir is the per-org walletmobile keystore directory under base. It is
 // the single source of truth for the layout: the activation flow

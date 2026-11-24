@@ -14,9 +14,9 @@ import (
 // fakeCredentialStore stands in for irmago's holder credential store. StoreBatch
 // generates instance ids the way irmago's BeforeCreate hook does, which is what
 // storeRecorder reads back. The embedded interface satisfies the rest of
-// db.CredentialStore; nothing under test calls those methods.
+// db.SdJwtVcStore; nothing under test calls those methods.
 type fakeCredentialStore struct {
-	db.CredentialStore
+	db.SdJwtVcStore
 
 	err       error
 	stored    int
@@ -27,7 +27,7 @@ func (f *fakeCredentialStore) ListInstancesWithStatusReference() ([]db.Credentia
 	return f.instances, f.err
 }
 
-func (f *fakeCredentialStore) StoreBatch(batch *models.CredentialBatch) error {
+func (f *fakeCredentialStore) StoreBatch(batch *models.SdJwtVcBatch) error {
 	if f.err != nil {
 		return f.err
 	}
@@ -40,10 +40,10 @@ func (f *fakeCredentialStore) StoreBatch(batch *models.CredentialBatch) error {
 	return nil
 }
 
-func batchWithInstances(vct string, instances int) *models.CredentialBatch {
-	return &models.CredentialBatch{
+func batchWithInstances(vct string, instances int) *models.SdJwtVcBatch {
+	return &models.SdJwtVcBatch{
 		VerifiableCredentialType: vct,
-		Instances:                make([]models.IssuedCredentialInstance, instances),
+		Instances:                make([]models.SdJwtVcBatchInstance, instances),
 	}
 }
 
@@ -54,7 +54,7 @@ func batchWithInstances(vct string, instances int) *models.CredentialBatch {
 // Two credentials of one vct must therefore yield two distinct refs.
 func TestStoreRecorderCapturesInstanceRefPerVCT(t *testing.T) {
 	t.Parallel()
-	rec := &storeRecorder{CredentialStore: &fakeCredentialStore{}}
+	rec := &storeRecorder{SdJwtVcStore: &fakeCredentialStore{}}
 
 	first := batchWithInstances("nl.kvk.registration", 1)
 	if err := rec.StoreBatch(first); err != nil {
@@ -85,7 +85,7 @@ func TestStoreRecorderCapturesInstanceRefPerVCT(t *testing.T) {
 // the issued vct differs from the one asked for.
 func TestStoreRecorderRefForFallsBackToFirstBatch(t *testing.T) {
 	t.Parallel()
-	rec := &storeRecorder{CredentialStore: &fakeCredentialStore{}}
+	rec := &storeRecorder{SdJwtVcStore: &fakeCredentialStore{}}
 
 	batch := batchWithInstances("vct.as.issued", 1)
 	if err := rec.StoreBatch(batch); err != nil {
@@ -98,7 +98,7 @@ func TestStoreRecorderRefForFallsBackToFirstBatch(t *testing.T) {
 
 func TestStoreRecorderRefForEmptyWithoutAStore(t *testing.T) {
 	t.Parallel()
-	rec := &storeRecorder{CredentialStore: &fakeCredentialStore{}}
+	rec := &storeRecorder{SdJwtVcStore: &fakeCredentialStore{}}
 	if got := rec.refFor("nl.kvk.registration"); got != "" {
 		t.Fatalf("refFor with nothing stored = %q, want empty", got)
 	}
@@ -109,7 +109,7 @@ func TestStoreRecorderRefForEmptyWithoutAStore(t *testing.T) {
 func TestStoreRecorderPropagatesStoreFailure(t *testing.T) {
 	t.Parallel()
 	wantErr := errors.New("insert failed")
-	rec := &storeRecorder{CredentialStore: &fakeCredentialStore{err: wantErr}}
+	rec := &storeRecorder{SdJwtVcStore: &fakeCredentialStore{err: wantErr}}
 
 	if err := rec.StoreBatch(batchWithInstances("nl.kvk.registration", 1)); !errors.Is(err, wantErr) {
 		t.Fatalf("StoreBatch error = %v, want %v", err, wantErr)
@@ -123,7 +123,7 @@ func TestStoreRecorderPropagatesStoreFailure(t *testing.T) {
 // empty batch, but the recorder must not panic if one ever reaches it.
 func TestStoreRecorderIgnoresInstancelessBatch(t *testing.T) {
 	t.Parallel()
-	rec := &storeRecorder{CredentialStore: &fakeCredentialStore{}}
+	rec := &storeRecorder{SdJwtVcStore: &fakeCredentialStore{}}
 	if err := rec.StoreBatch(batchWithInstances("nl.kvk.registration", 0)); err != nil {
 		t.Fatalf("store: %v", err)
 	}
@@ -136,10 +136,10 @@ func TestStoreRecorderIgnoresInstancelessBatch(t *testing.T) {
 func TestBatchStatusStoreListsOneBatch(t *testing.T) {
 	target, other := datatypes.NewUUIDv4(), datatypes.NewUUIDv4()
 	store := batchStatusStore{
-		CredentialStore: &fakeCredentialStore{instances: []db.CredentialStatusInstance{
-			{InstanceID: datatypes.NewUUIDv4(), BatchID: other, StatusListURI: "https://issuer.test/other"},
-			{InstanceID: datatypes.NewUUIDv4(), BatchID: target, StatusListURI: "https://issuer.test/target"},
-			{InstanceID: datatypes.NewUUIDv4(), BatchID: target, StatusListURI: "https://issuer.test/target"},
+		SdJwtVcStore: &fakeCredentialStore{instances: []db.CredentialStatusInstance{
+			{InstanceID: datatypes.NewUUIDv4(), BatchID: other, StatusListURI: new("https://issuer.test/other")},
+			{InstanceID: datatypes.NewUUIDv4(), BatchID: target, StatusListURI: new("https://issuer.test/target")},
+			{InstanceID: datatypes.NewUUIDv4(), BatchID: target, StatusListURI: new("https://issuer.test/target")},
 		}},
 		batchID: target,
 	}

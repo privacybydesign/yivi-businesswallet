@@ -53,29 +53,38 @@ func TestStubAttesterIssues(t *testing.T) {
 	org := organization.Organization{ID: uuid.New(), Name: "Stub BV", EUID: "NLNHR.12345678", Status: organization.StatusActive}
 	stub := newTestStub(t, org, &SKAConfig{CertificationURL: "https://cert.example", KeyStorage: []string{"iso_18045_high"}, UserAuthentication: []string{"iso_18045_high"}})
 
-	out, err := stub.Issue(context.Background(), org.ID, IssueRequest{InstanceKey: stubKey(t), AttestedKeys: []*ecdsa.PublicKey{stubKey(t)}, KeysInHSM: true})
+	bwiaToken, err := stub.IssueBWIA(context.Background(), org.ID, stubKey(t))
 	if err != nil {
-		t.Fatalf("Issue: %v", err)
+		t.Fatalf("IssueBWIA: %v", err)
 	}
-	bwia := stubClaims(t, out.BWIA)
+	bwia := stubClaims(t, bwiaToken)
 	if sub, _ := bwia["sub"].(string); !strings.HasPrefix(sub, "https://wallet.example/wallet-units/stub-") {
 		t.Errorf("BWIA sub = %q, want a stub unit under the base URL", sub)
 	}
 	if bwia["ebwoid_id"] != org.EUID {
 		t.Errorf("BWIA ebwoid_id = %v, want %q", bwia["ebwoid_id"], org.EUID)
 	}
-	if out.SKA == "" {
+	nonce := "c-nonce"
+	skaToken, err := stub.IssueSKA(context.Background(), org.ID, []*ecdsa.PublicKey{stubKey(t)}, &nonce)
+	if err != nil {
+		t.Fatalf("IssueSKA: %v", err)
+	}
+	if skaToken == "" {
 		t.Fatal("no SKA for HSM-held keys")
 	}
-	if ska := stubClaims(t, out.SKA); ska["certification"] != "https://cert.example" {
+	ska := stubClaims(t, skaToken)
+	if ska["certification"] != "https://cert.example" {
 		t.Errorf("SKA certification = %v", ska["certification"])
+	}
+	if ska["nonce"] != nonce {
+		t.Errorf("SKA nonce = %v, want %q", ska["nonce"], nonce)
 	}
 }
 
 func TestStubAttesterRefusesInactiveOrg(t *testing.T) {
 	t.Parallel()
 	org := organization.Organization{ID: uuid.New(), EUID: "NLNHR.12345678", Status: organization.StatusSuspended}
-	_, err := newTestStub(t, org, nil).Issue(context.Background(), org.ID, IssueRequest{InstanceKey: stubKey(t)})
+	_, err := newTestStub(t, org, nil).IssueBWIA(context.Background(), org.ID, stubKey(t))
 	if !errors.Is(err, ErrOrgNotActive) {
 		t.Fatalf("err = %v, want ErrOrgNotActive", err)
 	}
