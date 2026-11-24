@@ -41,16 +41,10 @@ func TestNeedsStatusList(t *testing.T) {
 type validityStore struct {
 	fakeStore
 	validity *int
-	offered  int
 }
 
 func (s *validityStore) GetTemplateDetail(context.Context, uuid.UUID, uuid.UUID) (TemplateDetail, error) {
 	return TemplateDetail{ValiditySeconds: s.validity}, nil
-}
-
-func (s *validityStore) CreateOffered(context.Context, uuid.UUID, IssueInput, TemplateDetail, *uuid.UUID, *time.Time, string, string) (Issued, error) {
-	s.offered++
-	return Issued{}, nil
 }
 
 func issueWith(t *testing.T, validity *int, requireStatusList bool) (*validityStore, error) {

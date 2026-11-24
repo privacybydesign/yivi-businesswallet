@@ -44,6 +44,7 @@ type fakeStore struct {
 	row      Issued
 	revoked  bool // whether the local Revoke ran
 	notFound bool
+	offered  int // CreateOffered calls
 }
 
 func (s *fakeStore) GetIssued(_ context.Context, _, _ uuid.UUID) (Issued, error) {
@@ -69,6 +70,7 @@ func (s *fakeStore) GetTemplateDetail(context.Context, uuid.UUID, uuid.UUID) (Te
 }
 
 func (s *fakeStore) CreateOffered(context.Context, uuid.UUID, IssueInput, TemplateDetail, *uuid.UUID, *time.Time, string, string) (Issued, error) {
+	s.offered++
 	return Issued{}, nil
 }
 
