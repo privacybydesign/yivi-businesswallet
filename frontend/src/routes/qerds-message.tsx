@@ -1,7 +1,10 @@
 import { Link, useParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
-import { useQerdsMessageQuery } from "../api/qerds.queries";
+import {
+  useMarkQerdsMessageReadMutation,
+  useQerdsMessageQuery,
+} from "../api/qerds.queries";
 import { useOrganizationQuery } from "../api/organization.queries";
 import { downloadQerdsAttachment } from "../api/qerds";
 import type {
@@ -263,6 +266,15 @@ export default function QerdsMessage(): React.JSX.Element {
   const message = messageQuery.data;
   const notFound =
     messageQuery.error instanceof ApiError && messageQuery.error.status === 404;
+
+  const { mutate: markRead } = useMarkQerdsMessageReadMutation(slug);
+  const unopened =
+    message?.direction === "inbound" && message.status === "received";
+  React.useEffect(() => {
+    if (unopened) {
+      markRead({ messageId: id });
+    }
+  }, [unopened, id, markRead]);
 
   const dateFormatter = React.useMemo(
     () =>

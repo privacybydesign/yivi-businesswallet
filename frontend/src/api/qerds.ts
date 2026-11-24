@@ -91,6 +91,10 @@ const qerdsPollResultSchema = z.object({ received: z.number() });
 
 export type QerdsPollResult = z.infer<typeof qerdsPollResultSchema>;
 
+const qerdsUnreadSchema = z.object({ unread: z.number() });
+
+export type QerdsUnread = z.infer<typeof qerdsUnreadSchema>;
+
 export const qerdsContactSchema = z.object({
   id: z.string(),
   organizationId: z.string(),
@@ -130,6 +134,28 @@ export function getQerdsMessage(
       schema: qerdsMessageWithEvidenceSchema,
       signal,
     },
+  );
+}
+
+// Inbound messages no member has opened yet.
+export function getQerdsUnread(
+  slug: string,
+  signal?: AbortSignal,
+): Promise<QerdsUnread> {
+  return request(
+    `/api/v1/orgs/${encodeURIComponent(slug)}/qerds/messages/unread`,
+    { schema: qerdsUnreadSchema, signal },
+  );
+}
+
+// Opening an inbound message reads it for the whole org.
+export function markQerdsMessageRead(
+  slug: string,
+  messageId: string,
+): Promise<void> {
+  return request(
+    `/api/v1/orgs/${encodeURIComponent(slug)}/qerds/messages/${encodeURIComponent(messageId)}/read`,
+    { schema: z.void(), method: "POST" },
   );
 }
 

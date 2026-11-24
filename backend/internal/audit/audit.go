@@ -73,6 +73,7 @@ const (
 
 	QerdsMessageSent           = "qerds.message_sent"
 	QerdsMessageReceived       = "qerds.message_received"
+	QerdsMessageRead           = "qerds.message_read"
 	QerdsAddressProvisioned    = "qerds.address_provisioned"
 	QerdsAddressDefaultChanged = "qerds.address_default_changed"
 	QerdsAddressDeleted        = "qerds.address_deleted"

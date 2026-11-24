@@ -1220,7 +1220,7 @@ func (w *wiring) buildNotifications(ctx context.Context) error {
 	dispatcher.Register(emailchannel.New(w.emailService, w.orgStore, cfg.AppBaseURL))
 	dispatcher.Register(slackChannel)
 	dispatcher.Register(teamsChannel)
-	dispatcher.Start(ctx, notifications.DefaultPollInterval)
+	database.RunOnNotify(ctx, w.pool, notifications.OutboxChannel, "notifications", dispatcher.Run)
 	return nil
 }
 

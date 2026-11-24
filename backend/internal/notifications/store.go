@@ -18,6 +18,10 @@ import (
 // instead of one long one.
 const DefaultClaimBatch = 100
 
+// OutboxChannel is NOTIFYed when an event is queued, so the dispatcher drains
+// the outbox as the change commits.
+const OutboxChannel = "notification_outbox"
+
 // Store persists per-org notification subscriptions and owns the outbox queue.
 type Store struct {
 	db    database.DB
@@ -116,11 +120,14 @@ func (s *Store) Enqueue(ctx context.Context, q database.Querier, e Event) error 
 	if _, err := q.Exec(ctx, insert, e.OrgID, e.ActorUserID, e.Action, e.TargetType, e.TargetID, metadata); err != nil {
 		return fmt.Errorf("notifications: enqueue %s: %w", e.Action, err)
 	}
+	if err := database.Notify(ctx, q, OutboxChannel); err != nil {
+		return fmt.Errorf("notifications: wake dispatcher for %s: %w", e.Action, err)
+	}
 	return nil
 }
 
 // Claim takes up to limit queued events off the outbox, oldest first, and returns
-// them. The delete and the read are one statement, so two API replicas polling at
+// them. The delete and the read are one statement, so two API replicas draining at
 // the same time never hand the same event to a channel twice — and an event that
 // is claimed but not delivered is gone, which is the at-most-once delivery this
 // layer promises (see the package doc).

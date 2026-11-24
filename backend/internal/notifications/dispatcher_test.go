@@ -435,3 +435,51 @@ func TestDispatchReportsAFailureToReadTheQueue(t *testing.T) {
 		t.Fatal("DispatchPending succeeded, want the claim error")
 	}
 }
+
+// queueOutbox hands out its events a batch at a time until it is empty.
+type queueOutbox struct {
+	events []Event
+	calls  int
+}
+
+func (o *queueOutbox) Claim(_ context.Context, limit int) ([]Event, error) {
+	o.calls++
+	n := min(limit, len(o.events))
+	batch := o.events[:n]
+	o.events = o.events[n:]
+	return batch, nil
+}
+
+func TestRunDrainsEveryBatchThenWaits(t *testing.T) {
+	orgID := uuid.New()
+	outbox := &queueOutbox{}
+	for range 5 {
+		outbox.events = append(outbox.events, event(orgID, "membership.invited"))
+	}
+	mail := &stubChannel{id: ChannelEmail}
+	d := NewDispatcher(outbox, subscribed(orgID, "membership.invited", ChannelEmail))
+	d.Register(mail)
+	d.batch = 2
+
+	next, err := d.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !next.IsZero() {
+		t.Fatalf("Run next = %v, want only a notify to wake it", next)
+	}
+	if got := len(mail.received()); got != 5 {
+		t.Fatalf("delivered %d events, want all 5", got)
+	}
+	// Batches of 2, 2 and 1: the short one says the outbox is empty.
+	if outbox.calls != 3 {
+		t.Fatalf("claimed %d times, want 3", outbox.calls)
+	}
+}
+
+func TestRunReportsAClaimFailure(t *testing.T) {
+	d := NewDispatcher(&stubOutbox{err: errors.New("db down")}, &stubSubscriptions{})
+	if _, err := d.Run(context.Background()); err == nil {
+		t.Fatal("Run error = nil, want the claim failure for RunOnNotify to retry")
+	}
+}
