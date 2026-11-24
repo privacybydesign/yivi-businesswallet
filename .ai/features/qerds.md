@@ -224,9 +224,9 @@ settings.
 
 Because inbound delivery is automatic on the backend (poll worker / webhook push), the inbox does
 not depend on the manual "Check inbox" action to surface a new message: the messages query
-re-fetches on an interval (paused while the tab is hidden), and inbound messages that arrived since
-this browser last opened them show an unread count on the Inbox tab plus a marker on the row.
-Unread state is per-browser (localStorage) — an arrival signal, not an org-wide read receipt.
+re-fetches on an interval (paused while the tab is hidden), and inbound messages no member has
+opened yet show an unread count on the Inbox tab, in the sidebar, and as a marker on the row.
+Unread state is org-wide: opening an inbound message moves it from `received` to `read`.
 
 ---
 
