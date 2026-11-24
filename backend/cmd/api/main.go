@@ -34,6 +34,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/events"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/idscan"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/issuersettings"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/issuerstatus"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/logging"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/mailer"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/mailoauth"
@@ -356,15 +357,31 @@ type attestationIssuer interface {
 	RevokeCredential(context.Context, string, string) error
 }
 
-func newAttestationIssuer(cfg config.Config) (attestationIssuer, error) {
+// newAttestationIssuer builds the configured issuer; entries, when set, is the
+// status list the rulebook issuer reserves its entries in.
+func newAttestationIssuer(cfg config.Config, entries openid4vciissuer.StatusEntries) (attestationIssuer, error) {
 	iss, err := newDefaultAttestationIssuer(cfg)
 	if err != nil || cfg.AttestationRulebookIssuerURL == "" {
 		return iss, err
 	}
-	return openid4vciissuer.RulebookRouter{
-		Default:   iss,
-		Rulebooks: openid4vciissuer.NewEudiIssuer(cfg.AttestationRulebookIssuerURL, &http.Client{Timeout: issuerHTTPTimeout}),
-	}, nil
+	rulebooks := openid4vciissuer.NewEudiIssuer(cfg.AttestationRulebookIssuerURL, &http.Client{Timeout: issuerHTTPTimeout})
+	if entries != nil {
+		rulebooks = rulebooks.WithStatusList(entries)
+	}
+	return openid4vciissuer.RulebookRouter{Default: iss, Rulebooks: rulebooks}, nil
+}
+
+// newRulebookStatusList is the status list this backend keeps for the rulebook
+// issuer, or nil when none is configured.
+func newRulebookStatusList(cfg config.Config, pool database.DB) (*issuerstatus.Service, error) {
+	if cfg.AttestationRulebookStatusListAPIKey == "" {
+		return nil, nil
+	}
+	signer, err := walletunit.LoadSigner([]byte(cfg.AttestationRulebookIssuerCert), []byte(cfg.AttestationRulebookIssuerKey))
+	if err != nil {
+		return nil, fmt.Errorf("rulebook issuer status list signer: %w", err)
+	}
+	return issuerstatus.NewService(issuerstatus.NewStore(pool), signer, cfg.AppBaseURL), nil
 }
 
 func newDefaultAttestationIssuer(cfg config.Config) (attestationIssuer, error) {
@@ -464,6 +481,20 @@ func (a qerdsOfferSender) SendOfferDeclined(ctx context.Context, orgID uuid.UUID
 		return err
 	}
 	subject := fmt.Sprintf("Credential offer declined: %s", credentialName)
+	_, err = a.svc.Send(ctx, orgID, "", toAddress, subject, body, nil)
+	return err
+}
+
+func (a qerdsOfferSender) SendCredentialRevoked(ctx context.Context, orgID uuid.UUID, toAddress, credentialName, reason string) error {
+	org, err := a.orgs.GetByID(ctx, orgID)
+	if err != nil {
+		return err
+	}
+	body, err := attestation.MarshalCredentialRevokedEnvelope(org.Name, credentialName, reason)
+	if err != nil {
+		return err
+	}
+	subject := fmt.Sprintf("Credential revoked: %s", credentialName)
 	_, err = a.svc.Send(ctx, orgID, "", toAddress, subject, body, nil)
 	return err
 }
@@ -768,16 +799,18 @@ type wiring struct {
 	requesterHandler      *openid4vprequester.Handler
 	requestTemplates      *openid4vprequester.TemplateHandler
 	attestationHandler    *attestation.Handler
-	wscaWalletHandler     *wscawallet.Handler
-	walletUnitHandler     *walletunit.Handler
-	notificationsHandler  *notifications.Handler
-	slackHandler          *slackchannel.Handler
-	teamsHandler          *teamschannel.Handler
-	provisioningHandler   *provisioning.Handler
-	cscHandler            *csc.Handler
-	signingHandler        *signing.Handler
-	signingService        *signing.Service
-	signingAPIHandler     *signing.APIHandler
+	// issuerStatusHandler is nil without a rulebook status list.
+	issuerStatusHandler  *issuerstatus.Handler
+	wscaWalletHandler    *wscawallet.Handler
+	walletUnitHandler    *walletunit.Handler
+	notificationsHandler *notifications.Handler
+	slackHandler         *slackchannel.Handler
+	teamsHandler         *teamschannel.Handler
+	provisioningHandler  *provisioning.Handler
+	cscHandler           *csc.Handler
+	signingHandler       *signing.Handler
+	signingService       *signing.Service
+	signingAPIHandler    *signing.APIHandler
 	// yiviCSCHandler serves the wallet's own signing service; nil when it is off.
 	yiviCSCHandler  *yivicsc.Handler
 	proofingHandler *proofing.Handler
@@ -1007,7 +1040,16 @@ func (w *wiring) buildWallet(holder eudiholder.Holder) error {
 
 func (w *wiring) buildAttestations(ctx context.Context) error {
 	cfg := w.cfg
-	attIssuer, err := newAttestationIssuer(cfg)
+	rulebookStatus, err := newRulebookStatusList(cfg, w.pool)
+	if err != nil {
+		return err
+	}
+	var entries openid4vciissuer.StatusEntries
+	if rulebookStatus != nil {
+		entries = rulebookStatus
+		w.issuerStatusHandler = issuerstatus.NewHandler(rulebookStatus, cfg.AttestationRulebookStatusListAPIKey)
+	}
+	attIssuer, err := newAttestationIssuer(cfg, entries)
 	if err != nil {
 		return err
 	}
@@ -1068,7 +1110,8 @@ func (w *wiring) buildAttestations(ctx context.Context) error {
 	w.requesterHandler = openid4vprequester.NewHandler(
 		openid4vprequester.NewService(
 			requesterStore, w.qerdsService, requesterCA,
-			relyingparty.NewTokenVerifier(requesterIssuerTrust),
+			relyingparty.NewTokenVerifier(requesterIssuerTrust,
+				eudiholder.NewStatusListChecker(requesterIssuerTrust, cfg.AttestationHolderAllowInsecureHTTP)),
 			cfg.OpenID4VPRequesterPublicURL, cfg.OpenID4VPOrgRequestTTL),
 		w.requireUser, w.orgHandler.Authorize)
 	w.requestTemplates = openid4vprequester.NewTemplateHandler(requesterStore, w.requireUser, w.orgHandler.Authorize)
@@ -1084,21 +1127,25 @@ func (w *wiring) buildAttestations(ctx context.Context) error {
 	// org's holder engine and indexes it (source=qerds).
 	trustedSenders := attestation.NewTrustedOfferSenders(cfg.QerdsTrustedOfferSenders, cfg.QerdsTrustedOfferParties)
 	logQerdsInboundPolicy(ctx, cfg, trustedSenders)
+	attestationService := attestation.NewService(
+		attestationStore, attIssuer, issuerSettingsStore, w.emailService, qerdsOfferSender{svc: w.qerdsService, orgs: w.orgStore}, attestationStore, attestationStore, attHolder, cfg.AppBaseURL,
+	)
 	w.qerdsService.SetInboundConsumer(chainedInboundConsumer{
 		attestation.NewOfferReceiver(attestationStore, trustedSenders),
 		attestation.NewDeclineReceiver(attestationStore),
+		attestation.NewRevokedReceiver(attestationService),
 		openid4vppresenter.NewReceiver(presenterService),
 	})
 
 	// Drain inbound for every provisioned address on a ticker, so a remote party's
 	// credential offer is received without an operator being logged in.
 	startQerdsInboundPoller(ctx, w.qerdsService, cfg.QerdsInboundPollInterval)
-	attestationService := attestation.NewService(
-		attestationStore, attIssuer, issuerSettingsStore, w.emailService, qerdsOfferSender{svc: w.qerdsService, orgs: w.orgStore}, attestationStore, attestationStore, attHolder, cfg.AppBaseURL,
-	)
-	if !cfg.DevMode && !cfg.AttestationIssuerStatusList {
-		attestationService.RequireStatusList()
-	}
+	attestationService.SetStatusListPolicy(attestation.StatusListPolicy{
+		Enforce:        !cfg.DevMode,
+		Default:        cfg.AttestationIssuerStatusList,
+		RulebookRouted: cfg.AttestationRulebookIssuerURL != "",
+		Rulebook:       rulebookStatus != nil,
+	})
 	// Re-read the issuer status list of every held credential, so a credential
 	// revoked after it was received stops reading as valid. Deploys come more
 	// often than the interval, so it also runs at boot.
@@ -1506,6 +1553,9 @@ func (w *wiring) httpServer() *http.Server {
 	}
 	if w.yiviCSCHandler != nil {
 		features = append(features, w.yiviCSCHandler)
+	}
+	if w.issuerStatusHandler != nil {
+		features = append(features, w.issuerStatusHandler)
 	}
 	handler := server.New(w.pool, w.cfg.StaticDir, features...)
 	// Outermost, so every route and the SPA's page headers see the client

@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/statuslist"
 )
 
 // Wallet unit lifecycle.
@@ -33,7 +35,7 @@ const (
 const (
 	bwiaTyp       = "oauth-client-attestation+jwt"
 	skaTyp        = "key-attestation+jwt"
-	statusListTyp = "statuslist+jwt"
+	statusListTyp = statuslist.TokenTyp
 
 	// tokenTTL is the technical validity of a BWIA and SKA; CS-05 7.1 wants it
 	// under 24 hours and keeps them single-use.

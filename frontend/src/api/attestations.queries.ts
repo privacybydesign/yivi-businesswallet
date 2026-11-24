@@ -516,11 +516,16 @@ export function useIssueAttestationMutation(
 
 export function useRevokeIssuedAttestationMutation(
   slug: string,
-): UseMutationResult<IssuedAttestation, Error, { issuedId: string }> {
+): UseMutationResult<
+  IssuedAttestation,
+  Error,
+  { issuedId: string; reason: string }
+> {
   const queryClient = useQueryClient();
   const { t } = useTranslation();
   return useMutation({
-    mutationFn: ({ issuedId }) => revokeIssuedAttestation(slug, issuedId),
+    mutationFn: ({ issuedId, reason }) =>
+      revokeIssuedAttestation(slug, issuedId, reason),
     meta: { suppressErrorToast: true },
     onSuccess: (_data, { issuedId }) => {
       toast.success(t("toasts.attestationRevoked"));

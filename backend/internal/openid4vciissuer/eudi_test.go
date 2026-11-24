@@ -136,3 +136,58 @@ func TestRulebookRouterRoutesRulebookOffers(t *testing.T) {
 		t.Errorf("ping: %v", err)
 	}
 }
+
+// fakeEntries holds the issuance ids the issuer reserved a status entry for.
+type fakeEntries map[string]bool
+
+func (f fakeEntries) Taken(_ context.Context, issuanceID string) (bool, error) {
+	return f[issuanceID], nil
+}
+
+func TestEudiIssuerWithStatusList(t *testing.T) {
+	ctx := context.Background()
+	collected := EudiIssuanceID("state-1")
+	iss := NewEudiIssuer("http://unused", http.DefaultClient).WithStatusList(fakeEntries{collected: true})
+
+	st, err := iss.Status(ctx, "", collected)
+	if err != nil || st.Status != StatusIssued || st.CredentialUUID != collected {
+		t.Errorf("collected offer status = %+v, %v; want issued with its issuance id", st, err)
+	}
+	if st, err := iss.Status(ctx, "", EudiIssuanceID("state-2")); err != nil || st.Status != StatusPending {
+		t.Errorf("open offer status = %+v, %v; want pending", st, err)
+	}
+	if err := iss.RevokeCredential(ctx, "", collected); err != nil {
+		t.Errorf("revoke = %v, want nil: the ledger revoke flips the entry", err)
+	}
+}
+
+// revokeRecorder is a default issuer that records what it was asked to revoke.
+type revokeRecorder struct {
+	StubIssuer
+	revoked []string
+}
+
+func (r *revokeRecorder) RevokeCredential(_ context.Context, _, credentialUUID string) error {
+	r.revoked = append(r.revoked, credentialUUID)
+	return nil
+}
+
+func TestRulebookRouterRoutesRevocations(t *testing.T) {
+	ctx := context.Background()
+	def := &revokeRecorder{StubIssuer: NewStubIssuer()}
+	router := RulebookRouter{Default: def, Rulebooks: NewEudiIssuer("http://unused", http.DefaultClient)}
+
+	if err := router.RevokeCredential(ctx, "", EudiIssuanceID("state-1")); !errors.Is(err, ErrNoStatusListBit) {
+		t.Errorf("rulebook revoke without a status list = %v, want ErrNoStatusListBit", err)
+	}
+	if err := router.RevokeCredential(ctx, "", "veramo-uuid"); err != nil || len(def.revoked) != 1 || def.revoked[0] != "veramo-uuid" {
+		t.Errorf("own revoke = %v, default got %v", err, def.revoked)
+	}
+	if router.RulebookStatusList() {
+		t.Error("RulebookStatusList = true without a status list")
+	}
+	router.Rulebooks = router.Rulebooks.WithStatusList(fakeEntries{})
+	if !router.RulebookStatusList() {
+		t.Error("RulebookStatusList = false with a status list")
+	}
+}

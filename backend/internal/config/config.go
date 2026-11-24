@@ -190,6 +190,12 @@ const (
 	// WE BUILD rulebook credentials, v0.9.4 up to v0.10.1 (see EudiIssuer). Empty
 	// sends them to the issuer above.
 	envAttestationRulebookIssuerURL = "ATTESTATION_RULEBOOK_ISSUER_URL"
+	// The status list this backend keeps for that issuer: the API key the issuer
+	// reserves entries with, and the issuer's own certificate (PEM chain, leaf
+	// first) and key, which sign the lists. All three or none.
+	envAttestationRulebookStatusListAPIKey = "ATTESTATION_RULEBOOK_STATUS_LIST_API_KEY"
+	envAttestationRulebookIssuerCert       = "ATTESTATION_RULEBOOK_ISSUER_CERT"
+	envAttestationRulebookIssuerKey        = "ATTESTATION_RULEBOOK_ISSUER_KEY"
 	// envAttestationIssuerStatusList says the issuer puts every credential on a
 	// Token Status List; without it only a local stack issues one valid over 24h.
 	envAttestationIssuerStatusList = "ATTESTATION_ISSUER_STATUS_LIST"
@@ -573,6 +579,11 @@ type Config struct {
 	// AttestationRulebookIssuerURL is the EU reference issuer for WE BUILD
 	// rulebook credentials; empty sends them to AttestationIssuer.
 	AttestationRulebookIssuerURL string
+	// AttestationRulebookStatusListAPIKey, Cert and Key are the envAttestationRulebook*
+	// status list settings; set means rulebook credentials are revocable.
+	AttestationRulebookStatusListAPIKey string
+	AttestationRulebookIssuerCert       string
+	AttestationRulebookIssuerKey        string
 	// AttestationIssuerStatusList is envAttestationIssuerStatusList.
 	AttestationIssuerStatusList bool
 	// AttestationStubClaimDelay is how long the stub issuer reports an offer
@@ -960,6 +971,9 @@ func loadAttestationIssuer(c *Config) error {
 	c.AttestationIssuerURL = os.Getenv(envAttestationIssuerURL)
 	c.AttestationIssuerInstance = os.Getenv(envAttestationIssuerInstance)
 	c.AttestationIssuerStatusList = strings.EqualFold(os.Getenv(envAttestationIssuerStatusList), "true")
+	if err := loadRulebookStatusList(c); err != nil {
+		return err
+	}
 	if c.AttestationIssuer == IssuerStub {
 		if c.AttestationIssuerStatusList {
 			return fmt.Errorf("config: %s=true needs a real issuer: %s=%q keeps no status list", envAttestationIssuerStatusList, envAttestationIssuer, IssuerStub)
@@ -971,6 +985,27 @@ func loadAttestationIssuer(c *Config) error {
 	}
 	if c.AttestationIssuerInstance == "" {
 		return fmt.Errorf("config: %s must be set when %s is not %q", envAttestationIssuerInstance, envAttestationIssuer, IssuerStub)
+	}
+	return nil
+}
+
+func loadRulebookStatusList(c *Config) error {
+	c.AttestationRulebookStatusListAPIKey = os.Getenv(envAttestationRulebookStatusListAPIKey)
+	c.AttestationRulebookIssuerCert = os.Getenv(envAttestationRulebookIssuerCert)
+	c.AttestationRulebookIssuerKey = os.Getenv(envAttestationRulebookIssuerKey)
+	set := 0
+	for _, v := range []string{c.AttestationRulebookStatusListAPIKey, c.AttestationRulebookIssuerCert, c.AttestationRulebookIssuerKey} {
+		if v != "" {
+			set++
+		}
+	}
+	switch {
+	case set == 0:
+		return nil
+	case set < 3:
+		return fmt.Errorf("config: %s, %s and %s must be set together", envAttestationRulebookStatusListAPIKey, envAttestationRulebookIssuerCert, envAttestationRulebookIssuerKey)
+	case c.AttestationRulebookIssuerURL == "":
+		return fmt.Errorf("config: the rulebook status list needs %s", envAttestationRulebookIssuerURL)
 	}
 	return nil
 }

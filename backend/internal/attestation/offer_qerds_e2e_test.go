@@ -319,6 +319,10 @@ func (r *declineRecorder) SendOfferDeclined(_ context.Context, _ uuid.UUID, toAd
 	return nil
 }
 
+func (*declineRecorder) SendCredentialRevoked(context.Context, uuid.UUID, string, string, string) error {
+	return nil
+}
+
 // Declining is the other half of the acceptance requirement: the credential must
 // never reach the wallet, and the decision must be final.
 func TestDeclineOfferNeverLoadsTheCredential(t *testing.T) {

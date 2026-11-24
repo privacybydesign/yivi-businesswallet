@@ -3623,6 +3623,7 @@ export const en = {
     },
     kinds: {
       credential_offer: "Credential offer",
+      credential_revoked: "Credential revoked",
       event_notification: "Event notification",
       identity_overdue: "Identity overdue",
       identity_proofing_requested: "Identity proofing requested",
@@ -3641,6 +3642,8 @@ export const en = {
     kindDescriptions: {
       credential_offer:
         "Sent to a person when this organization issues them a credential.",
+      credential_revoked:
+        "Sent to a person when this organization revokes a credential it issued them, with the reason.",
       event_notification:
         "Sent to this organization's admins when something happens that they subscribed to.",
       identity_overdue:
@@ -4284,6 +4287,13 @@ export const en = {
       empty: "No attestations issued yet.",
       cancel: "Cancel offer",
       revoke: "Revoke",
+      revokeDialog: {
+        title: "Revoke credential",
+        hint: "The holder is told this credential is revoked, and why. Revoking cannot be undone.",
+        reasonLabel: "Reason",
+        reasonPlaceholder: "Why is it revoked? The holder reads this.",
+        confirm: "Revoke credential",
+      },
       columns: {
         recipient: "Recipient",
         schema: "Schema",
@@ -4555,6 +4565,8 @@ export const en = {
       error: "Could not save the template: {{message}}",
       statusListRequired:
         "A validity over 24 hours needs a status list to revoke the credential on, and this environment has none. Enter 86400 seconds or less.",
+      rulebookStatusListRequired:
+        "Rulebook credentials get their validity from the rulebook issuer, and it has no status list to revoke them on in this environment. Rulebook templates cannot be saved until it has one.",
     },
     sources: {
       givenNames: "Recipient · first name",
@@ -4629,6 +4641,8 @@ export const en = {
       invalidClaims: "The claims do not match the rulebook. {{message}}",
       statusListRequired:
         "This template's validity is over 24 hours, which needs a status list to revoke the credential on, and this environment has none. Set the template's validity to 24 hours or less.",
+      rulebookStatusListRequired:
+        "The rulebook issuer has no status list to revoke this credential on in this environment, so rulebook credentials cannot be issued until it has one.",
       rulebookClaimsIntro:
         "This template follows a WE BUILD rulebook. Edit the claims as JSON. They start from the rulebook's example and are checked against the rulebook when you issue.",
       rulebookClaimsLabel: "Claims (JSON)",

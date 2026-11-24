@@ -12,6 +12,12 @@ func sampleVars(kind Kind) map[string]string {
 	switch kind {
 	case KindCredentialOffer:
 		return offerVars()
+	case KindCredentialRevoked:
+		return map[string]string{
+			varOrgName:        "Acme BV",
+			varCredentialName: "Employee badge",
+			varReason:         "You no longer work at Acme.",
+		}
 	case KindInvitation:
 		return map[string]string{
 			varOrgName:   "Acme BV",

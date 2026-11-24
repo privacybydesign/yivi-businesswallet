@@ -1920,6 +1920,85 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/v1/attestations/status-lists/take:
+    post:
+      tags: [attestation]
+      summary: Reserve a status list entry for a rulebook credential
+      description: >-
+        Called by the EU reference issuer (its `revocation.take_url`) while it signs a
+        rulebook credential. Reserves a random free entry tied to the offer whose
+        issuance id is `eudi:<issuer_state>` and returns the `status` claim to embed.
+        Only routed when the rulebook status list is configured.
+      security:
+        - issuerStatusKey: []
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [issuer_state]
+              properties:
+                issuer_state:
+                  type: string
+                  description: The offer's issuer_state.
+                expiry_date:
+                  type: string
+                  format: date
+                  description: The credential's expiry.
+                doctype:
+                  type: string
+                country:
+                  type: string
+      responses:
+        '200':
+          description: The status claim for the credential.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status_list]
+                properties:
+                  status_list:
+                    type: object
+                    required: [idx, uri]
+                    properties:
+                      idx:
+                        type: integer
+                      uri:
+                        type: string
+                        format: uri
+        '400':
+          description: No issuer_state, or an expiry_date that is not a date.
+        '401':
+          description: A missing or wrong API key.
+        '404':
+          description: No open offer with that issuer_state.
+  /api/v1/attestations/status-lists/{list}:
+    parameters:
+      - name: list
+        in: path
+        required: true
+        schema:
+          type: integer
+        description: Status list number.
+    get:
+      tags: [attestation]
+      summary: Get a rulebook credential status list
+      description: >-
+        Public. The Token Status List (1 bit per entry) the `status` claim of a
+        rulebook credential points to, signed with the rulebook issuer's key as an
+        `application/statuslist+jwt`. 404 for an unknown list.
+      security: []
+      responses:
+        '200':
+          description: The signed status list token.
+          content:
+            application/statuslist+jwt:
+              schema:
+                type: string
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/v1/orgs/{slug}/attestations:
     parameters:
       - name: slug
@@ -2983,14 +3062,23 @@ paths:
         `revoked`. This is the path backed by the issuer's IETF Token Status
         List. Unclaimed offers are withdrawn via cancel instead. Requires an
         administrator role. Returns 409 when the attestation is not a claimed
-        credential.
+        credential. The holder is told of the revocation and its reason (WE BUILD
+        CS-10 ISS-RV-09): an organization over QERDS, a person by e-mail. The
+        response carries the reason as `revocationReason`.
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              description: JSON request payload; see the endpoint description.
+              required: [reason]
+              properties:
+                reason:
+                  type: string
+                  maxLength: 500
+                  description: >-
+                    Why the credential is revoked, in plain language; sent to the holder.
+                    400 `reason_required` when empty, `reason_too_long` over 500 characters.
       responses:
         '2XX':
           description: Successful response.
@@ -16270,6 +16358,11 @@ components:
       type: apiKey
       in: cookie
       name: ybw_session
+    issuerStatusKey:
+      type: apiKey
+      in: header
+      name: X-Api-Key
+      description: The key the EU reference issuer reserves rulebook status list entries with.
   schemas:
     SigningApiRequest:
       type: object

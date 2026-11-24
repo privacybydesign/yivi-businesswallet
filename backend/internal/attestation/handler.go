@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 
@@ -58,10 +60,10 @@ type handlerStore interface {
 
 type issuanceService interface {
 	Issue(ctx context.Context, orgID uuid.UUID, issuedBy *uuid.UUID, orgName string, in IssueInput) (IssueResult, error)
-	CheckValidity(validitySeconds *int) error
+	CheckValidity(validitySeconds *int, rulebook bool) error
 	Status(ctx context.Context, orgID, id uuid.UUID) (Issued, error)
 	ListIssued(ctx context.Context, orgID uuid.UUID) ([]Issued, error)
-	Revoke(ctx context.Context, orgID, id uuid.UUID) (Issued, error)
+	Revoke(ctx context.Context, orgID, id uuid.UUID, in RevokeInput) (Issued, error)
 	Cancel(ctx context.Context, orgID, id uuid.UUID) (Issued, error)
 	ClaimStatus(ctx context.Context, token string) (ClaimView, error)
 	DeleteHeld(ctx context.Context, orgID, id uuid.UUID) error
@@ -792,19 +794,18 @@ func (h *Handler) createTemplate(w http.ResponseWriter, r *http.Request) error {
 		return badRequest("invalid_input", "invalid keyMaterialId")
 	}
 
-	if err := h.checkValidity(req.ValiditySeconds); err != nil {
+	org := organization.OrgFromContext(r.Context())
+	sc, err := h.schemas.GetSchema(r.Context(), org.ID, schemaID)
+	if errors.Is(err, ErrSchemaNotFound) {
+		return badRequest("invalid_input", "schema not found")
+	}
+	if err != nil {
+		return fmt.Errorf("resolving schema for template: %w", err)
+	}
+	if err := h.checkValidity(req.ValiditySeconds, sc.Rulebook != ""); err != nil {
 		return err
 	}
-
-	org := organization.OrgFromContext(r.Context())
 	if len(req.AttributeSources) > 0 {
-		sc, err := h.schemas.GetSchema(r.Context(), org.ID, schemaID)
-		if errors.Is(err, ErrSchemaNotFound) {
-			return badRequest("invalid_input", "schema not found")
-		}
-		if err != nil {
-			return fmt.Errorf("resolving schema for template attribute sources: %w", err)
-		}
 		if err := ValidateAttributeSources(sc.SubjectType, sc.Attributes, req.AttributeSources); err != nil {
 			return badRequest("invalid_input", err.Error())
 		}
@@ -838,22 +839,21 @@ func (h *Handler) updateTemplate(w http.ResponseWriter, r *http.Request) error {
 		return badRequest("invalid_input", "invalid keyMaterialId")
 	}
 
+	org := organization.OrgFromContext(r.Context())
+	existing, err := h.templates.GetTemplate(r.Context(), org.ID, id)
+	if errors.Is(err, ErrTemplateNotFound) {
+		return notFound("template_not_found", "template not found")
+	}
+	if err != nil {
+		return fmt.Errorf("resolving template: %w", err)
+	}
 	// Archiving keeps whatever validity the template already had.
 	if req.Status != TemplateArchived {
-		if err := h.checkValidity(req.ValiditySeconds); err != nil {
+		if err := h.checkValidity(req.ValiditySeconds, existing.Rulebook != ""); err != nil {
 			return err
 		}
 	}
-
-	org := organization.OrgFromContext(r.Context())
 	if len(req.AttributeSources) > 0 {
-		existing, err := h.templates.GetTemplate(r.Context(), org.ID, id)
-		if errors.Is(err, ErrTemplateNotFound) {
-			return notFound("template_not_found", "template not found")
-		}
-		if err != nil {
-			return fmt.Errorf("resolving template for attribute sources: %w", err)
-		}
 		if err := ValidateAttributeSources(existing.SubjectType, existing.Attributes, req.AttributeSources); err != nil {
 			return badRequest("invalid_input", err.Error())
 		}
@@ -889,16 +889,19 @@ func (h *Handler) deleteTemplate(w http.ResponseWriter, r *http.Request) error {
 }
 
 // checkValidity answers a validity the deployment may not issue.
-func (h *Handler) checkValidity(validitySeconds *int) error {
-	if err := h.service.CheckValidity(validitySeconds); errors.Is(err, ErrStatusListRequired) {
-		return statusListRequired()
+func (h *Handler) checkValidity(validitySeconds *int, rulebook bool) error {
+	if err := h.service.CheckValidity(validitySeconds, rulebook); errors.Is(err, ErrStatusListRequired) || errors.Is(err, ErrRulebookStatusListRequired) {
+		return statusListError(err)
 	} else if err != nil {
 		return fmt.Errorf("checking template validity: %w", err)
 	}
 	return nil
 }
 
-func statusListRequired() error {
+func statusListError(err error) error {
+	if errors.Is(err, ErrRulebookStatusListRequired) {
+		return badRequest("rulebook_status_list_required", "rulebook credentials need their issuer to publish a status list")
+	}
 	return badRequest("status_list_required", "a validity over 24 hours needs an issuer that publishes a status list")
 }
 
@@ -1091,8 +1094,8 @@ func (h *Handler) issue(w http.ResponseWriter, r *http.Request) error {
 		return badRequest("invalid_attribute", err.Error())
 	case errors.Is(err, rulebook.ErrInvalidClaims):
 		return badRequest("invalid_claims", err.Error())
-	case errors.Is(err, ErrStatusListRequired):
-		return statusListRequired()
+	case errors.Is(err, ErrStatusListRequired), errors.Is(err, ErrRulebookStatusListRequired):
+		return statusListError(err)
 	case err != nil:
 		return fmt.Errorf("issuing attestation: %w", err)
 	}
@@ -1105,8 +1108,12 @@ func (h *Handler) revoke(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
+	reason, err := decodeRevokeReason(r.Body)
+	if err != nil {
+		return err
+	}
 	org := organization.OrgFromContext(r.Context())
-	issued, err := h.service.Revoke(r.Context(), org.ID, id)
+	issued, err := h.service.Revoke(r.Context(), org.ID, id, RevokeInput{Reason: reason, IssuerName: org.Name})
 	switch {
 	case errors.Is(err, ErrIssuedNotFound):
 		return notFound("attestation_not_found", "attestation not found")
@@ -1117,6 +1124,25 @@ func (h *Handler) revoke(w http.ResponseWriter, r *http.Request) error {
 	}
 	respond.JSON(w, r, http.StatusOK, issued)
 	return nil
+}
+
+// decodeRevokeReason reads the reason a revocation must give, which the holder
+// is told (CS-10 ISS-RV-09).
+func decodeRevokeReason(body io.Reader) (string, error) {
+	var req struct {
+		Reason string `json:"reason"`
+	}
+	if err := json.NewDecoder(body).Decode(&req); err != nil {
+		return "", badRequest("invalid_body", "invalid request body")
+	}
+	reason := strings.TrimSpace(req.Reason)
+	switch {
+	case reason == "":
+		return "", badRequest("reason_required", "a revocation needs a reason, which the holder is told")
+	case utf8.RuneCountInString(reason) > MaxRevocationReasonLength:
+		return "", badRequest("reason_too_long", fmt.Sprintf("the reason is at most %d characters", MaxRevocationReasonLength))
+	}
+	return reason, nil
 }
 
 func (h *Handler) cancel(w http.ResponseWriter, r *http.Request) error {

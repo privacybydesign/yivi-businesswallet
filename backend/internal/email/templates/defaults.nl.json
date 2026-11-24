@@ -74,6 +74,7 @@
     "attestation.key_added": "Attestatiesleutel toegevoegd",
     "attestation.key_suspended": "Attestatiesleutel opgeschort",
     "attestation.key_revoked": "Attestatiesleutel ingetrokken",
+    "attestation.held_status_changed": "Status van ontvangen credential gewijzigd",
 
     "signing.requested": "Ondertekening aangevraagd",
     "signing.completed": "Ondertekening voltooid",
@@ -89,6 +90,16 @@
         { "type": "paragraph", "text": "{{credentialName}} staat klaar om aan je wallet toe te voegen." },
         { "type": "button", "label": "Voeg het toe aan je wallet", "url": "{{claimUrl}}" },
         { "type": "paragraph", "text": "Je wallet vraagt om deze code: {{txCode}}" },
+        { "type": "footer" }
+      ]
+    },
+    "credential_revoked": {
+      "subject": "{{orgName}} heeft je credential ingetrokken: {{credentialName}}",
+      "blocks": [
+        { "type": "logo" },
+        { "type": "heading", "text": "{{orgName}} heeft je credential ingetrokken" },
+        { "type": "paragraph", "text": "{{credentialName}} is niet meer geldig. {{orgName}} gaf deze reden:" },
+        { "type": "paragraph", "text": "{{reason}}" },
         { "type": "footer" }
       ]
     },

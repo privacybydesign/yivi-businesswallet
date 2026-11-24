@@ -114,6 +114,9 @@ function inlineError(error: Error, t: TFunction): string {
   if (code === "status_list_required") {
     return t("attestations.wizard.statusListRequired");
   }
+  if (code === "rulebook_status_list_required") {
+    return t("attestations.wizard.rulebookStatusListRequired");
+  }
   return error.message;
 }
 

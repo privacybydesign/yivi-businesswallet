@@ -573,6 +573,35 @@ func TestLoadStatusListNeedsRealIssuer(t *testing.T) {
 	}
 }
 
+// The rulebook status list is three settings that only make sense together, and
+// only next to the rulebook issuer.
+func TestLoadRulebookStatusList(t *testing.T) {
+	all := map[string]string{
+		envAttestationRulebookIssuerURL:        "https://eudi-issuer.example",
+		envAttestationRulebookStatusListAPIKey: "key",
+		envAttestationRulebookIssuerCert:       "cert",
+		envAttestationRulebookIssuerKey:        "pem",
+	}
+	t.Run("all set", func(t *testing.T) {
+		cfg, err := loadWith(t, all)
+		if err != nil {
+			t.Fatalf("loading the full rulebook status list: %v", err)
+		}
+		if cfg.AttestationRulebookStatusListAPIKey != "key" || cfg.AttestationRulebookIssuerCert != "cert" || cfg.AttestationRulebookIssuerKey != "pem" {
+			t.Errorf("rulebook status list = %q, %q, %q", cfg.AttestationRulebookStatusListAPIKey, cfg.AttestationRulebookIssuerCert, cfg.AttestationRulebookIssuerKey)
+		}
+	})
+	for _, drop := range []string{envAttestationRulebookIssuerURL, envAttestationRulebookStatusListAPIKey, envAttestationRulebookIssuerCert, envAttestationRulebookIssuerKey} {
+		t.Run("without "+drop, func(t *testing.T) {
+			env := maps.Clone(all)
+			delete(env, drop)
+			if _, err := loadWith(t, env); err == nil {
+				t.Errorf("loaded without %s, want an error", drop)
+			}
+		})
+	}
+}
+
 // localStack is the APP_BASE_URL of a local developer stack.
 const localStack = "http://localhost:5173"
 

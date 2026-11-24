@@ -24,6 +24,9 @@ const (
 	// KindCredentialOffer is sent when an org issues a credential to a natural
 	// person, linking to the claim page.
 	KindCredentialOffer Kind = "credential_offer"
+	// KindCredentialRevoked tells a natural person that an org revoked a
+	// credential it issued them, and why.
+	KindCredentialRevoked Kind = "credential_revoked"
 	// KindInvitation is sent when an org admin invites someone to join the org.
 	KindInvitation Kind = "invitation"
 	// KindPostguardFile is sent on the PostGuard "own SMTP" delivery path, linking
@@ -121,6 +124,11 @@ var kindVariables = map[Kind][]Variable{
 		{Name: varCredentialName},
 		{Name: varClaimURL, IsURL: true},
 		{Name: varTxCode},
+	},
+	KindCredentialRevoked: {
+		{Name: varOrgName},
+		{Name: varCredentialName},
+		{Name: varReason},
 	},
 	KindInvitation: {
 		{Name: varOrgName},

@@ -407,14 +407,21 @@ export function AttestationTemplateForm({
             role="alert"
             className="rounded-yivi bg-error-bg text-error px-3 py-2 text-[13px]"
           >
-            {apiErrorCode(mutationError) === "status_list_required"
-              ? t("attestations.templateForm.statusListRequired")
-              : t("attestations.templateForm.error", {
-                  message: mutationError.message,
-                })}
+            {templateErrorText(mutationError, t)}
           </p>
         )}
       </form>
     </Modal>
   );
+}
+
+function templateErrorText(error: Error, t: TFunction): string {
+  switch (apiErrorCode(error)) {
+    case "status_list_required":
+      return t("attestations.templateForm.statusListRequired");
+    case "rulebook_status_list_required":
+      return t("attestations.templateForm.rulebookStatusListRequired");
+    default:
+      return t("attestations.templateForm.error", { message: error.message });
+  }
 }

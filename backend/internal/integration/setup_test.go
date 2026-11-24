@@ -139,6 +139,10 @@ func (f *fakeVerifier) Status(_ context.Context, _ string) (string, error) {
 // without sending anything (delivery is best-effort and not the unit under test).
 type stubEmailNotifier struct{}
 
+func (stubEmailNotifier) SendCredentialRevoked(_ context.Context, _ uuid.UUID, _, _, _, _ string) error {
+	return nil
+}
+
 func (stubEmailNotifier) SendCredentialOffer(_ context.Context, _ uuid.UUID, _, _, _, _, _ string) error {
 	return nil
 }
@@ -150,6 +154,10 @@ func (stubQerdsNotifier) SendCredentialOffer(_ context.Context, _ uuid.UUID, _, 
 }
 
 func (stubQerdsNotifier) SendOfferDeclined(_ context.Context, _ uuid.UUID, _, _, _ string) error {
+	return nil
+}
+
+func (stubQerdsNotifier) SendCredentialRevoked(_ context.Context, _ uuid.UUID, _, _, _ string) error {
 	return nil
 }
 

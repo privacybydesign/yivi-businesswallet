@@ -20,6 +20,7 @@ import {
 import { toast } from "../lib/toast";
 import { Button, Card, Icon, Tag, TopBar } from "../ui";
 import * as React from "react";
+import { envelopeMessage } from "../lib/qerds-envelope";
 
 const EYEBROW =
   "text-muted font-label text-[11px] font-medium tracking-[0.06em] uppercase";
@@ -336,6 +337,20 @@ export default function QerdsMessage(): React.JSX.Element {
                 <p className="text-ink-soft mt-2 text-[14px] italic">
                   {t("qerds.message.noBody")}
                 </p>
+              ) : envelopeMessage(message.body) !== null ? (
+                <>
+                  <p className="text-ink mt-2 text-[14px] whitespace-pre-wrap">
+                    {envelopeMessage(message.body)}
+                  </p>
+                  <details className="mt-4">
+                    <summary className="text-link cursor-pointer text-[11.5px]">
+                      {t("qerds.offer.rawEnvelope")}
+                    </summary>
+                    <pre className="bg-surface-2 border-line text-ink-soft mt-1.5 overflow-x-auto rounded-md border p-2.5 font-mono text-[11px] break-all whitespace-pre-wrap">
+                      {message.body}
+                    </pre>
+                  </details>
+                </>
               ) : (
                 <p className="text-ink mt-2 text-[14px] whitespace-pre-wrap">
                   {message.body}

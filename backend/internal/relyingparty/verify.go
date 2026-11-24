@@ -1,6 +1,7 @@
 package relyingparty
 
 import (
+	"context"
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/sha256"
@@ -17,6 +18,7 @@ import (
 	"github.com/lestrrat-go/jwx/v3/jwk"
 	"github.com/lestrrat-go/jwx/v3/jws"
 	"github.com/privacybydesign/irmago/eudi/credentials/sdjwtvc"
+	"github.com/privacybydesign/irmago/eudi/credentials/statuslist"
 	"github.com/privacybydesign/irmago/eudi/didjwk"
 	"github.com/privacybydesign/irmago/eudi/didkey"
 	eudijwt "github.com/privacybydesign/irmago/eudi/jwt"
@@ -88,9 +90,11 @@ func ParseVPToken(raw string) (map[string][]string, error) {
 // key-binding JWT against the credential's cnf key — given as a JWK or as a
 // did:key / did:jwk kid, the form the Veramo issuer uses and irmago's own
 // verifier check does not yet resolve — with the expected nonce and audience
-// (the verifier's client_id). A presentation that fails is still decoded so the
-// page can show what arrived next to why it was refused.
-func VerifyVPToken(token map[string][]string, issuerTrust eudijwt.X509VerificationContext, nonce, clientID string) []Presented {
+// (the verifier's client_id). With a status checker, a credential carrying a
+// status list is refused unless its entry reads valid (CS-10 RP-RV-01..03). A
+// presentation that fails is still decoded so the page can show what arrived
+// next to why it was refused.
+func VerifyVPToken(ctx context.Context, token map[string][]string, issuerTrust eudijwt.X509VerificationContext, status StatusChecker, nonce, clientID string) []Presented {
 	processor := sdjwtvc.NewVerifierVerificationProcessor(false, sdjwtvc.SdJwtVcVerificationContext{
 		X509VerificationContext: issuerTrust,
 		Clock:                   eudijwt.NewSystemClock(),
@@ -101,6 +105,9 @@ func VerifyVPToken(token map[string][]string, issuerTrust eudijwt.X509Verificati
 		for _, raw := range presentations {
 			p := Presented{QueryID: queryID, Raw: raw}
 			verified, err := verifyPresentation(processor, raw, nonce, clientID)
+			if err == nil {
+				err = checkStatus(ctx, status, verified.IssuerSignedJwtPayload.Status)
+			}
 			if err != nil {
 				p.Error = err.Error()
 				p.VCT, p.Issuer, p.Claims = decodeUnverified(raw)
@@ -114,6 +121,28 @@ func VerifyVPToken(token map[string][]string, issuerTrust eudijwt.X509Verificati
 		}
 	}
 	return out
+}
+
+// StatusChecker reads a credential's entry on its issuer's Token Status List.
+type StatusChecker interface {
+	Check(ctx context.Context, ref statuslist.Reference) (statuslist.Status, error)
+}
+
+// checkStatus refuses a credential whose status list entry is not valid, or
+// whose list cannot be read and verified. A credential without a status list
+// passes; a nil checker checks nothing.
+func checkStatus(ctx context.Context, status StatusChecker, claim *statuslist.StatusClaim) error {
+	if status == nil || claim == nil || claim.StatusList == nil {
+		return nil
+	}
+	st, err := status.Check(ctx, *claim.StatusList)
+	if err != nil {
+		return fmt.Errorf("status list: %w", err)
+	}
+	if st != statuslist.StatusValid {
+		return fmt.Errorf("status list: credential is %s", st)
+	}
+	return nil
 }
 
 // verifyPresentation splits the KB-JWT off, lets irmago verify the SD-JWT VC it
@@ -294,13 +323,14 @@ var ErrNoPresentations = errors.New("relyingparty: vp_token holds no presentatio
 // takes the verification step as a seam.
 type TokenVerifier struct {
 	issuerTrust eudijwt.X509VerificationContext
+	status      StatusChecker
 }
 
-func NewTokenVerifier(issuerTrust eudijwt.X509VerificationContext) TokenVerifier {
-	return TokenVerifier{issuerTrust: issuerTrust}
+func NewTokenVerifier(issuerTrust eudijwt.X509VerificationContext, status StatusChecker) TokenVerifier {
+	return TokenVerifier{issuerTrust: issuerTrust, status: status}
 }
 
-// Verify runs VerifyVPToken against the bound issuer trust.
-func (v TokenVerifier) Verify(token map[string][]string, nonce, clientID string) []Presented {
-	return VerifyVPToken(token, v.issuerTrust, nonce, clientID)
+// Verify runs VerifyVPToken against the bound issuer trust and status checker.
+func (v TokenVerifier) Verify(ctx context.Context, token map[string][]string, nonce, clientID string) []Presented {
+	return VerifyVPToken(ctx, token, v.issuerTrust, v.status, nonce, clientID)
 }

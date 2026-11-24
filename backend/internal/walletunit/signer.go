@@ -112,7 +112,8 @@ func (s *Signer) RootPEM() []byte {
 // Leaf is the certificate the provider signs under.
 func (s *Signer) Leaf() *x509.Certificate { return s.chain[0] }
 
-func (s *Signer) sign(typ string, claims jwt.MapClaims) (string, error) {
+// Sign signs claims as a JWT of type typ, with the chain in its x5c header.
+func (s *Signer) Sign(typ string, claims jwt.MapClaims) (string, error) {
 	x5c := make([]string, len(s.chain))
 	for i, c := range s.chain {
 		x5c[i] = base64.StdEncoding.EncodeToString(c.Raw)

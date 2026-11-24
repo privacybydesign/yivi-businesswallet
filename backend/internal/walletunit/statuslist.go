@@ -1,12 +1,10 @@
 package walletunit
 
 import (
-	"bytes"
-	"compress/zlib"
-	"encoding/base64"
-	"fmt"
 	"strconv"
 	"time"
+
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/statuslist"
 )
 
 // Token Status List (draft-ietf-oauth-status-list-20, the version CS-05 8.2 pins).
@@ -47,27 +45,7 @@ func statusListURI(baseURL string, list int64) string {
 	return baseURL + statusListPath + strconv.FormatInt(list, 10)
 }
 
-// encodeStatusList packs statuses (list-local index → value) at statusBits per
-// entry, least significant bits first, and returns the zlib-compressed base64url lst.
+// encodeStatusList packs statuses (list-local index → value) into one list.
 func encodeStatusList(statuses map[int64]byte) (string, error) {
-	const perByte = 8 / statusBits
-	bits := make([]byte, statusListSize/perByte)
-	for idx, v := range statuses {
-		if idx < 0 || idx >= statusListSize {
-			return "", fmt.Errorf("walletunit: status index %d outside the list", idx)
-		}
-		bits[idx/perByte] |= v << (uint(idx%perByte) * statusBits)
-	}
-	var buf bytes.Buffer
-	zw, err := zlib.NewWriterLevel(&buf, zlib.BestCompression)
-	if err != nil {
-		return "", err
-	}
-	if _, err := zw.Write(bits); err != nil {
-		return "", err
-	}
-	if err := zw.Close(); err != nil {
-		return "", err
-	}
-	return base64.RawURLEncoding.EncodeToString(buf.Bytes()), nil
+	return statuslist.Encode(statuses, statusListSize, statusBits)
 }

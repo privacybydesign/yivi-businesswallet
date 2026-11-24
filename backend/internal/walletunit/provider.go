@@ -137,7 +137,7 @@ func (p *Provider) Issue(ctx context.Context, orgID uuid.UUID, req IssueRequest)
 		return Issued{}, err
 	}
 	var out Issued
-	if out.BWIA, err = p.signer.sign(bwiaTyp, p.cfg.bwiaClaims(unit.ID.String(), org, cnf, idx, now)); err != nil {
+	if out.BWIA, err = p.signer.Sign(bwiaTyp, p.cfg.bwiaClaims(unit.ID.String(), org, cnf, idx, now)); err != nil {
 		return Issued{}, err
 	}
 	if len(attested) == 0 {
@@ -148,7 +148,7 @@ func (p *Provider) Issue(ctx context.Context, orgID uuid.UUID, req IssueRequest)
 	if err != nil {
 		return Issued{}, err
 	}
-	if out.SKA, err = p.signer.sign(skaTyp, p.cfg.skaClaims(attested, idx, now)); err != nil {
+	if out.SKA, err = p.signer.Sign(skaTyp, p.cfg.skaClaims(attested, idx, now)); err != nil {
 		return Issued{}, err
 	}
 	return out, nil
@@ -167,7 +167,7 @@ func (p *Provider) StatusList(ctx context.Context, list int64) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return p.signer.sign(statusListTyp, p.cfg.statusListClaims(list, lst, p.now()))
+	return p.signer.Sign(statusListTyp, p.cfg.statusListClaims(list, lst, p.now()))
 }
 
 // bwiaClaims is the BWIA for unit, whose status entry is idx.

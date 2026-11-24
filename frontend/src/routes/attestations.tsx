@@ -60,6 +60,7 @@ import {
 } from "../ui";
 import type { IconName } from "../ui";
 import { AttestationIssueWizard } from "./attestations-issue";
+import { RevokeDialog } from "./attestations-revoke-dialog";
 import { AttestationRulebookImport } from "./attestations-rulebook-import";
 import { AttestationSchemaForm } from "./attestations-schema-form";
 import { AttestationTemplateForm } from "./attestations-template-form";
@@ -478,6 +479,7 @@ function IssuedTab({
   const { t } = useTranslation();
   const revoke = useRevokeIssuedAttestationMutation(slug);
   const cancel = useCancelIssuedAttestationMutation(slug);
+  const [revoking, setRevoking] = useState<string | null>(null);
   const columnCount = isAdmin ? ISSUED_COLUMN_COUNT : ISSUED_COLUMN_COUNT - 1;
 
   if (error) {
@@ -529,7 +531,11 @@ function IssuedTab({
                   {row.schemaVct}
                 </Table.Cell>
                 <Table.Cell>
-                  <Tag tone={issuedTone(row.status)} dot>
+                  <Tag
+                    tone={issuedTone(row.status)}
+                    dot
+                    title={row.revocationReason}
+                  >
                     <span className="capitalize">{row.status}</span>
                   </Tag>
                 </Table.Cell>
@@ -551,7 +557,10 @@ function IssuedTab({
                       <Button
                         variant="dangerGhost"
                         size="sm"
-                        onClick={() => revoke.mutate({ issuedId: row.id })}
+                        onClick={() => {
+                          revoke.reset();
+                          setRevoking(row.id);
+                        }}
                       >
                         {t("attestations.issued.revoke")}
                       </Button>
@@ -563,6 +572,19 @@ function IssuedTab({
           )}
         </Table.Body>
       </Table>
+      {revoking !== null && (
+        <RevokeDialog
+          busy={revoke.isPending}
+          error={revoke.error?.message}
+          onClose={() => setRevoking(null)}
+          onConfirm={(reason) =>
+            revoke.mutate(
+              { issuedId: revoking, reason },
+              { onSuccess: () => setRevoking(null) },
+            )
+          }
+        />
+      )}
     </Card>
   );
 }

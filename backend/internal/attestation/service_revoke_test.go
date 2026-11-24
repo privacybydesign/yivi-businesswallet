@@ -53,7 +53,7 @@ func (s *fakeStore) GetIssued(_ context.Context, _, _ uuid.UUID) (Issued, error)
 	return s.row, nil
 }
 
-func (s *fakeStore) Revoke(_ context.Context, _, _ uuid.UUID) (Issued, error) {
+func (s *fakeStore) Revoke(_ context.Context, _, _ uuid.UUID, _ string) (Issued, error) {
 	if !isRevocable(s.row.Status) {
 		return Issued{}, ErrNotOfferable
 	}
@@ -107,7 +107,7 @@ func TestRevokePropagatesToIssuer(t *testing.T) {
 	iss := &fakeIssuer{}
 	svc := newRevokeService(store, iss)
 
-	revoked, err := svc.Revoke(context.Background(), uuid.New(), uuid.New())
+	revoked, err := svc.Revoke(context.Background(), uuid.New(), uuid.New(), RevokeInput{Reason: "test"})
 	if err != nil {
 		t.Fatalf("Revoke: %v", err)
 	}
@@ -129,7 +129,7 @@ func TestRevokeAbortsWhenIssuerFails(t *testing.T) {
 	iss := &fakeIssuer{revokeErr: errors.New("status list unreachable")}
 	svc := newRevokeService(store, iss)
 
-	if _, err := svc.Revoke(context.Background(), uuid.New(), uuid.New()); err == nil {
+	if _, err := svc.Revoke(context.Background(), uuid.New(), uuid.New(), RevokeInput{Reason: "test"}); err == nil {
 		t.Fatalf("expected error when issuer revoke fails")
 	}
 	if store.revoked {
@@ -146,7 +146,7 @@ func TestRevokeDegradesWhenNoStatusListBit(t *testing.T) {
 	iss := &fakeIssuer{revokeErr: openid4vciissuer.ErrNoStatusListBit}
 	svc := newRevokeService(store, iss)
 
-	revoked, err := svc.Revoke(context.Background(), uuid.New(), uuid.New())
+	revoked, err := svc.Revoke(context.Background(), uuid.New(), uuid.New(), RevokeInput{Reason: "test"})
 	if err != nil {
 		t.Fatalf("Revoke should degrade to local-only when the issuer has no status-list bit, got: %v", err)
 	}

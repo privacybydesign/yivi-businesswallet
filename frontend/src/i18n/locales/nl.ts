@@ -3714,6 +3714,7 @@ export const nl: Translation<typeof en> = {
     },
     kinds: {
       credential_offer: "Credential uitgegeven",
+      credential_revoked: "Credential ingetrokken",
       event_notification: "Melding van een gebeurtenis",
       identity_overdue: "Identiteit verlopen",
       identity_proofing_requested: "Identiteitsverificatie gevraagd",
@@ -3732,6 +3733,8 @@ export const nl: Translation<typeof en> = {
     kindDescriptions: {
       credential_offer:
         "Gaat naar een persoon als deze organisatie een credential aan die persoon uitgeeft.",
+      credential_revoked:
+        "Verstuurd naar een persoon wanneer deze organisatie een uitgegeven credential intrekt, met de reden.",
       event_notification:
         "Gaat naar de beheerders van deze organisatie als er iets gebeurt waarop zij zich hebben geabonneerd.",
       identity_overdue:
@@ -4387,6 +4390,13 @@ export const nl: Translation<typeof en> = {
       empty: "Nog geen attestaties uitgegeven.",
       cancel: "Aanbod annuleren",
       revoke: "Intrekken",
+      revokeDialog: {
+        title: "Credential intrekken",
+        hint: "De houder krijgt te horen dat deze credential is ingetrokken, en waarom. Intrekken kan niet ongedaan worden gemaakt.",
+        reasonLabel: "Reden",
+        reasonPlaceholder: "Waarom wordt hij ingetrokken? De houder leest dit.",
+        confirm: "Credential intrekken",
+      },
       columns: {
         recipient: "Ontvanger",
         schema: "Schema",
@@ -4660,6 +4670,8 @@ export const nl: Translation<typeof en> = {
       error: "Het sjabloon opslaan mislukt: {{message}}",
       statusListRequired:
         "Een geldigheid van meer dan 24 uur vereist een statuslijst om de credential op in te trekken, en die heeft deze omgeving niet. Vul 86400 seconden of minder in.",
+      rulebookStatusListRequired:
+        "Rulebook-credentials krijgen hun geldigheid van de rulebook-uitgever, en die heeft in deze omgeving geen statuslijst om ze op in te trekken. Rulebook-sjablonen kunnen pas worden opgeslagen als die er is.",
     },
     sources: {
       givenNames: "Ontvanger · voornaam",
@@ -4735,6 +4747,8 @@ export const nl: Translation<typeof en> = {
       invalidClaims: "De claims voldoen niet aan het rulebook. {{message}}",
       statusListRequired:
         "De geldigheid van dit sjabloon is meer dan 24 uur. Dat vereist een statuslijst om de credential op in te trekken, en die heeft deze omgeving niet. Zet de geldigheid van het sjabloon op 24 uur of minder.",
+      rulebookStatusListRequired:
+        "De rulebook-uitgever heeft in deze omgeving geen statuslijst om deze credential op in te trekken, dus rulebook-credentials kunnen pas worden uitgegeven als die er is.",
       rulebookClaimsIntro:
         "Dit sjabloon volgt een WE BUILD-rulebook. Bewerk de claims als JSON. Ze beginnen bij het voorbeeld uit het rulebook en worden bij het uitgeven tegen het rulebook gecontroleerd.",
       rulebookClaimsLabel: "Claims (JSON)",
