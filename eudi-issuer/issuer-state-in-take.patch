@@ -1,0 +1,30 @@
+--- a/app/dynamic_func.py
++++ b/app/dynamic_func.py
+@@ -79,6 +79,7 @@
+                 "scope": scope,
+                 "device_publickey": device_publickey,
+                 "data": data,
++                "session_id": session_id,
+             },
+         ).json()
+ 
+--- a/app/formatter_func.py
++++ b/app/formatter_func.py
+@@ -29,6 +29,7 @@
+ import datetime
+ import hashlib
+ import requests
++from urllib.parse import quote_plus
+ from sd_jwt.common import SDObj
+ from jsonschema import ValidationError, validate
+ from sd_jwt import __version__
+@@ -314,6 +315,9 @@
+ 
+     if CONFIGURATION["revocation"]["enabled"]:
+         payload = f"doctype={vct}&country={country}&expiry_date={validity}"
++        # The offer's issuer_state, so the status list ties the entry to the offer.
++        if PID.get("session_id"):
++            payload += "&issuer_state=" + quote_plus(PID["session_id"])
+         headers = {
+             "Content-Type": "application/x-www-form-urlencoded",
+             "X-Api-Key": CONFIGURATION["revocation"]["api_key"],

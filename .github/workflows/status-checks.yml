@@ -134,6 +134,9 @@ jobs:
           - component: devverifier
             context: backend
             dockerfile: backend/docker/devverifier/Dockerfile
+          - component: eudi-issuer
+            context: eudi-issuer
+            dockerfile: eudi-issuer/Dockerfile
     uses: privacybydesign/github-workflows/.github/workflows/docker-publish.yml@v1
     permissions:
       contents: read
