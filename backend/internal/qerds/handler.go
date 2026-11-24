@@ -31,6 +31,7 @@ const (
 	multipartMemoryBytes    = 8 << 20 // buffer in memory before spilling to a temp file
 	multipartOverheadBytes  = 1 << 20 // headroom over the payload cap for framing + text fields
 	defaultContentType      = "application/octet-stream"
+	invalidMessageID        = "invalid message id"
 )
 
 type sender interface {
@@ -280,7 +281,7 @@ func readMultipartFile(fh *multipart.FileHeader) ([]byte, error) {
 func (h *Handler) downloadAttachment(w http.ResponseWriter, r *http.Request) error {
 	messageID, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
-		return badRequest("invalid_id", "invalid message id")
+		return badRequest("invalid_id", invalidMessageID)
 	}
 	attachmentID, err := uuid.Parse(r.PathValue("attachmentId"))
 	if err != nil {
@@ -309,7 +310,7 @@ func (h *Handler) downloadAttachment(w http.ResponseWriter, r *http.Request) err
 func (h *Handler) getMessage(w http.ResponseWriter, r *http.Request) error {
 	id, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
-		return badRequest("invalid_id", "invalid message id")
+		return badRequest("invalid_id", invalidMessageID)
 	}
 
 	org := organization.OrgFromContext(r.Context())
@@ -331,7 +332,7 @@ func (h *Handler) getMessage(w http.ResponseWriter, r *http.Request) error {
 func (h *Handler) markRead(w http.ResponseWriter, r *http.Request) error {
 	id, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
-		return badRequest("invalid_id", "invalid message id")
+		return badRequest("invalid_id", invalidMessageID)
 	}
 	org := organization.OrgFromContext(r.Context())
 	if _, err := h.messages.MarkRead(r.Context(), org.ID, id); err != nil {
