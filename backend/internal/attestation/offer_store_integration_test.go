@@ -96,27 +96,7 @@ func TestAcceptOfferRecordsHeldAndClosesTheOffer(t *testing.T) {
 		t.Fatalf("RecordOffer: %v", err)
 	}
 
-	claimed, err := e.store.ClaimOffer(ctx, e.orgID, offer.ID)
-	if err != nil {
-		t.Fatalf("ClaimOffer: %v", err)
-	}
-	if claimed.Status != attestation.OfferAccepting {
-		t.Errorf("claimed status = %q, want %q", claimed.Status, attestation.OfferAccepting)
-	}
-	if claimed.Offer != offerInput(messageID).Offer {
-		t.Errorf("the claim did not return the deeplink to redeem: %q", claimed.Offer)
-	}
-	if claimed.DecidedAt != nil {
-		t.Errorf("a claimed offer is not settled yet, got decidedAt %v", claimed.DecidedAt)
-	}
-	// A claimed offer is out of the queue, so a second admin has nothing to accept.
-	pendingWhileClaimed, err := e.store.ListPendingOffers(ctx, e.orgID)
-	if err != nil {
-		t.Fatalf("ListPendingOffers: %v", err)
-	}
-	if len(pendingWhileClaimed) != 0 {
-		t.Fatalf("a claimed offer is still listed as pending (%d)", len(pendingWhileClaimed))
-	}
+	claimOfferAndCheck(t, ctx, e, offer.ID, messageID)
 
 	held, err := e.store.AcceptOffer(ctx, e.orgID, offer.ID, attestation.HeldInput{
 		CredentialRef:   "ref-1",
@@ -148,12 +128,43 @@ func TestAcceptOfferRecordsHeldAndClosesTheOffer(t *testing.T) {
 		t.Fatalf("accepted offer still pending (%d)", len(pending))
 	}
 
+	checkOfferAcceptedOnce(t, ctx, e, offer.ID, messageID)
+}
+
+// claimOfferAndCheck claims a pending offer and checks it left the queue.
+func claimOfferAndCheck(t *testing.T, ctx context.Context, e env, offerID, messageID uuid.UUID) {
+	t.Helper()
+	claimed, err := e.store.ClaimOffer(ctx, e.orgID, offerID)
+	if err != nil {
+		t.Fatalf("ClaimOffer: %v", err)
+	}
+	if claimed.Status != attestation.OfferAccepting {
+		t.Errorf("claimed status = %q, want %q", claimed.Status, attestation.OfferAccepting)
+	}
+	if claimed.Offer != offerInput(messageID).Offer {
+		t.Errorf("the claim did not return the deeplink to redeem: %q", claimed.Offer)
+	}
+	if claimed.DecidedAt != nil {
+		t.Errorf("a claimed offer is not settled yet, got decidedAt %v", claimed.DecidedAt)
+	}
+	// A claimed offer is out of the queue, so a second admin has nothing to accept.
+	pendingWhileClaimed, err := e.store.ListPendingOffers(ctx, e.orgID)
+	if err != nil {
+		t.Fatalf("ListPendingOffers: %v", err)
+	}
+	if len(pendingWhileClaimed) != 0 {
+		t.Fatalf("a claimed offer is still listed as pending (%d)", len(pendingWhileClaimed))
+	}
+}
+
+func checkOfferAcceptedOnce(t *testing.T, ctx context.Context, e env, offerID, messageID uuid.UUID) {
+	t.Helper()
 	// The status guard is what makes a double accept safe: an accepted offer can
 	// be neither re-claimed nor settled again.
-	if _, err := e.store.ClaimOffer(ctx, e.orgID, offer.ID); !errors.Is(err, attestation.ErrOfferNotFound) {
+	if _, err := e.store.ClaimOffer(ctx, e.orgID, offerID); !errors.Is(err, attestation.ErrOfferNotFound) {
 		t.Fatalf("ClaimOffer on an accepted offer = %v, want ErrOfferNotFound", err)
 	}
-	if _, err := e.store.AcceptOffer(ctx, e.orgID, offer.ID, attestation.HeldInput{
+	if _, err := e.store.AcceptOffer(ctx, e.orgID, offerID, attestation.HeldInput{
 		CredentialRef: "ref-2", VCT: "nl.kvk.registration", Issuer: "https://issuer.ver.id",
 		Source: attestation.HeldSourceQERDS, SourceMessageID: &messageID,
 	}); !errors.Is(err, attestation.ErrOfferNotFound) {
