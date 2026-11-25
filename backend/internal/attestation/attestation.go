@@ -29,6 +29,12 @@ var (
 	ErrHeldNotFound          = errors.New("attestation: held attestation not found")
 	ErrOfferNotFound         = errors.New("attestation: credential offer not found")
 	ErrRecipientKindMismatch = errors.New("attestation: recipient kind does not match the schema subject type")
+	// ErrStatusListRequired means the validity is over 24 hours and the issuer
+	// publishes no Token Status List to revoke the credential on.
+	ErrStatusListRequired = errors.New("attestation: a validity over 24 hours needs an issuer status list")
+	// ErrRulebookStatusListRequired means rulebook credentials go to an issuer
+	// that sets their validity itself and has no status list to revoke them on.
+	ErrRulebookStatusListRequired = errors.New("attestation: the rulebook issuer has no status list")
 
 	// ErrUnknownAttribute and ErrMissingAttribute enforce data minimisation
 	// (Art 5(1)(b)): the schema's attribute list is the allow-list.
@@ -245,9 +251,21 @@ type Issued struct {
 	ClaimedAt      *time.Time `json:"claimedAt,omitempty"`
 	ExpiresAt      *time.Time `json:"expiresAt,omitempty"`
 	RevokedAt      *time.Time `json:"revokedAt,omitempty"`
-	CancelledAt    *time.Time `json:"cancelledAt,omitempty"`
-	CreatedAt      time.Time  `json:"createdAt"`
-	UpdatedAt      time.Time  `json:"updatedAt"`
+	// RevocationReason is why the issuer revoked it, as told to the holder.
+	RevocationReason string     `json:"revocationReason,omitempty"`
+	CancelledAt      *time.Time `json:"cancelledAt,omitempty"`
+	CreatedAt        time.Time  `json:"createdAt"`
+	UpdatedAt        time.Time  `json:"updatedAt"`
+}
+
+// MaxRevocationReasonLength bounds the reason an issuer gives for a revocation.
+const MaxRevocationReasonLength = 500
+
+// RevokeInput is a revocation: why, and the issuing organization's name the
+// holder is told it by.
+type RevokeInput struct {
+	Reason     string
+	IssuerName string
 }
 
 // Recipient identifies who an attestation is issued to.

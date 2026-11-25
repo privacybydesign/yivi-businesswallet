@@ -13,9 +13,10 @@ import (
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/respond"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/statuslist"
 )
 
-const statusListContentType = "application/statuslist+jwt"
+const statusListContentType = statuslist.ContentType
 
 type unitStore interface {
 	Summary(ctx context.Context, orgID uuid.UUID) (Summary, error)

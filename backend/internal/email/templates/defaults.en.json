@@ -74,6 +74,7 @@
     "attestation.key_added": "Added attestation key",
     "attestation.key_suspended": "Suspended attestation key",
     "attestation.key_revoked": "Revoked attestation key",
+    "attestation.held_status_changed": "Held credential status changed",
 
     "signing.requested": "Requested a document signature",
     "signing.completed": "Completed a document signature",
@@ -89,6 +90,16 @@
         { "type": "paragraph", "text": "{{credentialName}} is ready to be added to your wallet." },
         { "type": "button", "label": "Add it to your wallet", "url": "{{claimUrl}}" },
         { "type": "paragraph", "text": "Your wallet will ask for this code: {{txCode}}" },
+        { "type": "footer" }
+      ]
+    },
+    "credential_revoked": {
+      "subject": "{{orgName}} has revoked your credential: {{credentialName}}",
+      "blocks": [
+        { "type": "logo" },
+        { "type": "heading", "text": "{{orgName}} has revoked your credential" },
+        { "type": "paragraph", "text": "{{credentialName}} is no longer valid. {{orgName}} gave this reason:" },
+        { "type": "paragraph", "text": "{{reason}}" },
         { "type": "footer" }
       ]
     },

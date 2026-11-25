@@ -57,7 +57,7 @@ type (
 		IssueOrganization(orgName, address string, lifetime time.Duration) (relyingparty.Signer, error)
 	}
 	tokenVerifier interface {
-		Verify(token map[string][]string, nonce, clientID string) []relyingparty.Presented
+		Verify(ctx context.Context, token map[string][]string, nonce, clientID string) []relyingparty.Presented
 	}
 )
 
@@ -274,7 +274,7 @@ func (s *Service) Respond(ctx context.Context, id uuid.UUID, form url.Values) er
 	if err != nil {
 		return s.refuse(ctx, r, ReasonVerificationFailed, err)
 	}
-	disclosed, reason, err := s.check(r, token)
+	disclosed, reason, err := s.check(ctx, r, token)
 	if err != nil {
 		return s.refuse(ctx, r, reason, err)
 	}
@@ -282,7 +282,7 @@ func (s *Service) Respond(ctx context.Context, id uuid.UUID, form url.Values) er
 }
 
 // check verifies token against what r asked for and returns the disclosure.
-func (s *Service) check(r Request, token map[string][]string) ([]DisclosedCredential, string, error) {
+func (s *Service) check(ctx context.Context, r Request, token map[string][]string) ([]DisclosedCredential, string, error) {
 	asked := make(map[string]CredentialRequest, len(r.Credentials))
 	for _, c := range r.Credentials {
 		asked[c.ID] = c
@@ -296,7 +296,7 @@ func (s *Service) check(r Request, token map[string][]string) ([]DisclosedCreden
 		return nil, ReasonIncompleteResponse, errors.New("not every requested credential was presented")
 	}
 	var out []DisclosedCredential
-	for _, p := range s.verifier.Verify(token, r.Nonce, r.ClientID) {
+	for _, p := range s.verifier.Verify(ctx, token, r.Nonce, r.ClientID) {
 		if !p.Verified {
 			return nil, ReasonVerificationFailed, fmt.Errorf("presentation %q: %s", p.QueryID, p.Error)
 		}

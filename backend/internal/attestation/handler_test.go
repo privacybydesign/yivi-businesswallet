@@ -191,3 +191,28 @@ func TestCreateSchemaRefusesARulebookType(t *testing.T) {
 		t.Fatalf("expected vct_rulebook, got %q", code)
 	}
 }
+
+// A revocation must say why, as the holder is told (CS-10 ISS-RV-09).
+func TestDecodeRevokeReason(t *testing.T) {
+	cases := []struct {
+		body, want, code string
+	}{
+		{`{"reason":"  Contract ended "}`, "Contract ended", ""},
+		{`{"reason":"   "}`, "", "reason_required"},
+		{`{}`, "", "reason_required"},
+		{`{"reason":"` + strings.Repeat("é", MaxRevocationReasonLength+1) + `"}`, "", "reason_too_long"},
+		{`not json`, "", "invalid_body"},
+	}
+	for _, c := range cases {
+		got, err := decodeRevokeReason(strings.NewReader(c.body))
+		if c.code == "" {
+			if err != nil || got != c.want {
+				t.Errorf("decodeRevokeReason(%.30q) = %q, %v; want %q", c.body, got, err, c.want)
+			}
+			continue
+		}
+		if code := apiErrorCode(t, err); code != c.code {
+			t.Errorf("decodeRevokeReason(%.30q) code = %q, want %q", c.body, code, c.code)
+		}
+	}
+}

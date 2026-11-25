@@ -115,6 +115,11 @@ Routes of the sender slice:
   `ATTESTATION_HOLDER_TRUST_CHAIN` + pinned Yivi anchors) and be the requested
   vct; otherwise the row becomes `failed` (`verification_failed` /
   `incomplete_response`) and nothing it carried is kept.
+- A credential with a `status.status_list` must read valid on its issuer's list
+  (`eudiholder.NewStatusListChecker`, same trust and fetch policy as the holder,
+  lists cached per their `ttl`). Revoked, suspended, or a list that cannot be
+  fetched or verified is `verification_failed`: refusing when the status is
+  unknown is the acceptance policy WE BUILD CS-10 RP-RV-05 asks for.
 - The response goes straight over HTTPS, not QERDS: QERDS proves A *sent* the
   request, not what B disclosed.
 

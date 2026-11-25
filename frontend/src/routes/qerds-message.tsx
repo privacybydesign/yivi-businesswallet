@@ -23,6 +23,7 @@ import {
 import { toast } from "../lib/toast";
 import { Button, Card, Icon, Tag, TopBar } from "../ui";
 import * as React from "react";
+import { envelopeMessage } from "../lib/qerds-envelope";
 
 const EYEBROW =
   "text-muted font-label text-[11px] font-medium tracking-[0.06em] uppercase";
@@ -254,6 +255,52 @@ function AttachmentsCard({
   );
 }
 
+function MessageBodyCard({
+  body,
+  t,
+}: Readonly<{
+  body: string;
+  t: TFunction;
+}>): React.JSX.Element {
+  const readable = envelopeMessage(body);
+  let content: React.ReactNode;
+  if (body.trim() === "") {
+    content = (
+      <p className="text-ink-soft mt-2 text-[14px] italic">
+        {t("qerds.message.noBody")}
+      </p>
+    );
+  } else if (readable === null) {
+    content = (
+      <p className="text-ink mt-2 text-[14px] whitespace-pre-wrap">{body}</p>
+    );
+  } else {
+    content = (
+      <>
+        <p className="text-ink mt-2 text-[14px] whitespace-pre-wrap">
+          {readable}
+        </p>
+        <details className="mt-4">
+          <summary className="text-link cursor-pointer text-[11.5px]">
+            {t("qerds.offer.rawEnvelope")}
+          </summary>
+          <pre className="bg-surface-2 border-line text-ink-soft mt-1.5 overflow-x-auto rounded-md border p-2.5 font-mono text-[11px] break-all whitespace-pre-wrap">
+            {body}
+          </pre>
+        </details>
+      </>
+    );
+  }
+  return (
+    <Card className="p-6">
+      <h2 className="text-[16px] font-semibold">
+        {t("qerds.message.content")}
+      </h2>
+      {content}
+    </Card>
+  );
+}
+
 export default function QerdsMessage(): React.JSX.Element {
   const { t, i18n } = useTranslation();
   const { orgSlug, messageId } = useParams();
@@ -340,20 +387,7 @@ export default function QerdsMessage(): React.JSX.Element {
               t={t}
             />
           ) : (
-            <Card className="p-6">
-              <h2 className="text-[16px] font-semibold">
-                {t("qerds.message.content")}
-              </h2>
-              {message.body.trim() === "" ? (
-                <p className="text-ink-soft mt-2 text-[14px] italic">
-                  {t("qerds.message.noBody")}
-                </p>
-              ) : (
-                <p className="text-ink mt-2 text-[14px] whitespace-pre-wrap">
-                  {message.body}
-                </p>
-              )}
-            </Card>
+            <MessageBodyCard body={message.body} t={t} />
           )}
 
           {message.attachments.length > 0 && (

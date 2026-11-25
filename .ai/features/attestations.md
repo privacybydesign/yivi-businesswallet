@@ -506,6 +506,14 @@ batch (revoked if any copy is; last check is the latest).
   (admin). That one re-reads only that credential's list (`Engine.RefreshStatus`
   hands irmago a `batchStatusStore` narrowed to its batch) and answers `changed`
   for it.
+- Opening the held list or a held credential re-checks the org first when its last
+  view-triggered re-check is over `heldViewFreshness` (1 minute) old
+  (`refreshHeldIfStale`). The page waits up to `heldViewWait` (3 s); a slower
+  re-check finishes in the background. Concurrent views share one re-check.
+- Revoking a credential issued over QERDS sends the holding org an
+  `eaa-credential-revoked/v1` message (`notifyRevoked`). Its `RevokedReceiver`
+  re-checks that org's held credentials at once. The message marks nothing revoked
+  itself: only the status list does, so a forged notice changes nothing.
 - After every refresh, also a failed or timed-out one, each held credential with a
   status list whose current status differs from its last audited one is audited
   `attestation.held_status_changed` on the held target (`auditHeldStatuses`).
@@ -661,6 +669,41 @@ Two distinct terminal withdrawals, because they are different events:
     local flip (same fail-safe ordering as `DeleteHeld`). A deployment issuing
     without a status list, or a legacy claimed row with no captured uuid, flips
     locally only. Propagation to external validators beyond the status list is v2.
+- **A validity over 24 hours needs a status list** (WE BUILD CS-10, EBWOID rulebook;
+  YIV-532). The backend cannot see whether the issuer reserves a bit: `create-offer`
+  answers the same either way, and Veramo leaves the status list out of its metadata.
+  So the deployment says so with `ATTESTATION_ISSUER_STATUS_LIST=true`.
+  - Without it, and outside `DEV_MODE`, a validity over 24 hours is refused
+    (400 `status_list_required`): on saving a template and again on issuing, so a
+    template saved before the rule cannot issue either. No validity (the one-year
+    default) and a validity of 0 (never expires) count as over 24 hours.
+  - The stub issuer keeps no status list, so `true` with `ATTESTATION_ISSUER=stub`
+    fails at boot.
+  - Set it only where every issuer instance the deployment uses has a status list:
+    the instance's `statusLists` block or the credential config's `statuslist`, plus
+    a deployed `statuslist-agent` (`openid4vc-poc-ops`).
+- **Rulebook credentials get their status list from this backend** (`internal/issuerstatus`).
+  The EU reference issuer (`ATTESTATION_RULEBOOK_ISSUER_URL`) ignores the template
+  validity (its credential configs set it, a year) and runs no status list. Pointed
+  at this backend (`revocation.take_url`), it reserves an entry per credential it
+  signs:
+  - `POST /api/v1/attestations/status-lists/take` (header `X-Api-Key`, form
+    `issuer_state`, `expiry_date`) answers `{status_list: {idx, uri}}`: a random
+    free index tied to the offer whose issuance id is `eudi:<issuer_state>`. The
+    upstream issuer does not send `issuer_state`; ops runs it with a patch that
+    does. A reservation without it is refused (400), and the issuer then signs the
+    credential without a status, so the patch is required.
+  - `GET /api/v1/attestations/status-lists/{list}` serves the Status List Token,
+    unauthenticated, signed with the EU issuer's own key and certificate.
+  - An entry reads invalid once its `issued_attestations` row is `revoked`, so the
+    ledger revoke is the revocation, and like it final (CS-10 ISS-RV-06). It shows
+    within the token's one-hour `ttl` (ISS-RV-05).
+  - A reservation is also the first sign the wallet collected the offer: the issuer
+    status of a rulebook offer reads issued once it has an entry, so it moves to
+    claimed and can be revoked.
+  - Outside `DEV_MODE`, with the rulebook issuer set and no rulebook status list, a
+    rulebook template is refused (400 `rulebook_status_list_required`), whatever its
+    validity.
 
 ### 9.5 Receive / hold (holder side, Art 5(1)(a))
 Inbound EAAs land in the org's **irmago EUDI holder engine** (§6.5) with a
@@ -814,6 +857,10 @@ invalidation cascades. The screen is the mockup:
 | `ATTESTATION_ISSUER_URL` | Veramo issuer base (`veramo-issuer.openid4vc.staging.yivi.app`) | when `veramo` |
 | `ATTESTATION_ISSUER_ADMIN_TOKEN` | Veramo issuer Bearer admin token | when `veramo` |
 | `ATTESTATION_ISSUER_INSTANCE` | Veramo issuer instance name (`issuerName` in the path) | when `veramo` |
+| `ATTESTATION_ISSUER_STATUS_LIST` | `true` when the issuer puts every credential on a Token Status List (§9.4) | outside `DEV_MODE`, to issue a credential valid over 24 h |
+| `ATTESTATION_RULEBOOK_STATUS_LIST_API_KEY` | key the rulebook issuer reserves status list entries with (its `revocation.api_key`, §9.4) | outside `DEV_MODE`, to issue rulebook credentials |
+| `ATTESTATION_STATUS_LIST_BASE_URL` | base URL (no `/api/v1`) of the status lists our backend keeps; the dev stack sets `http://host.docker.internal:8080`, since the containers cannot reach `localhost:5173` | no, defaults to `APP_BASE_URL` |
+| `ATTESTATION_RULEBOOK_ISSUER_CERT` / `_KEY` | the rulebook issuer's certificate (PEM chain) and key, which sign its status lists | with the API key |
 | `ATTESTATION_OFFER_TTL` | credential-offer lifetime before `expired` | no (has default) |
 | `ATTESTATION_VCT_NAMESPACE` | org `vct` namespace prefix (e.g. `nl.<org>`) | no (derived) |
 | `ATTESTATION_HOLDER_ENCRYPTION_KEY` | per-org holder at-rest key material (§6.5) | when holder enabled |

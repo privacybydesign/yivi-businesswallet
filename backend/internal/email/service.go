@@ -91,6 +91,17 @@ func (s *Service) SendCredentialOffer(ctx context.Context, orgID uuid.UUID, to, 
 	})
 }
 
+// SendCredentialRevoked tells a natural-person holder that orgName revoked a
+// credential it issued them, and why. Returns ErrNotConfigured when the org has
+// no usable SMTP settings.
+func (s *Service) SendCredentialRevoked(ctx context.Context, orgID uuid.UUID, to, orgName, credentialName, reason string) error {
+	return s.send(ctx, orgID, KindCredentialRevoked, []string{to}, map[string]string{
+		varOrgName:        orgName,
+		varCredentialName: credentialName,
+		varReason:         reason,
+	})
+}
+
 // SendInvitation notifies an invited person that they can join an organization,
 // linking to the accept page. Returns ErrNotConfigured when the org has no
 // usable SMTP settings.

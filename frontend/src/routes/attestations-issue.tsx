@@ -111,6 +111,12 @@ function inlineError(error: Error, t: TFunction): string {
   if (code === "invalid_claims") {
     return t("attestations.wizard.invalidClaims", { message: error.message });
   }
+  if (code === "status_list_required") {
+    return t("attestations.wizard.statusListRequired");
+  }
+  if (code === "rulebook_status_list_required") {
+    return t("attestations.wizard.rulebookStatusListRequired");
+  }
   return error.message;
 }
 

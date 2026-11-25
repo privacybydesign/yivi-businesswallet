@@ -37,10 +37,30 @@ const (
 type EudiIssuer struct {
 	baseURL string
 	http    *http.Client
+	// entries is the status list the issuer reserves its entries in; nil when it
+	// issues without one.
+	entries StatusEntries
 }
+
+// StatusEntries is the Token Status List this deployment keeps for the issuer
+// (issuerstatus): the issuer reserves an entry there for each credential it signs.
+type StatusEntries interface {
+	Taken(ctx context.Context, issuanceID string) (bool, error)
+}
+
+// EudiIssuanceID is the issuance id of the offer whose issuer_state is issuerState.
+func EudiIssuanceID(issuerState string) string { return eudiIDPrefix + issuerState }
 
 func NewEudiIssuer(baseURL string, httpClient *http.Client) *EudiIssuer {
 	return &EudiIssuer{baseURL: strings.TrimRight(baseURL, "/"), http: httpClient}
+}
+
+// WithStatusList has the issuer reserve an entry in entries for every credential
+// it signs, which makes them revocable.
+func (c *EudiIssuer) WithStatusList(entries StatusEntries) *EudiIssuer {
+	out := *c
+	out.entries = entries
+	return &out
 }
 
 type eudiOfferPayload struct {
@@ -120,16 +140,32 @@ func (c *EudiIssuer) CreateOffer(ctx context.Context, req OfferRequest) (Offer, 
 	return out, nil
 }
 
-// Status is always pending: the issuer cannot tell whether a wallet collected an
-// offer.
-func (c *EudiIssuer) Status(context.Context, string, string) (IssuanceStatus, error) {
-	return IssuanceStatus{Status: StatusPending}, nil
+// Status reports an offer issued once the issuer reserved a status list entry for
+// it, which it does while signing the credential a wallet collected. Without a
+// status list it cannot tell, and the offer stays pending. The issuance id is the
+// credential handle RevokeCredential gets back.
+func (c *EudiIssuer) Status(ctx context.Context, _, issuanceID string) (IssuanceStatus, error) {
+	if c.entries == nil {
+		return IssuanceStatus{Status: StatusPending}, nil
+	}
+	taken, err := c.entries.Taken(ctx, issuanceID)
+	if err != nil {
+		return IssuanceStatus{}, err
+	}
+	if !taken {
+		return IssuanceStatus{Status: StatusPending}, nil
+	}
+	return IssuanceStatus{Status: StatusIssued, CredentialUUID: issuanceID}, nil
 }
 
-// RevokeCredential reports ErrNoStatusListBit: the issuer runs no status list, so
-// revocation stays in the local ledger.
+// RevokeCredential has nothing to call: the credential's status list entry reads
+// invalid once the ledger row is revoked. Without a status list it reports
+// ErrNoStatusListBit, and revocation stays in the local ledger.
 func (c *EudiIssuer) RevokeCredential(context.Context, string, string) error {
-	return ErrNoStatusListBit
+	if c.entries == nil {
+		return ErrNoStatusListBit
+	}
+	return nil
 }
 
 // Ping checks the issuer serves its credential issuer metadata.
@@ -185,8 +221,14 @@ func (r RulebookRouter) Status(ctx context.Context, instance, issuanceID string)
 	return r.Default.Status(ctx, instance, issuanceID)
 }
 
-// RevokeCredential goes to the default issuer: a rulebook credential never gets
-// a credential uuid, as its issuer never reports it collected.
+// RevokeCredential sends a rulebook credential, whose handle is its issuance id,
+// to the rulebook issuer, and every other one to the default.
 func (r RulebookRouter) RevokeCredential(ctx context.Context, instance, credentialUUID string) error {
+	if strings.HasPrefix(credentialUUID, eudiIDPrefix) {
+		return r.Rulebooks.RevokeCredential(ctx, instance, credentialUUID)
+	}
 	return r.Default.RevokeCredential(ctx, instance, credentialUUID)
 }
+
+// RulebookStatusList reports whether rulebook credentials get a status list entry.
+func (r RulebookRouter) RulebookStatusList() bool { return r.Rulebooks.entries != nil }

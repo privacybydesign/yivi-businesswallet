@@ -509,3 +509,14 @@ func credentialInstanceRef(c *clientmodels.Credential) string {
 	}
 	return ""
 }
+
+// NewStatusListChecker is a Token Status List checker for a verifier: lists
+// verify against trust and are fetched under the same policy a holder's are.
+// Its cache is in memory, as a verifier keeps no per-org storage.
+func NewStatusListChecker(trust eudijwt.X509VerificationContext, allowInsecureHTTP bool) *statuslist.Checker {
+	return statuslist.NewChecker(statuslist.VerificationContext{
+		X509Context: trust,
+		Clock:       eudijwt.NewSystemClock(),
+		HTTPClient:  newStatusClient(safehttp.Policy{AllowInsecureHTTP: allowInsecureHTTP}),
+	}, nil)
+}
