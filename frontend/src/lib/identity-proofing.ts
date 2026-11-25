@@ -2040,6 +2040,7 @@ const PROOFING_ERROR_KEYS = {
   // An admin by role whose mandate was withdrawn: the backend refuses every
   // admin call, though the role still shows the admin's tabs.
   mandate_withdrawn: "identityProofing.errors.mandateWithdrawn",
+  wallet_not_active: "toasts.walletNotActive",
   legal_retention: "identityProofing.errors.legalRetention",
   // too_large is a diploma or Verzekeringsbericht upload's,
   // payload_too_large a branding logo's.
