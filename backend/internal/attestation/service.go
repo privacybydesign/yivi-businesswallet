@@ -139,7 +139,18 @@ type Service struct {
 	now         func() time.Time
 	statusLists StatusListPolicy
 	heldFresh   heldFreshness
+	ownerID     ownerIDRevoker
 }
+
+// ownerIDRevoker acts on the org's owner identification data (the EBWOID its
+// wallet opened with) being revoked by its issuer.
+type ownerIDRevoker interface {
+	OwnerIDRevoked(ctx context.Context, orgID uuid.UUID) error
+}
+
+// SetOwnerIDRevoker sets who acts when a status re-check finds the org's EBWOID
+// revoked. Without it nothing happens beyond the audit.
+func (s *Service) SetOwnerIDRevoker(r ownerIDRevoker) { s.ownerID = r }
 
 func NewService(store issuedStore, iss issuer, instances issuerInstanceResolver, email emailNotifier, qerds qerdsNotifier, held heldMutator, offers offerStore, holder holderEngine, appBaseURL string) *Service {
 	return &Service{
@@ -989,6 +1000,12 @@ func (s *Service) auditHeldStatuses(ctx context.Context, orgID uuid.UUID) (map[u
 		}
 		if recorded {
 			changed[h.ID] = struct{}{}
+		}
+		// On every re-check, not only on the change, so a failed revoke is retried.
+		if v.Revoked && h.Source == HeldSourceBootstrap && s.ownerID != nil {
+			if err := s.ownerID.OwnerIDRevoked(ctx, orgID); err != nil {
+				errs = append(errs, fmt.Errorf("attestation: owner id revoked org %s: %w", orgID, err))
+			}
 		}
 	}
 	return changed, errors.Join(errs...)

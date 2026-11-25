@@ -55,6 +55,7 @@ type Store struct {
 // unitProvisioner creates the org's wallet unit inside the registration tx.
 type unitProvisioner interface {
 	Provision(ctx context.Context, q database.Querier, orgID uuid.UUID) (walletunit.Unit, error)
+	RevokeIn(ctx context.Context, q database.Querier, orgID uuid.UUID, reason string) (walletunit.Unit, error)
 }
 
 func NewStore(db database.DB, recorder audit.Recorder, units unitProvisioner) *Store {
@@ -211,27 +212,49 @@ func insertRepresentations(ctx context.Context, q database.Querier, orgID, reque
 func (s *Store) SetStatus(ctx context.Context, orgID uuid.UUID, status string) (organization.Organization, error) {
 	var org organization.Organization
 	err := database.InTx(ctx, s.db, func(q database.Querier) error {
-		// Locked, so the check and the write see the same status.
-		var before string
-		err := q.QueryRow(ctx, `SELECT status FROM organizations WHERE id = $1 FOR UPDATE`, orgID).Scan(&before)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return organization.ErrNotFound
-		}
-		if err != nil {
-			return fmt.Errorf("wallet: read status org %s: %w", orgID, err)
-		}
-		if err := lifecycle.Transition(before, status); err != nil {
-			return err
-		}
-		const update = `UPDATE organizations SET status = $1, updated_at = now() WHERE id = $2 RETURNING ` + orgColumns
-		if err := scanOrg(q.QueryRow(ctx, update, status, orgID), &org); err != nil {
-			return fmt.Errorf("wallet: set status org %s: %w", orgID, err)
-		}
-		return s.audit.Record(ctx, q, statusAudit[status],
-			audit.Target{Type: audit.TargetOrganization, ID: org.ID.String(), OrgID: &orgID},
-			audit.Updated(map[string]any{"status": before}, map[string]any{"status": status}))
+		var err error
+		org, err = s.setStatusIn(ctx, q, orgID, status)
+		return err
 	})
 	return org, err
+}
+
+func (s *Store) setStatusIn(ctx context.Context, q database.Querier, orgID uuid.UUID, status string) (organization.Organization, error) {
+	// Locked, so the check and the write see the same status.
+	var before string
+	err := q.QueryRow(ctx, `SELECT status FROM organizations WHERE id = $1 FOR UPDATE`, orgID).Scan(&before)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return organization.Organization{}, organization.ErrNotFound
+	}
+	if err != nil {
+		return organization.Organization{}, fmt.Errorf("wallet: read status org %s: %w", orgID, err)
+	}
+	if err := lifecycle.Transition(before, status); err != nil {
+		return organization.Organization{}, err
+	}
+	var org organization.Organization
+	const update = `UPDATE organizations SET status = $1, updated_at = now() WHERE id = $2 RETURNING ` + orgColumns
+	if err := scanOrg(q.QueryRow(ctx, update, status, orgID), &org); err != nil {
+		return organization.Organization{}, fmt.Errorf("wallet: set status org %s: %w", orgID, err)
+	}
+	return org, s.audit.Record(ctx, q, statusAudit[status],
+		audit.Target{Type: audit.TargetOrganization, ID: org.ID.String(), OrgID: &orgID},
+		audit.Updated(map[string]any{"status": before}, map[string]any{"status": status}))
+}
+
+// Cease revokes the wallet of an org whose activity ended, and its wallet unit with
+// ReasonCessation, in one tx. What is already revoked is left as it is, so it can
+// be called again.
+func (s *Store) Cease(ctx context.Context, orgID uuid.UUID) error {
+	return database.InTx(ctx, s.db, func(q database.Querier) error {
+		if _, err := s.setStatusIn(ctx, q, orgID, organization.StatusRevoked); err != nil && !errors.Is(err, lifecycle.ErrTransition) {
+			return err
+		}
+		if _, err := s.units.RevokeIn(ctx, q, orgID, walletunit.ReasonCessation); err != nil && !errors.Is(err, walletunit.ErrNoActiveUnit) {
+			return err
+		}
+		return nil
+	})
 }
 
 // ListRepresentations returns the (non-revoked) mandate list for an org.

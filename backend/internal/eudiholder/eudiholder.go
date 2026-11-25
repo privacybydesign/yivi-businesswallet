@@ -153,6 +153,14 @@ type Credential struct {
 	IssuedAt time.Time
 	// ExpiresAt is the exp claim; nil if the credential does not expire.
 	ExpiresAt *time.Time
+	// Status is the credential's status.status_list claim; nil when it has none.
+	Status *StatusReference
+}
+
+// StatusReference is a credential's entry in its issuer's Token Status List.
+type StatusReference struct {
+	URI   string
+	Index uint64
 }
 
 // Redeemed is the outcome of redeeming a credential offer: the fields the caller

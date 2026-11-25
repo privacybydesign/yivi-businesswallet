@@ -208,7 +208,11 @@ func (s *Store) HeldHistory(ctx context.Context, orgID, id uuid.UUID) ([]audit.E
 // HolderOrgs lists the organizations that hold at least one credential: the
 // ones a scheduled status re-check visits.
 func (s *Store) HolderOrgs(ctx context.Context) ([]uuid.UUID, error) {
-	rows, err := s.db.Query(ctx, `SELECT DISTINCT organization_id FROM held_attestations WHERE deleted_at IS NULL`)
+	// A revoked wallet is final and fetches nothing new; a suspended one is still
+	// checked, so a revoked EBWOID can still revoke it.
+	rows, err := s.db.Query(ctx, `SELECT DISTINCT h.organization_id FROM held_attestations h
+		JOIN organizations o ON o.id = h.organization_id
+		WHERE h.deleted_at IS NULL AND o.status <> 'revoked'`)
 	if err != nil {
 		return nil, fmt.Errorf("attestation: holder orgs: %w", err)
 	}

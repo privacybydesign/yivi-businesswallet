@@ -120,6 +120,8 @@ func (h *Handler) activate(w http.ResponseWriter, r *http.Request) error {
 	switch {
 	case errors.Is(err, ErrUnitActive):
 		return apiError(http.StatusConflict, "unit_active", "the organization already has an active wallet unit")
+	case errors.Is(err, ErrOrgNotActive):
+		return apiError(http.StatusConflict, "wallet_not_active", "the wallet is suspended or revoked")
 	case err != nil:
 		return fmt.Errorf("wallet unit activate: %w", err)
 	}

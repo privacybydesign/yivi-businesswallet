@@ -52,6 +52,7 @@ import {
   documentIsTooLarge,
 } from "../lib/signing-document";
 import { placementsIncomplete } from "../lib/placement";
+import { walletNotActive } from "../lib/api-error";
 import { toast } from "../lib/toast";
 import { Avatar, Button, Card, Icon, Input, Modal, Tag, TopBar } from "../ui";
 import { SigningHistoryPanel } from "./signing-history";
@@ -112,6 +113,7 @@ function startError(error: Error, t: TFunction): string {
     if (code === "already_signed") return t("signing.alreadySigned");
     if (code === "not_your_turn") return t("signing.notYourTurn");
     if (code === "sign_in_progress") return t("signing.signInProgress");
+    if (code === "wallet_not_active") return t("toasts.walletNotActive");
   }
   if (error instanceof ApiError && error.status === TOO_LARGE_STATUS) {
     return t("signing.documentTooLarge", {
@@ -469,7 +471,14 @@ function ToSignTab({
           toast.success(t("signing.decline.toastSuccess"));
           setDecliningId(null);
         },
-        onError: () => toast.error(t("signing.decline.toastError")),
+        onError: (error) =>
+          toast.error(
+            t(
+              walletNotActive(error)
+                ? "toasts.walletNotActive"
+                : "signing.decline.toastError",
+            ),
+          ),
       },
     );
   };

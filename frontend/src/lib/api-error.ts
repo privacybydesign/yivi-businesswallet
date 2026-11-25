@@ -15,3 +15,9 @@ export function errorCode(error: unknown): string | null {
   }
   return null;
 }
+
+// walletNotActive reports a change the backend refused because the org's wallet
+// is suspended or revoked: trying again cannot help.
+export function walletNotActive(error: unknown): boolean {
+  return errorCode(error) === "wallet_not_active";
+}

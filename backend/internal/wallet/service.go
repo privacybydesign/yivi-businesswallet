@@ -30,6 +30,7 @@ const discardTimeout = 10 * time.Second
 type walletStore interface {
 	RegisterOrganization(ctx context.Context, reg Registration) (organization.Organization, error)
 	SetStatus(ctx context.Context, orgID uuid.UUID, status string) (organization.Organization, error)
+	Cease(ctx context.Context, orgID uuid.UUID) error
 	ListRepresentations(ctx context.Context, orgID uuid.UUID) ([]Representation, error)
 	ClaimRepresentation(ctx context.Context, orgID, repID, userID uuid.UUID) error
 }
@@ -375,4 +376,10 @@ func (s *Service) Suspend(ctx context.Context, orgID uuid.UUID) (organization.Or
 // Revoke revokes an org's wallet (Art 6(2)).
 func (s *Service) Revoke(ctx context.Context, orgID uuid.UUID) (organization.Organization, error) {
 	return s.store.SetStatus(ctx, orgID, organization.StatusRevoked)
+}
+
+// OwnerIDRevoked revokes the wallet and wallet unit of an org whose EBWOID its
+// issuer revoked: KVK revokes it when the company ends (Art 6(2)(f)).
+func (s *Service) OwnerIDRevoked(ctx context.Context, orgID uuid.UUID) error {
+	return s.store.Cease(ctx, orgID)
 }

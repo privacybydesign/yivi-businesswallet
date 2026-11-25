@@ -98,13 +98,16 @@ var (
 )
 
 var (
-	ErrNotFound            = errors.New("organization not found")
-	ErrSlugTaken           = errors.New("organization slug already taken")
-	ErrNotMember           = errors.New("user is not a member of the organization")
-	ErrAlreadyMember       = errors.New("user is already a member of the organization")
-	ErrAlreadyInvited      = errors.New("user is already invited to the organization")
-	ErrInvitationNotFound  = errors.New("invitation not found")
-	ErrInvitationExpired   = errors.New("invitation expired")
+	ErrNotFound           = errors.New("organization not found")
+	ErrSlugTaken          = errors.New("organization slug already taken")
+	ErrNotMember          = errors.New("user is not a member of the organization")
+	ErrAlreadyMember      = errors.New("user is already a member of the organization")
+	ErrAlreadyInvited     = errors.New("user is already invited to the organization")
+	ErrInvitationNotFound = errors.New("invitation not found")
+	ErrInvitationExpired  = errors.New("invitation expired")
+	// ErrWalletNotActive refuses a change to an org whose wallet is suspended or
+	// revoked (Art 6(2)(f)): it stays readable, nothing new is started.
+	ErrWalletNotActive     = errors.New("organization: wallet is not active")
 	ErrEmailMismatch       = errors.New("disclosed email does not match the invitation")
 	ErrNameMismatch        = errors.New("disclosed name does not match the invitation")
 	ErrDisclosureFailed    = errors.New("identity disclosure failed")

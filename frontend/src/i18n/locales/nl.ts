@@ -2385,6 +2385,8 @@ export const nl: Translation<typeof en> = {
       "Status opnieuw gecontroleerd: deze credential is veranderd",
     dismiss: "Sluiten",
     error: "Er is iets misgegaan. Probeer het opnieuw.",
+    walletNotActive:
+      "Deze wallet is geschorst of ingetrokken. Je kunt alles nog lezen en exporteren, maar er kan niets worden gewijzigd.",
     invitationSent: "Uitnodiging verstuurd",
     invitationResent: "Uitnodiging opnieuw verstuurd",
     invitationRevoked: "Uitnodiging ingetrokken",
@@ -3595,7 +3597,10 @@ export const nl: Translation<typeof en> = {
     reasons: {
       owner_request: "Verzoek van de organisatie",
       key_compromise: "Sleutel gecompromitteerd",
+      cessation: "Bedrijf beëindigd (eigenaar-identificatie ingetrokken)",
     },
+    ceasedHint:
+      "De uitgever heeft de eigenaar-identificatie van deze organisatie ingetrokken omdat het bedrijf is beëindigd. De wallet is ingetrokken en er kan geen nieuwe wallet-unit worden geactiveerd.",
     loadError: "De wallet-unit kon niet worden geladen: {{message}}",
     createdAt: "Unit aangemaakt",
     issuedCount: "Uitgegeven attestaties",
@@ -4092,6 +4097,12 @@ export const nl: Translation<typeof en> = {
       organizationsHint: "Totaal in deze deployment",
     },
     viewAll: "Alle organisaties bekijken",
+  },
+  walletReadOnly: {
+    suspended:
+      "Deze wallet is geschorst. Je kunt alles erin lezen en exporteren, maar er kan niets nieuws worden verstuurd, aangevraagd, uitgegeven of ondertekend.",
+    revoked:
+      "Deze wallet is ingetrokken. Je kunt alles erin lezen en exporteren, maar er kan niets nieuws worden verstuurd, aangevraagd, uitgegeven of ondertekend.",
   },
   testMode: {
     banner:

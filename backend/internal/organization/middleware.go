@@ -49,12 +49,40 @@ func (h *Handler) Authorize(next http.Handler) http.Handler {
 			right = access.Member.ReviewRight()
 		}
 
+		if org.Status != StatusActive && !allowedWhileInactive(r) {
+			respond.Error(w, r, http.StatusConflict, WalletNotActiveCode,
+				"this wallet is suspended or revoked: it can be read and exported, not changed")
+			return
+		}
+
 		authority := access.Authority
 		authority.PlatformAdmin = platformAdmin
 
 		ctx = contextWithReviewRight(contextWithAuthority(contextWithRole(contextWithOrg(ctx, org), role), authority), right)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+// WalletNotActiveCode is the API error code for a change refused because the
+// org's wallet is suspended or revoked.
+const WalletNotActiveCode = "wallet_not_active"
+
+// changesWhileInactive are the changes a suspended or revoked wallet still
+// allows: they only touch what is already there, or finish revoking it.
+var changesWhileInactive = map[string]bool{
+	"POST /orgs/{slug}/qerds/messages/{id}/read": true,
+	"PUT /orgs/{slug}/notifications/settings":    true,
+	"POST /orgs/{slug}/wallet/revoke":            true,
+}
+
+// allowedWhileInactive reports whether r may reach an org whose wallet is not
+// active: any read, and the few changes in changesWhileInactive.
+func allowedWhileInactive(r *http.Request) bool {
+	switch r.Method {
+	case http.MethodGet, http.MethodHead, http.MethodOptions:
+		return true
+	}
+	return changesWhileInactive[r.Pattern]
 }
 
 // RequireOrgAdmin gates the administrative surface. The caller's functional role

@@ -225,6 +225,13 @@ func (s *Store) RecordRejectedAccept(ctx context.Context, orgID uuid.UUID, email
 
 func (s *Store) AcceptInvitation(ctx context.Context, inv Invitation, userID uuid.UUID, disclosed identity.Name, phone, dateOfBirth string) error {
 	return database.InTx(ctx, s.db, func(q database.Querier) error {
+		var status string
+		if err := q.QueryRow(ctx, `SELECT status FROM organizations WHERE id = $1 FOR SHARE`, inv.OrganizationID).Scan(&status); err != nil {
+			return fmt.Errorf("organization: status org %s: %w", inv.OrganizationID, err)
+		}
+		if status != StatusActive {
+			return ErrWalletNotActive
+		}
 		// identity_verified_at is set to now(): acceptance always proves a
 		// passport/id-card identity via the disclosure flow. phone and date of
 		// birth are best-effort (empty/unparseable => NULL). identity_due_at is

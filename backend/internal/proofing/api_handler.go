@@ -17,6 +17,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/auth"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/clientip"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/email"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingprovider"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/ratelimit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/respond"
@@ -164,6 +165,9 @@ func (h *Handler) requireAPIKey(scope string, next respond.HandlerFunc) http.Han
 
 		if !slices.Contains(caller.Scopes, scope) {
 			return &respond.APIError{Status: http.StatusForbidden, Code: "insufficient_scope", Message: "this API key lacks the " + scope + " scope"}
+		}
+		if !caller.WalletActive && r.Method != http.MethodGet && r.Method != http.MethodHead {
+			return &respond.APIError{Status: http.StatusConflict, Code: organization.WalletNotActiveCode, Message: "this organization's wallet is suspended or revoked"}
 		}
 
 		ctx := audit.ContextWithActor(context.WithValue(r.Context(), apiCallerKey{}, caller),
