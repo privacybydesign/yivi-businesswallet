@@ -68,6 +68,9 @@ import {
   showsSessionIdentity,
   timelineActor,
   ageOverFact,
+  asksNationality,
+  dutchNationalityLabel,
+  registeredFacts,
 } from "../lib/identity-proofing";
 import type { SessionFilter } from "../lib/identity-proofing";
 import { blockingError } from "../lib/query-state";
@@ -1066,10 +1069,24 @@ function IdentityRows({
             {t("identityProofing.sessions.identity.birthDate")}
           </dt>
           <dd>{identity.birthDate || "—"}</dd>
-          <dt className="text-muted">
-            {t("identityProofing.sessions.identity.nationality")}
-          </dt>
-          <dd>{identity.nationality || "—"}</dd>
+          {asksNationality(identity) && (
+            <>
+              <dt className="text-muted">
+                {t("identityProofing.sessions.identity.nationality")}
+              </dt>
+              <dd>
+                {identity.nationality ||
+                  dutchNationalityLabel(identity, t) ||
+                  "—"}
+              </dd>
+            </>
+          )}
+          {registeredFacts(identity, t).map((fact) => (
+            <React.Fragment key={fact.label}>
+              <dt className="text-muted">{fact.label}</dt>
+              <dd>{fact.value}</dd>
+            </React.Fragment>
+          ))}
           {ageOver && (
             <>
               <dt className="text-muted">{ageOver.label}</dt>
@@ -1097,22 +1114,42 @@ function IdentityRows({
           {evidence.documentCheck && (
             <DocumentCheckRows check={evidence.documentCheck} outcome={check} />
           )}
-          <dt className="text-muted">
-            {t("identityProofing.sessions.identity.passiveAuth")}
-          </dt>
-          <dd>{check(evidence.passiveAuth)}</dd>
-          <dt className="text-muted">
-            {t("identityProofing.sessions.identity.faceMatch")}
-          </dt>
-          <dd>
-            {evidence.faceMatch === undefined
-              ? "—"
-              : `${Math.round(evidence.faceMatch * PERCENT)}%`}
-          </dd>
-          <dt className="text-muted">
-            {t("identityProofing.sessions.identity.liveness")}
-          </dt>
-          <dd>{check(evidence.liveness)}</dd>
+          {evidence.documentCheck === null && (
+            <>
+              <dt className="text-muted">
+                {t("identityProofing.sessions.identity.documentCheck")}
+              </dt>
+              <dd>—</dd>
+            </>
+          )}
+          {evidence.passiveAuth !== undefined && (
+            <>
+              <dt className="text-muted">
+                {t("identityProofing.sessions.identity.passiveAuth")}
+              </dt>
+              <dd>{check(evidence.passiveAuth ?? undefined)}</dd>
+            </>
+          )}
+          {evidence.faceMatch !== undefined && (
+            <>
+              <dt className="text-muted">
+                {t("identityProofing.sessions.identity.faceMatch")}
+              </dt>
+              <dd>
+                {evidence.faceMatch === null
+                  ? "—"
+                  : `${Math.round(evidence.faceMatch * PERCENT)}%`}
+              </dd>
+            </>
+          )}
+          {evidence.liveness !== undefined && (
+            <>
+              <dt className="text-muted">
+                {t("identityProofing.sessions.identity.liveness")}
+              </dt>
+              <dd>{check(evidence.liveness ?? undefined)}</dd>
+            </>
+          )}
         </>
       )}
     </>

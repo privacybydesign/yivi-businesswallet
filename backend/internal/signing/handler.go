@@ -49,6 +49,7 @@ type signingService interface {
 	HandleCallback(ctx context.Context, code, state string) string
 	GetRequest(ctx context.Context, orgID, userID, id uuid.UUID, isAdmin bool) (Request, error)
 	GetSignedDocument(ctx context.Context, orgID, userID, id uuid.UUID, isAdmin bool) ([]byte, string, error)
+	GetDocumentPreview(ctx context.Context, orgID, userID, id uuid.UUID, isAdmin bool) ([]byte, string, error)
 	ListPending(ctx context.Context, orgID, userID uuid.UUID) ([]Request, error)
 	ListRequests(ctx context.Context, orgID uuid.UUID, cursor string, limit int) ([]Request, string, error)
 	GetCredential(ctx context.Context, orgID, userID uuid.UUID) (LinkedCredential, error)
@@ -100,6 +101,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("POST /orgs/{slug}/signing/requests/{id}/decline", member(respond.HandlerFunc(h.declineRequest)))
 	mux.Handle("GET /orgs/{slug}/signing/requests/{id}", member(respond.HandlerFunc(h.getRequest)))
 	mux.Handle("GET /orgs/{slug}/signing/requests/{id}/document", member(respond.HandlerFunc(h.getDocument)))
+	mux.Handle("GET /orgs/{slug}/signing/requests/{id}/preview", member(respond.HandlerFunc(h.getDocumentPreview)))
 
 	// Central OAuth redirect target (matches the QTSP client registration). It is
 	// correlated by state, so it needs no session; it 302s the browser onward.
@@ -361,6 +363,26 @@ func (h *Handler) getDocument(w http.ResponseWriter, r *http.Request) error {
 		return fmt.Errorf("getting signed document: %w", err)
 	}
 	writePDF(w, "attachment", signedName(filename), doc)
+	return nil
+}
+
+// getDocumentPreview serves the document a signer is asked to sign, to read in
+// the wallet before signing.
+func (h *Handler) getDocumentPreview(w http.ResponseWriter, r *http.Request) error {
+	org := organization.OrgFromContext(r.Context())
+	u := auth.UserFromContext(r.Context())
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_id", Message: "invalid request id"}
+	}
+	doc, filename, err := h.svc.GetDocumentPreview(r.Context(), org.ID, u.ID, id, organization.IsAdmin(r.Context()))
+	if errors.Is(err, ErrNotFound) {
+		return &respond.APIError{Status: http.StatusNotFound, Code: "not_found", Message: "signing request not found"}
+	}
+	if err != nil {
+		return fmt.Errorf("getting document preview: %w", err)
+	}
+	writePDF(w, "inline", documentName(filename), doc)
 	return nil
 }
 

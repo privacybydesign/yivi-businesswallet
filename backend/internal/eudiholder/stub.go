@@ -203,6 +203,11 @@ func (h *StubHolder) RefreshStatus(context.Context, uuid.UUID, string) (int, err
 	return 0, nil
 }
 
+// Payload is nil: the stub synthesises held credentials and keeps no signed form.
+func (h *StubHolder) Payload(context.Context, uuid.UUID, string) (map[string]any, error) {
+	return nil, nil
+}
+
 // Delete removes the credential; an absent ref is a no-op (matches the engine
 // contract, so the held-delete flow behaves the same under stub and irmago).
 func (h *StubHolder) Delete(_ context.Context, orgID uuid.UUID, ref string) error {

@@ -237,18 +237,17 @@ var (
 	faceOnlyAttributes    = []string{"selfie", "biometrics"}
 )
 
-// Odixus keeps a copy of a new employee's identity document, as the
-// employer's identification duty asks. Both flows copy the ones built for
-// Odixus in the flow editor.
+// Odixus's flows are the ones its emails name: a DigiD session, a document
+// session with or without the chip, and a driving licence check. Odixus needs
+// the whole BSN and a copy of the identity document.
 var (
-	odixusDigiDSteps     = []flow.Step{flow.StepDocumentCapture, flow.StepDocumentPhoto, flow.StepNFCRead, flow.StepFaceVerification}
-	odixusChipSteps      = []flow.Step{flow.StepDocumentCapture, flow.StepDocumentPhoto, flow.StepNFCRead}
-	odixusDigiDChecks    = []flow.Check{flow.CheckNFCPassiveAuth, flow.CheckFaceMatch, flow.CheckFaceLiveness}
 	odixusChipChecks     = []flow.Check{flow.CheckNFCPassiveAuth}
+	odixusFaceChecks     = []flow.Check{flow.CheckFaceMatch, flow.CheckFaceLiveness}
 	odixusDigiDDocuments = []string{flow.DocumentKindPersonalData}
-	odixusChipDocuments  = []string{flow.DocumentKindPassport, flow.DocumentKindIdentityCard}
-	odixusDigiDData      = []string{"dg1", "biometrics", "selfie", "document_image"}
-	odixusChipData       = []string{"dg1", "document_image"}
+	odixusDocuments      = []string{flow.DocumentKindPassport, flow.DocumentKindIdentityCard, flow.DocumentKindResidencePermit}
+	odixusIdentityData   = []string{"dg1"}
+	odixusDocumentData   = []string{"dg1", "dg11", "biometrics", "document_image"}
+	odixusLicenceData    = []string{"dg1", "dg11", "document_image"}
 	odixusCopyReason     = map[string]string{
 		"en": "To keep a copy of your identity document, as the law asks of your employer.",
 		"nl": "Om een kopie van je identiteitsbewijs te bewaren, zoals de wet van je werkgever vraagt.",
@@ -265,6 +264,46 @@ func odixusReasons(attributes []string) map[string]map[string]string {
 
 // odixusPurpose is why Odixus onboards someone.
 const odixusPurpose = "Onboarding nieuwe medewerker: identificatie en kopie van het identiteitsbewijs"
+
+// odixusYiviOnly is a flow the Yivi app alone runs, sharing one of documents;
+// its app steps stand for what the app shares.
+func odixusYiviOnly(name string, documents []string, bsnPolicy privacy.BSNPolicy) flow.FlowDefinition {
+	return flow.FlowDefinition{
+		Name: name, Steps: []flow.Step{flow.StepDocumentCapture, flow.StepNFCRead},
+		Apps: []flow.App{flow.AppYivi}, RequiredChecks: odixusChipChecks,
+		AcceptedDocumentTypes: documents, RequestedAttributes: odixusIdentityData,
+		RequiredAssuranceLevel: flow.AssuranceLevelLow,
+		BSNPolicy:              bsnPolicy, KeepFacePhotos: new(false),
+		LegalBasis: privacy.LegalBasisLegalObligation, ProcessingPurpose: odixusPurpose,
+		AttributeReasons: odixusReasons(odixusIdentityData),
+	}
+}
+
+// odixusDigiD is the DigiD session under bsnPolicy: the BRP personal data and
+// the registered address from the Yivi app.
+func odixusDigiD(name string, bsnPolicy privacy.BSNPolicy) demoProofingFlow {
+	return demoProofingFlow{def: odixusYiviOnly(name, odixusDigiDDocuments, bsnPolicy), address: proofing.AddressRequired}
+}
+
+// odixusDocumentSession photographs the front and back and checks a live face
+// against them in CM's ID scan; withChip first has the Yivi app share the
+// document it read with the chip.
+func odixusDocumentSession(name string, withChip bool) flow.FlowDefinition {
+	fd := flow.FlowDefinition{
+		Name: name, Steps: []flow.Step{flow.StepDocumentPhoto, flow.StepFaceVerification},
+		SelfieLocation: flow.LocationBrowser, FaceProvider: flow.FaceProviderIDScan, RequiredChecks: odixusFaceChecks,
+		AcceptedDocumentTypes: odixusDocuments, RequestedAttributes: odixusDocumentData,
+		BSNPolicy: privacy.BSNPolicyRetrieve, KeepFacePhotos: new(true),
+		LegalBasis: privacy.LegalBasisLegalObligation, ProcessingPurpose: odixusPurpose,
+		AttributeReasons: odixusReasons(odixusDocumentData),
+	}
+	if withChip {
+		fd.Steps = append([]flow.Step{flow.StepDocumentCapture, flow.StepNFCRead}, fd.Steps...)
+		fd.Apps = []flow.App{flow.AppYivi}
+		fd.RequiredChecks = append(slices.Clone(odixusChipChecks), odixusFaceChecks...)
+	}
+	return fd
+}
 
 // demoRetentionDays and shortRetentionDays are how long a demo org's flows
 // keep a session's personal data: most orgs', and CM's minimum for a ticket's
@@ -300,8 +339,11 @@ const (
 	flowASRAccountChange = "Rekeningnummer wijzigen"
 	flowUnibetOnboarding = "Nieuwe klant (AMLR)"
 	flowCMAgeCheck       = "Ticket: echte persoon en leeftijd"
-	flowOdixusDigiD      = "Onboarding met DigiD"
-	flowOdixusNoDigiD    = "Onboarding zonder DigiD"
+	flowOdixusDigiD      = "DigiD-sessie"
+	flowOdixusDigiDNoBSN = "DigiD-sessie zonder BSN"
+	flowOdixusChip       = "Documentsessie met chip"
+	flowOdixusNoChip     = "Documentsessie zonder chip"
+	flowOdixusLicence    = "Losse rijbewijscheck"
 )
 
 var demoProofingOrgs = []demoProofingOrg{
@@ -367,27 +409,18 @@ var demoProofingOrgs = []demoProofingOrg{
 	{
 		slug: odixusSlug, defaultFlow: flowOdixusDigiD, retentionDays: demoRetentionDays,
 		flows: []demoProofingFlow{
-			// With DigiD: personal data and the registered address from the
-			// Yivi app, then CM's ID scan photographs the document and checks
-			// the face against it.
+			odixusDigiD(flowOdixusDigiD, privacy.BSNPolicyRetrieve),
+			// For a self-employed person, whose BSN Odixus may not process.
+			odixusDigiD(flowOdixusDigiDNoBSN, privacy.BSNPolicyOmit),
+			{def: odixusDocumentSession(flowOdixusChip, true)},
+			{def: odixusDocumentSession(flowOdixusNoChip, false)},
+			// The emails name no selfie for the driving licence check.
 			{def: flow.FlowDefinition{
-				Name: flowOdixusDigiD, Steps: odixusDigiDSteps, Apps: []flow.App{flow.AppYivi},
-				SelfieLocation: flow.LocationBrowser, FaceProvider: flow.FaceProviderIDScan, RequiredChecks: odixusDigiDChecks,
-				AcceptedDocumentTypes: odixusDigiDDocuments, RequestedAttributes: odixusDigiDData,
-				RequiredAssuranceLevel: flow.AssuranceLevelLow,
-				BSNPolicy:              privacy.BSNPolicyMask, BlurBSN: new(true), KeepFacePhotos: new(true),
+				Name: flowOdixusLicence, Steps: []flow.Step{flow.StepDocumentPhoto},
+				AcceptedDocumentTypes: []string{flow.DocumentTypeDrivingLicence}, RequestedAttributes: odixusLicenceData,
+				BSNPolicy: privacy.BSNPolicyRetrieve, KeepFacePhotos: new(true),
 				LegalBasis: privacy.LegalBasisLegalObligation, ProcessingPurpose: odixusPurpose,
-				AttributeReasons: odixusReasons(odixusDigiDData),
-			}, address: proofing.AddressRequired},
-			// Without DigiD: the Idem app reads the document's chip and CM's
-			// ID scan photographs the same document.
-			{def: flow.FlowDefinition{
-				Name: flowOdixusNoDigiD, Steps: odixusChipSteps, Apps: []flow.App{flow.AppIdem},
-				RequiredChecks: odixusChipChecks, AcceptedDocumentTypes: odixusChipDocuments,
-				RequestedAttributes: odixusChipData,
-				BSNPolicy:           privacy.BSNPolicyMask, BlurBSN: new(true), KeepFacePhotos: new(false),
-				LegalBasis: privacy.LegalBasisLegalObligation, ProcessingPurpose: odixusPurpose,
-				AttributeReasons: odixusReasons(odixusChipData),
+				AttributeReasons: odixusReasons(odixusLicenceData),
 			}},
 		},
 		theme: odixusTheme,

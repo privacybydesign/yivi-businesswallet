@@ -175,6 +175,7 @@ export interface TestEmailInput {
 // renders the matrix the list endpoint returns.
 export const MAIL_TEMPLATE_KINDS = [
   "credential_offer",
+  "credential_revoked",
   "event_notification",
   "identity_overdue",
   "identity_proofing_requested",

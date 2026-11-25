@@ -107,6 +107,20 @@ page goes on by itself; denied, it says why and waits for the signer to continue
 `POST …/cancel` denies it. The id is unguessable and is the page's whole
 authorization; `oauth2/authorize` is rate limited per client address.
 
+**The wallet's own pages do not go there.** A start against the built-in service
+answers `authorizeInApp: true`, and the page that started it (the member's signing
+page, the external signee's `/sign/{token}`) asks `authorizeUrl` for JSON:
+`oauth2/authorize` answers a caller that accepts `application/json` and not
+`text/html` with `{authorizationId, redirectUrl}` instead of the redirect. The page
+shows the same step in a dialog (`routes/signing-authorization-dialog.tsx`; the
+panel and `lib/use-signing-authorization.ts` are shared with the standalone page),
+so the signer scans where they pressed Sign. The decided authorization's
+`redirectUrl` is still a full navigation, to the callback and back to the same
+page. Closing the dialog cancels a pending authorization rather than hiding it: the
+ceremony holds the request until that redirect ends it. If the JSON start fails the
+browser is sent to `authorizeUrl` as before. A remote provider is never
+`authorizeInApp`: its authorization page is its own.
+
 The page shows the document's name because a cross-device QR code can be relayed:
 somebody who starts an authorization and gets another person to scan it would be
 signing with that person's identity. The Yivi app shows who is asking and for what

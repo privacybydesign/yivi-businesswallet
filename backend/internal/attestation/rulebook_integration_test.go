@@ -147,7 +147,7 @@ func TestOrganizationSchemaStillIssuesStrings(t *testing.T) {
 	_, err := e.service.Issue(ctx, e.orgID, &e.actorID, "Caesar", attestation.IssueInput{
 		TemplateID: templateID,
 		Recipient:  attestation.Recipient{Kind: attestation.RecipientOrganization, Ref: "supplier@qerds.example"},
-		Attributes: map[string]any{"name": map[string]any{"nested": "x"}},
+		Attributes: map[string]any{"name": map[string]any{"nested": "x"}, attestation.IdentifierClaim: map[string]any{"euid": "NLNHR.12345678"}},
 	})
 	if !errors.Is(err, attestation.ErrInvalidAttribute) {
 		t.Errorf("nested value on an organization schema err = %v, want ErrInvalidAttribute", err)

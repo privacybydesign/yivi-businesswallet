@@ -7,7 +7,8 @@ import { ApiError } from "../api/http";
 import { REGISTER_SESSION_URL, registerWallet } from "../api/wallet";
 import type { WalletEnrollment } from "../api/wallet";
 import { meQueryKey } from "../api/auth.queries";
-import { representationLabel } from "../lib/representation";
+import { registeredMessage, statedCompanyError } from "../lib/representation";
+import { CompanyNameField } from "./company-name-field";
 import { usePreAuthOrgTheme } from "../lib/pre-auth-theme";
 import {
   Button,
@@ -44,6 +45,10 @@ function errorMessage(error: unknown, t: TFunction): string {
     if (code === "ebwoid_mismatch") {
       return t("register.ebwoidMismatch");
     }
+    const stated = statedCompanyError(code, t);
+    if (stated !== null) {
+      return stated;
+    }
     if (code === "slug_taken") {
       return t("register.slugTaken");
     }
@@ -65,6 +70,7 @@ export default function Register(): React.JSX.Element {
   const [phase, setPhase] = useState<Phase>("form");
   const [kvkNumber, setKvkNumber] = useState("");
   const [slug, setSlug] = useState("");
+  const [companyName, setCompanyName] = useState("");
   const [result, setResult] = useState<WalletEnrollment | null>(null);
   const [message, setMessage] = useState("");
 
@@ -74,6 +80,7 @@ export default function Register(): React.JSX.Element {
       disclosureToken,
       kvkNumber: kvkNumber.trim(),
       slug: slug.trim(),
+      legalName: companyName.trim(),
     })
       .then((data) => {
         setResult(data);
@@ -144,9 +151,7 @@ export default function Register(): React.JSX.Element {
                 tone="success"
                 icon="valid"
                 title={t("register.registeredAt", { org: result.legalName })}
-                message={t("register.yourRole", {
-                  role: representationLabel(result, t),
-                })}
+                message={registeredMessage(result, "register.yourRole", t)}
                 action={
                   <Button variant="primary" onClick={() => void enterApp()}>
                     {t("register.enter", { org: result.legalName })}
@@ -239,6 +244,10 @@ export default function Register(): React.JSX.Element {
                       autoFocus
                     />
                   </label>
+                  <CompanyNameField
+                    value={companyName}
+                    onChange={setCompanyName}
+                  />
                   <label className="flex flex-col gap-1.5">
                     <span className="text-ink text-[13px] font-semibold">
                       {t("register.slug")}
@@ -255,7 +264,11 @@ export default function Register(): React.JSX.Element {
                   </label>
                   <Button
                     type="submit"
-                    disabled={kvkNumber.trim() === "" || slug.trim() === ""}
+                    disabled={
+                      kvkNumber.trim() === "" ||
+                      companyName.trim() === "" ||
+                      slug.trim() === ""
+                    }
                   >
                     {t("register.continue")}
                   </Button>

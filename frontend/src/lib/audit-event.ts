@@ -75,6 +75,7 @@ const ACTION_VISUAL: Record<string, { icon: IconName; tone: AuditTone }> = {
   "attestation.key_revoked": { icon: "close", tone: "red" },
   "attestation.offer_accepted": { icon: "valid", tone: "green" },
   "attestation.offer_declined": { icon: "close", tone: "slate" },
+  "attestation.offer_failed": { icon: "warning", tone: "amber" },
   "email.settings_updated": { icon: "settings", tone: "blue" },
   "email.template_updated": { icon: "email", tone: "blue" },
   "email.template_reset": { icon: "email", tone: "amber" },
@@ -325,6 +326,8 @@ export function auditActionLabel(action: string, t: TFunction): string {
       return t("auditLog.actions.qerdsMessageSent");
     case "qerds.message_received":
       return t("auditLog.actions.qerdsMessageReceived");
+    case "qerds.message_read":
+      return t("auditLog.actions.qerdsMessageRead");
     case "qerds.address_provisioned":
       return t("auditLog.actions.qerdsAddressProvisioned");
     case "qerds.address_default_changed":
@@ -371,6 +374,8 @@ export function auditActionLabel(action: string, t: TFunction): string {
       return t("auditLog.actions.kvkRegistrationValidated");
     case "kvk.registration_not_validated":
       return t("auditLog.actions.kvkRegistrationNotValidated");
+    case "kvk.registration_declared":
+      return t("auditLog.actions.kvkRegistrationDeclared");
     case "attestation.schema_created":
       return t("auditLog.actions.attestationSchemaCreated");
     case "attestation.schema_updated":
@@ -409,6 +414,8 @@ export function auditActionLabel(action: string, t: TFunction): string {
       return t("auditLog.actions.attestationOfferAccepted");
     case "attestation.offer_declined":
       return t("auditLog.actions.attestationOfferDeclined");
+    case "attestation.offer_failed":
+      return t("auditLog.actions.attestationOfferFailed");
     case "email.settings_updated":
       return t("auditLog.actions.emailSettingsUpdated");
     case "email.template_updated":

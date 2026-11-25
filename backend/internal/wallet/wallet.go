@@ -25,6 +25,9 @@ var (
 	ErrNotRepresentative = errors.New("wallet: requester is not a listed representative")
 	// ErrUnknownKVK means the KVK number is not in the register at all.
 	ErrUnknownKVK = errors.New("wallet: kvk number not found in the register")
+	// ErrCompanyNameRequired means the register supplies no company name and the
+	// requester stated none.
+	ErrCompanyNameRequired = errors.New("wallet: a company name is required")
 	// ErrEBWOIDMismatch means the EBWOID names another company than the register.
 	ErrEBWOIDMismatch = errors.New("wallet: owner identification data does not match the register")
 
@@ -42,6 +45,11 @@ type Requester struct {
 	GivenNames  string
 	FamilyName  string
 	DateOfBirth string
+	// Disclosed marks a fresh wallet disclosure, which identifies the first owner.
+	Disclosed bool
+	// CompanyName is the company name the requester states, for a register that
+	// supplies none (registryprovider.DeclaredRegistry).
+	CompanyName string
 }
 
 // Representation is one authorised representative from the KVK attestation — the
@@ -64,6 +72,7 @@ type Representation struct {
 type Registration struct {
 	OrgID             uuid.UUID
 	RequestorUserID   uuid.UUID
+	Requester         Requester
 	Slug              string
 	DigitalAddress    string
 	KVKContactAddress string

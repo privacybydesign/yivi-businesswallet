@@ -73,6 +73,7 @@ const (
 
 	QerdsMessageSent           = "qerds.message_sent"
 	QerdsMessageReceived       = "qerds.message_received"
+	QerdsMessageRead           = "qerds.message_read"
 	QerdsAddressProvisioned    = "qerds.address_provisioned"
 	QerdsAddressDefaultChanged = "qerds.address_default_changed"
 	QerdsAddressDeleted        = "qerds.address_deleted"
@@ -101,6 +102,9 @@ const (
 	// it consults its authentic source for a registration request.
 	KVKRegistrationValidated    = "kvk.registration_validated"
 	KVKRegistrationNotValidated = "kvk.registration_not_validated"
+	// KVKRegistrationDeclared is a company accepted as the requester stated it,
+	// with no register consulted.
+	KVKRegistrationDeclared = "kvk.registration_declared"
 
 	AttestationSchemaCreated   = "attestation.schema_created"
 	AttestationSchemaUpdated   = "attestation.schema_updated"
@@ -123,6 +127,7 @@ const (
 	AttestationHeldStatusChanged = "attestation.held_status_changed"
 	AttestationOfferAccepted     = "attestation.offer_accepted"
 	AttestationOfferDeclined     = "attestation.offer_declined"
+	AttestationOfferFailed       = "attestation.offer_failed"
 
 	EmailSettingsUpdated = "email.settings_updated"
 	EmailTemplateUpdated = "email.template_updated"

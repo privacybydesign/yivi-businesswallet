@@ -79,6 +79,7 @@ const (
 	envWalletUnitSKAKeyStorage       = "WALLET_UNIT_SKA_KEY_STORAGE"
 	envWalletUnitSKAUserAuth         = "WALLET_UNIT_SKA_USER_AUTHENTICATION"
 	envOpenID4VPRequesterPublicURL   = "OPENID4VP_REQUESTER_PUBLIC_URL"
+	envAttestationStatusListBaseURL  = "ATTESTATION_STATUS_LIST_BASE_URL"
 
 	envPlatformAdminEmails = "PLATFORM_ADMIN_EMAILS"
 
@@ -190,6 +191,19 @@ const (
 	// QR stays on screen for a recording; zero claims at once.
 	envAttestationStubClaimDelay = "ATTESTATION_STUB_CLAIM_DELAY"
 	envAttestationPingCredential = "ATTESTATION_ISSUER_PING_CREDENTIAL"
+	// envAttestationRulebookIssuerURL is the EU reference issuer that issues the
+	// WE BUILD rulebook credentials, v0.9.4 up to v0.10.1 (see EudiIssuer). Empty
+	// sends them to the issuer above.
+	envAttestationRulebookIssuerURL = "ATTESTATION_RULEBOOK_ISSUER_URL"
+	// The status list this backend keeps for that issuer: the API key the issuer
+	// reserves entries with, and the issuer's own certificate (PEM chain, leaf
+	// first) and key, which sign the lists. All three or none.
+	envAttestationRulebookStatusListAPIKey = "ATTESTATION_RULEBOOK_STATUS_LIST_API_KEY"
+	envAttestationRulebookIssuerCert       = "ATTESTATION_RULEBOOK_ISSUER_CERT"
+	envAttestationRulebookIssuerKey        = "ATTESTATION_RULEBOOK_ISSUER_KEY"
+	// envAttestationIssuerStatusList says the issuer puts every credential on a
+	// Token Status List; without it only a local stack issues one valid over 24h.
+	envAttestationIssuerStatusList = "ATTESTATION_ISSUER_STATUS_LIST"
 
 	// Attestation holder (the "store, select" side). The irmago EUDI holder engine
 	// is backed by Postgres, one isolated schema per org; the storage dir holds
@@ -364,6 +378,9 @@ const (
 
 	// The wallet-bootstrap registry (KVK) provider. Reuses ProviderStub ("stub").
 	defaultWalletRegistryProvider = ProviderStub
+	// ProviderDeclared accepts the company a registrant states, consulting no
+	// register: for a deployment real companies register on, until KVK is connected.
+	ProviderDeclared = "declared"
 
 	// ProviderValidatieNL checks a VOG for real with validatie.nl, and is the
 	// default; ProviderStub accepts every VOG and runs only when set explicitly
@@ -486,6 +503,10 @@ type Config struct {
 	// wallet fetches request_uri from and posts the response to. Defaults to
 	// AppBaseURL.
 	OpenID4VPRequesterPublicURL string
+	// AttestationStatusListBaseURL is the base URL (no /api/v1) written into
+	// the status list references of the credentials this wallet issues.
+	// Defaults to AppBaseURL.
+	AttestationStatusListBaseURL string
 
 	QerdsProvider             string
 	QerdsProviderURL          string
@@ -571,6 +592,16 @@ type Config struct {
 	AttestationIssuerToken    string
 	AttestationIssuerInstance string
 	AttestationPingCredential string
+	// AttestationRulebookIssuerURL is the EU reference issuer for WE BUILD
+	// rulebook credentials; empty sends them to AttestationIssuer.
+	AttestationRulebookIssuerURL string
+	// AttestationRulebookStatusListAPIKey, Cert and Key are the envAttestationRulebook*
+	// status list settings; set means rulebook credentials are revocable.
+	AttestationRulebookStatusListAPIKey string
+	AttestationRulebookIssuerCert       string
+	AttestationRulebookIssuerKey        string
+	// AttestationIssuerStatusList is envAttestationIssuerStatusList.
+	AttestationIssuerStatusList bool
 	// AttestationStubClaimDelay is how long the stub issuer reports an offer
 	// pending; zero reports it issued at once.
 	AttestationStubClaimDelay time.Duration
@@ -699,8 +730,9 @@ func Load() (Config, error) {
 		IdentityProofingEncryptionKey: os.Getenv(envIdentityProofingEncryptionKey),
 		IdentityProofingEDLCSCAPaths:  parseList(os.Getenv(envIdentityProofingEDLCSCAPaths)),
 
-		AttestationIssuerToken:    os.Getenv(envAttestationIssuerToken),
-		AttestationPingCredential: os.Getenv(envAttestationPingCredential),
+		AttestationIssuerToken:       os.Getenv(envAttestationIssuerToken),
+		AttestationPingCredential:    os.Getenv(envAttestationPingCredential),
+		AttestationRulebookIssuerURL: os.Getenv(envAttestationRulebookIssuerURL),
 
 		AttestationHolderTrustChain: os.Getenv(envAttestationHolderTrustChain),
 		AttestationHolderStagingAnchors: strings.EqualFold(
@@ -955,7 +987,14 @@ func loadAttestationIssuer(c *Config) error {
 	c.AttestationIssuer = envOrDefault(envAttestationIssuer, defaultAttestationIssuer)
 	c.AttestationIssuerURL = os.Getenv(envAttestationIssuerURL)
 	c.AttestationIssuerInstance = os.Getenv(envAttestationIssuerInstance)
+	c.AttestationIssuerStatusList = strings.EqualFold(os.Getenv(envAttestationIssuerStatusList), "true")
+	if err := loadRulebookStatusList(c); err != nil {
+		return err
+	}
 	if c.AttestationIssuer == IssuerStub {
+		if c.AttestationIssuerStatusList {
+			return fmt.Errorf("config: %s=true needs a real issuer: %s=%q keeps no status list", envAttestationIssuerStatusList, envAttestationIssuer, IssuerStub)
+		}
 		return nil
 	}
 	if c.AttestationIssuerURL == "" {
@@ -963,6 +1002,27 @@ func loadAttestationIssuer(c *Config) error {
 	}
 	if c.AttestationIssuerInstance == "" {
 		return fmt.Errorf("config: %s must be set when %s is not %q", envAttestationIssuerInstance, envAttestationIssuer, IssuerStub)
+	}
+	return nil
+}
+
+func loadRulebookStatusList(c *Config) error {
+	c.AttestationRulebookStatusListAPIKey = os.Getenv(envAttestationRulebookStatusListAPIKey)
+	c.AttestationRulebookIssuerCert = os.Getenv(envAttestationRulebookIssuerCert)
+	c.AttestationRulebookIssuerKey = os.Getenv(envAttestationRulebookIssuerKey)
+	set := 0
+	for _, v := range []string{c.AttestationRulebookStatusListAPIKey, c.AttestationRulebookIssuerCert, c.AttestationRulebookIssuerKey} {
+		if v != "" {
+			set++
+		}
+	}
+	switch {
+	case set == 0:
+		return nil
+	case set < 3:
+		return fmt.Errorf("config: %s, %s and %s must be set together", envAttestationRulebookStatusListAPIKey, envAttestationRulebookIssuerCert, envAttestationRulebookIssuerKey)
+	case c.AttestationRulebookIssuerURL == "":
+		return fmt.Errorf("config: the rulebook status list needs %s", envAttestationRulebookIssuerURL)
 	}
 	return nil
 }
@@ -1005,6 +1065,10 @@ func loadURLs(c *Config) error {
 	if err := requireAbsoluteHTTPURL(envOpenID4VPRequesterPublicURL, c.OpenID4VPRequesterPublicURL); err != nil {
 		return err
 	}
+	c.AttestationStatusListBaseURL = envOrDefault(envAttestationStatusListBaseURL, c.AppBaseURL)
+	if err := requireAbsoluteHTTPURL(envAttestationStatusListBaseURL, c.AttestationStatusListBaseURL); err != nil {
+		return err
+	}
 	c.IdentityProofingPublicURL = envOrDefault(envIdentityProofingPublicURL, c.AppBaseURL)
 	if err := requireAbsoluteHTTPURL(envIdentityProofingPublicURL, c.IdentityProofingPublicURL); err != nil {
 		return err
@@ -1039,14 +1103,15 @@ func requireProductionSettings(c *Config) error {
 	// address register: over the network only with https. Plain http to this
 	// machine never leaves it.
 	for key, raw := range map[string]string{
-		envIdentityProofingPublicURL:   c.IdentityProofingPublicURL,
-		envRegulaFaceAPIPublicURL:      c.RegulaFaceAPIPublicURL,
-		envVogValidatorURL:             c.VogValidatorURL,
-		envIDScanAPIURL:                c.IDScanAPIURL,
-		envAppBaseURL:                  c.AppBaseURL,
-		envOpenID4VPRequesterPublicURL: c.OpenID4VPRequesterPublicURL,
-		envAddressLookupURL:            c.AddressLookupURL,
-		envSigningRedirectURI:          c.SigningRedirectURI,
+		envIdentityProofingPublicURL:    c.IdentityProofingPublicURL,
+		envRegulaFaceAPIPublicURL:       c.RegulaFaceAPIPublicURL,
+		envVogValidatorURL:              c.VogValidatorURL,
+		envIDScanAPIURL:                 c.IDScanAPIURL,
+		envAppBaseURL:                   c.AppBaseURL,
+		envOpenID4VPRequesterPublicURL:  c.OpenID4VPRequesterPublicURL,
+		envAttestationStatusListBaseURL: c.AttestationStatusListBaseURL,
+		envAddressLookupURL:             c.AddressLookupURL,
+		envSigningRedirectURI:           c.SigningRedirectURI,
 	} {
 		if raw != "" && !strings.HasPrefix(strings.ToLower(raw), "https://") && !localhostURL(raw) {
 			return fmt.Errorf("config: %s %q must be https outside %s=true (a local stack)", key, raw, envDevMode)

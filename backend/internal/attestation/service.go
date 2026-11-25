@@ -59,7 +59,7 @@ type issuedStore interface {
 	MarkClaimed(ctx context.Context, orgID, id uuid.UUID, credentialUUID string) (Issued, error)
 	GetIssued(ctx context.Context, orgID, id uuid.UUID) (Issued, error)
 	ListIssued(ctx context.Context, orgID uuid.UUID) ([]Issued, error)
-	Revoke(ctx context.Context, orgID, id uuid.UUID) (Issued, error)
+	Revoke(ctx context.Context, orgID, id uuid.UUID, reason string) (Issued, error)
 	Cancel(ctx context.Context, orgID, id uuid.UUID) (Issued, error)
 	GetClaim(ctx context.Context, token string) (claimRow, error)
 }
@@ -82,6 +82,7 @@ type offerStore interface {
 	ListPendingOffers(ctx context.Context, orgID uuid.UUID) ([]CredentialOffer, error)
 	ClaimOffer(ctx context.Context, orgID, id uuid.UUID) (CredentialOffer, error)
 	ReleaseOffer(ctx context.Context, orgID, id uuid.UUID) error
+	FailOffer(ctx context.Context, orgID, id uuid.UUID) error
 	AcceptOffer(ctx context.Context, orgID, id uuid.UUID, in HeldInput) (HeldAttestation, error)
 	DeclineOffer(ctx context.Context, orgID, id uuid.UUID) (CredentialOffer, error)
 }
@@ -99,11 +100,15 @@ type holderEngine interface {
 	Validities(ctx context.Context, orgID uuid.UUID) (map[string]eudiholder.HeldValidity, error)
 	RefreshStatuses(ctx context.Context, orgID uuid.UUID) (int, error)
 	RefreshStatus(ctx context.Context, orgID uuid.UUID, ref string) (int, error)
+	Payload(ctx context.Context, orgID uuid.UUID, ref string) (map[string]any, error)
 }
 
 // emailNotifier delivers a person-facing "your credential is ready" e-mail.
 type emailNotifier interface {
 	SendCredentialOffer(ctx context.Context, orgID uuid.UUID, to, orgName, credentialName, claimURL, txCode string) error
+	// SendCredentialRevoked tells a natural-person holder that a credential was
+	// revoked, and why.
+	SendCredentialRevoked(ctx context.Context, orgID uuid.UUID, to, orgName, credentialName, reason string) error
 }
 
 // qerdsNotifier delivers an organization-facing OpenID4VCI credential offer over
@@ -114,21 +119,26 @@ type qerdsNotifier interface {
 	SendCredentialOffer(ctx context.Context, orgID uuid.UUID, toAddress, orgName, credentialName, offerURI string) error
 	// SendOfferDeclined tells the issuer at toAddress that its offer was declined.
 	SendOfferDeclined(ctx context.Context, orgID uuid.UUID, toAddress, credentialName, offerURI string) error
+	// SendCredentialRevoked tells the holder at toAddress that a credential it
+	// was issued has been revoked, and why.
+	SendCredentialRevoked(ctx context.Context, orgID uuid.UUID, toAddress, credentialName, reason string) error
 }
 
 // Service coordinates issuance across the ledger store, the hosted issuer and the
 // two recipient-delivery channels (e-mail for people, QERDS for organizations).
 type Service struct {
-	store      issuedStore
-	issuer     issuer
-	instances  issuerInstanceResolver
-	email      emailNotifier
-	qerds      qerdsNotifier
-	held       heldMutator
-	offers     offerStore
-	holder     holderEngine
-	appBaseURL string
-	now        func() time.Time
+	store       issuedStore
+	issuer      issuer
+	instances   issuerInstanceResolver
+	email       emailNotifier
+	qerds       qerdsNotifier
+	held        heldMutator
+	offers      offerStore
+	holder      holderEngine
+	appBaseURL  string
+	now         func() time.Time
+	statusLists StatusListPolicy
+	heldFresh   heldFreshness
 }
 
 func NewService(store issuedStore, iss issuer, instances issuerInstanceResolver, email emailNotifier, qerds qerdsNotifier, held heldMutator, offers offerStore, holder holderEngine, appBaseURL string) *Service {
@@ -143,7 +153,47 @@ func NewService(store issuedStore, iss issuer, instances issuerInstanceResolver,
 		holder:     holder,
 		appBaseURL: strings.TrimRight(appBaseURL, "/"),
 		now:        time.Now,
+		heldFresh: heldFreshness{
+			checked: map[uuid.UUID]time.Time{},
+			running: map[uuid.UUID]chan struct{}{},
+		},
 	}
+}
+
+// StatusListPolicy says which credentials this deployment's issuers can put on a
+// Token Status List, which a credential valid over 24 hours needs (CS-10).
+type StatusListPolicy struct {
+	// Enforce refuses what needs a status list the issuer lacks. Off on a local stack.
+	Enforce bool
+	// Default is true when the default issuer puts every credential on a status list.
+	Default bool
+	// RulebookRouted is true when rulebook credentials go to their own issuer, which
+	// ignores the template validity and issues for as long as its own configuration
+	// says. Rulebook says whether that issuer puts them on a status list.
+	RulebookRouted bool
+	Rulebook       bool
+}
+
+// SetStatusListPolicy sets what CheckValidity refuses. Without it nothing is refused.
+func (s *Service) SetStatusListPolicy(p StatusListPolicy) { s.statusLists = p }
+
+// CheckValidity refuses a template this deployment may not issue: one whose
+// credentials live over 24 hours without a status list to revoke them on.
+func (s *Service) CheckValidity(validitySeconds *int, rulebook bool) error {
+	p := s.statusLists
+	if !p.Enforce {
+		return nil
+	}
+	if rulebook && p.RulebookRouted {
+		if !p.Rulebook {
+			return ErrRulebookStatusListRequired
+		}
+		return nil
+	}
+	if !p.Default && needsStatusList(validitySeconds) {
+		return ErrStatusListRequired
+	}
+	return nil
 }
 
 // instanceFor resolves the org's issuer instance so offers route to that org's
@@ -178,11 +228,17 @@ func (s *Service) Issue(ctx context.Context, orgID uuid.UUID, issuedBy *uuid.UUI
 	if err := validateAttributes(detail, in.Attributes); err != nil {
 		return IssueResult{}, err
 	}
-
-	expirationSeconds := defaultExpirationSeconds
-	if detail.ValiditySeconds != nil {
-		expirationSeconds = *detail.ValiditySeconds
+	if detail.SchemaRulebook == "" && detail.SubjectType == SubjectOrganization {
+		identifier, _ := normalizeIdentifier(in.Attributes[IdentifierClaim])
+		in.Attributes = maps.Clone(in.Attributes)
+		in.Attributes[IdentifierClaim] = identifier
 	}
+	// Also here: a template saved before the rule, or by another deployment.
+	if err := s.CheckValidity(detail.ValiditySeconds, detail.SchemaRulebook != ""); err != nil {
+		return IssueResult{}, err
+	}
+
+	expirationSeconds := expirationSecondsFor(detail.ValiditySeconds)
 	var expiresAt *time.Time
 	if expirationSeconds > 0 {
 		t := s.now().Add(time.Duration(expirationSeconds) * time.Second)
@@ -215,6 +271,7 @@ func (s *Service) Issue(ctx context.Context, orgID uuid.UUID, issuedBy *uuid.UUI
 		// .ai/features/oid4vci-over-qerds.md §4).
 		UseTxCode:   in.Recipient.Kind == RecipientExternal,
 		AwaitRedeem: in.Recipient.Kind == RecipientOrganization,
+		Rulebook:    detail.SchemaRulebook != "",
 	})
 	if err != nil {
 		if failErr := s.store.MarkFailed(ctx, orgID, issued.ID); failErr != nil {
@@ -346,7 +403,7 @@ func (s *Service) ClaimStatus(ctx context.Context, token string) (ClaimView, err
 // degrades to a local-only flip — there is nothing published that could drift.
 // Any other issuer failure leaves the local state untouched and surfaces the
 // error (the same fail-safe, external-first ordering as DeleteHeld).
-func (s *Service) Revoke(ctx context.Context, orgID, id uuid.UUID) (Issued, error) {
+func (s *Service) Revoke(ctx context.Context, orgID, id uuid.UUID, in RevokeInput) (Issued, error) {
 	issued, err := s.store.GetIssued(ctx, orgID, id)
 	if err != nil {
 		return Issued{}, err
@@ -372,7 +429,39 @@ func (s *Service) Revoke(ctx context.Context, orgID, id uuid.UUID) (Issued, erro
 		slog.WarnContext(ctx, "attestation: revoking claimed attestation with no issuer credential uuid; status list not updated",
 			slog.String("id", id.String()))
 	}
-	return s.store.Revoke(ctx, orgID, id)
+	revoked, err := s.store.Revoke(ctx, orgID, id, in.Reason)
+	if err != nil {
+		return Issued{}, err
+	}
+	s.notifyRevoked(ctx, orgID, in.IssuerName, revoked)
+	return revoked, nil
+}
+
+// notifyRevoked tells the holder that its credential was revoked and why
+// (CS-10 ISS-RV-09): an organization over QERDS, whose wallet then re-reads the
+// status list, a person by e-mail. Failures are logged: the status list already
+// says revoked.
+func (s *Service) notifyRevoked(ctx context.Context, orgID uuid.UUID, issuerName string, issued Issued) {
+	if issued.RecipientRef == "" {
+		return
+	}
+	name := issued.SchemaVCT
+	if issued.TemplateID != nil {
+		if detail, err := s.store.GetTemplateDetail(ctx, orgID, *issued.TemplateID); err == nil {
+			name = detail.Name
+		}
+	}
+	var err error
+	switch {
+	case issued.RecipientKind == RecipientOrganization && s.qerds != nil:
+		err = s.qerds.SendCredentialRevoked(ctx, orgID, issued.RecipientRef, name, issued.RevocationReason)
+	case issued.RecipientKind != RecipientOrganization && s.email != nil:
+		err = s.email.SendCredentialRevoked(ctx, orgID, issued.RecipientRef, issuerName, name, issued.RevocationReason)
+	}
+	if err != nil {
+		slog.ErrorContext(ctx, "attestation: revocation notice failed",
+			slog.String("id", issued.ID.String()), slog.String("recipient", issued.RecipientRef), slog.String("error", err.Error()))
+	}
 }
 
 // isRevocable reports whether an attestation in this status can still be revoked
@@ -435,6 +524,10 @@ func (s *Service) AcceptOffer(ctx context.Context, orgID, id uuid.UUID) (HeldAtt
 		return HeldAttestation{}, err
 	}
 	redeemed, err := s.holder.Redeem(ctx, orgID, offer.Offer)
+	if errors.Is(err, eudiholder.ErrOfferUsed) {
+		s.settleClaim(ctx, orgID, id, s.offers.FailOffer)
+		return HeldAttestation{}, fmt.Errorf("%w: offer %s org %s: %w", ErrOfferUsed, id, orgID, err)
+	}
 	if err != nil {
 		s.releaseClaim(ctx, orgID, id)
 		return HeldAttestation{}, fmt.Errorf("attestation: redeem accepted offer %s org %s: %w", id, orgID, err)
@@ -470,10 +563,16 @@ func (s *Service) AcceptOffer(ctx context.Context, orgID, id uuid.UUID) (HeldAtt
 // fails anyway is logged rather than returned, because the redemption error is
 // what the admin needs to see.
 func (s *Service) releaseClaim(ctx context.Context, orgID, id uuid.UUID) {
+	s.settleClaim(ctx, orgID, id, s.offers.ReleaseOffer)
+}
+
+// settleClaim moves a claim on after a failed redemption, back to pending or to
+// failed, on a detached context for the reason releaseClaim gives.
+func (s *Service) settleClaim(ctx context.Context, orgID, id uuid.UUID, settle func(context.Context, uuid.UUID, uuid.UUID) error) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), releaseClaimTimeout)
 	defer cancel()
-	if err := s.offers.ReleaseOffer(ctx, orgID, id); err != nil {
-		slog.ErrorContext(ctx, "attestation: reopening a credential offer after a failed redemption",
+	if err := settle(ctx, orgID, id); err != nil {
+		slog.ErrorContext(ctx, "attestation: settling a credential offer after a failed redemption",
 			slog.String("orgId", orgID.String()),
 			slog.String("offerId", id.String()),
 			slog.String("error", err.Error()))
@@ -584,6 +683,7 @@ func (s *Service) HeldClaims(ctx context.Context, orgID, id uuid.UUID, lang stri
 	if err != nil {
 		return HeldClaimsView{}, err
 	}
+	s.refreshHeldIfStale(ctx, orgID)
 	cred, err := s.holder.Claims(ctx, orgID, held.CredentialRef, held.VCT, lang)
 	if err != nil {
 		return HeldClaimsView{}, fmt.Errorf("attestation: held claims %s from engine: %w", id, err)
@@ -600,7 +700,11 @@ func (s *Service) HeldClaims(ctx context.Context, orgID, id uuid.UUID, lang stri
 		return HeldClaimsView{}, fmt.Errorf("attestation: held validity %s from engine: %w", id, err)
 	}
 	validity := validities[held.CredentialRef]
-	rulebookID, violations, err := checkRulebook(held.VCT, cred.Attributes)
+	payload, err := s.holder.Payload(ctx, orgID, held.CredentialRef)
+	if err != nil {
+		return HeldClaimsView{}, fmt.Errorf("attestation: held claims %s payload from engine: %w", id, err)
+	}
+	rulebookID, violations, err := checkRulebook(held.VCT, cred.Attributes, payload)
 	if err != nil {
 		return HeldClaimsView{}, fmt.Errorf("attestation: held claims %s rulebook check: %w", id, err)
 	}
@@ -622,18 +726,24 @@ func (s *Service) HeldClaims(ctx context.Context, orgID, id uuid.UUID, lang stri
 	}, nil
 }
 
-// checkRulebook validates a held credential's claims against the WE BUILD rulebook
-// its vct belongs to. It returns no rulebook for any other vct.
-func checkRulebook(vct string, attrs []eudiholder.HeldAttribute) (string, []string, error) {
+// checkRulebook validates a held credential against the WE BUILD rulebook its vct
+// belongs to: the whole signed payload (vct, cnf, status and every claim) when the
+// engine holds one, else the disclosed claims. It returns no rulebook for any other vct.
+func checkRulebook(vct string, attrs []eudiholder.HeldAttribute, payload map[string]any) (string, []string, error) {
 	rb, ok := rulebook.ForVCT(vct)
 	if !ok {
 		return "", nil, nil
 	}
-	claims := make(map[string]any, len(attrs))
-	for _, a := range attrs {
-		claims[a.Key] = a.Value
+	var err error
+	if payload != nil {
+		err = rb.ValidatePayload(payload)
+	} else {
+		claims := make(map[string]any, len(attrs))
+		for _, a := range attrs {
+			claims[a.Key] = a.Value
+		}
+		err = rb.ValidateClaims(claims)
 	}
-	err := rb.ValidateClaims(claims)
 	var ve *rulebook.ValidationError
 	if errors.As(err, &ve) {
 		return rb.ID, ve.Violations, nil
@@ -653,6 +763,7 @@ func (s *Service) ListHeld(ctx context.Context, orgID uuid.UUID, lang string) ([
 	if err != nil {
 		return nil, err
 	}
+	s.refreshHeldIfStale(ctx, orgID)
 	displays, err := s.holder.Displays(ctx, orgID, lang)
 	if err != nil {
 		return nil, fmt.Errorf("attestation: held displays org %s from engine: %w", orgID, err)
@@ -738,11 +849,31 @@ func validateAttributes(detail TemplateDetail, provided map[string]any) error {
 		}
 		return rb.ValidateClaims(provided)
 	}
+	if detail.SubjectType == SubjectOrganization {
+		if err := validateIdentifier(provided[IdentifierClaim]); err != nil {
+			return err
+		}
+	}
+	return validateOwnAttributes(detail, provided)
+}
+
+func validateIdentifier(value any) error {
+	if value == nil {
+		return fmt.Errorf("%w: %q", ErrMissingAttribute, IdentifierClaim)
+	}
+	_, err := normalizeIdentifier(value)
+	return err
+}
+
+func validateOwnAttributes(detail TemplateDetail, provided map[string]any) error {
 	byKey := make(map[string]AttributeDef, len(detail.SchemaAttributes))
 	for _, a := range detail.SchemaAttributes {
 		byKey[a.Key] = a
 	}
 	for key, value := range provided {
+		if key == IdentifierClaim && detail.SubjectType == SubjectOrganization {
+			continue
+		}
 		if _, ok := byKey[key]; !ok {
 			return fmt.Errorf("%w: %q", ErrUnknownAttribute, key)
 		}

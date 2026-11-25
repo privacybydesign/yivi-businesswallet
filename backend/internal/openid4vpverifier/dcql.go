@@ -98,6 +98,9 @@ type dcqlCredential struct {
 	Format string      `json:"format"`
 	Meta   dcqlMeta    `json:"meta"`
 	Claims []dcqlClaim `json:"claims"`
+	// ClaimSets are the claim ids the wallet may disclose, the first set it
+	// can satisfy winning; absent is every claim.
+	ClaimSets [][]string `json:"claim_sets,omitempty"`
 }
 
 type dcqlMeta struct {
@@ -105,6 +108,7 @@ type dcqlMeta struct {
 }
 
 type dcqlClaim struct {
+	ID   string   `json:"id,omitempty"`
 	Path []string `json:"path"`
 }
 
@@ -296,7 +300,8 @@ var defaultProofingSources = []string{SourcePassport, SourceIdentityCard, Source
 // one credential set: they share one. A document credential discloses the
 // name, nationality and date of birth (an age claim replaces it) plus req's
 // claims; the personal data its name and date of birth, which ties a
-// photographed document to the person, and an age claim, never a photo.
+// photographed document to the person, an age claim and whether the holder is
+// Dutch, never a photo.
 func (v vcts) proofingRequestQuery(req ProofingRequest) dcqlQuery {
 	sources := req.Sources
 	if len(sources) == 0 {
@@ -306,13 +311,17 @@ func (v vcts) proofingRequestQuery(req ProofingRequest) dcqlQuery {
 	if !slices.ContainsFunc(req.Claims, isAgeClaim) {
 		names = append(names, ClaimDateOfBirth)
 	}
-	documentClaims := claimPaths(append(names, req.Claims...)...)
+	documentClaims := claimPaths(append(slices.Clone(names), req.Claims...)...)
+	// A driving licence has no nationality, so asking it would leave the
+	// holder unable to share one.
+	licenceNames := slices.DeleteFunc(slices.Clone(names), func(c string) bool { return c == ClaimNationality })
+	licenceClaims := claimPaths(append(licenceNames, req.Claims...)...)
 	personalNames := []string{ClaimPersonalFirstNames, ClaimPersonalPrefix, ClaimPersonalFamilyName, ClaimPersonalDateOfBirth}
 	if req.BSN {
 		personalNames = append(personalNames, ClaimPersonalBSN)
 	}
-	personalClaims := claimPaths(append(personalNames,
-		slices.DeleteFunc(slices.Clone(req.Claims), func(c string) bool { return c == ClaimPhoto })...)...)
+	personalNames = append(personalNames,
+		slices.DeleteFunc(slices.Clone(req.Claims), func(c string) bool { return c == ClaimPhoto })...)
 
 	var q dcqlQuery
 	var options [][]string
@@ -320,18 +329,22 @@ func (v vcts) proofingRequestQuery(req ProofingRequest) dcqlQuery {
 		q.Credentials = append(q.Credentials, dcqlCredential{ID: id, Format: formatSDJWT, Meta: dcqlMeta{[]string{vct}}, Claims: claims})
 		options = append(options, []string{id})
 	}
-	for _, c := range [...]struct{ source, id, vct string }{
-		{SourcePassport, credIDPassport, v.passport},
-		{SourceIdentityCard, credIDIDCard, v.idCard},
-		{SourceResidencePermit, credIDResidencePermit, v.residencePermit},
-		{SourceDrivingLicence, credIDDrivingLicence, v.drivingLicence},
+	for _, c := range [...]struct {
+		source, id, vct string
+		claims          []dcqlClaim
+	}{
+		{SourcePassport, credIDPassport, v.passport, documentClaims},
+		{SourceIdentityCard, credIDIDCard, v.idCard, documentClaims},
+		{SourceResidencePermit, credIDResidencePermit, v.residencePermit, documentClaims},
+		{SourceDrivingLicence, credIDDrivingLicence, v.drivingLicence, licenceClaims},
 	} {
 		if slices.Contains(sources, c.source) {
-			add(c.id, c.vct, documentClaims)
+			add(c.id, c.vct, c.claims)
 		}
 	}
 	if slices.Contains(sources, SourcePersonalData) {
-		add(credIDPersonalData, v.personalData, personalClaims)
+		q.Credentials = append(q.Credentials, personalDataCredential(v.personalData, personalNames))
+		options = append(options, []string{credIDPersonalData})
 	}
 	q.CredentialSets = []dcqlCredentialSet{{Options: options}}
 	if req.Address {
@@ -342,6 +355,20 @@ func (v vcts) proofingRequestQuery(req ProofingRequest) dcqlQuery {
 		q.CredentialSets = append(q.CredentialSets, dcqlCredentialSet{Options: [][]string{{credIDAddress}}})
 	}
 	return q
+}
+
+// personalDataCredential asks the personal data for names and, when the
+// holder's credential has it, the optional Dutch nationality: a missing
+// claim would otherwise keep the wallet from sharing the credential at all.
+func personalDataCredential(vct string, names []string) dcqlCredential {
+	claims := make([]dcqlClaim, 0, len(names)+1)
+	for _, n := range append(slices.Clone(names), ClaimPersonalNationality) {
+		claims = append(claims, dcqlClaim{ID: n, Path: []string{n}})
+	}
+	return dcqlCredential{
+		ID: credIDPersonalData, Format: formatSDJWT, Meta: dcqlMeta{[]string{vct}}, Claims: claims,
+		ClaimSets: [][]string{append(slices.Clone(names), ClaimPersonalNationality), names},
+	}
 }
 
 // SigningRequest is the disclosure that authorises a signature at the wallet's

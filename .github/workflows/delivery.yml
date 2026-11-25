@@ -1,5 +1,5 @@
-# Delivery: builds, scans and pushes the three images
-# ghcr.io/privacybydesign/yivi-businesswallet/{business-wallet,postguard-sidecar,devverifier}.
+# Delivery: builds, scans and pushes the four images
+# ghcr.io/privacybydesign/yivi-businesswallet/{business-wallet,postguard-sidecar,devverifier,eudi-issuer}.
 # Push to main -> :edge, release vX.Y.Z -> :X.Y.Z and :latest, manual run ->
 # :<branch>. The ops repo pulls them from ghcr.io (edge on dev, the release
 # version on prod). PR builds are scanned in Status checks; published images
@@ -34,6 +34,10 @@ jobs:
           - component: devverifier
             context: backend
             dockerfile: backend/docker/devverifier/Dockerfile
+          # The EU reference issuer for the WE BUILD rulebook credentials (eudi-issuer/).
+          - component: eudi-issuer
+            context: eudi-issuer
+            dockerfile: eudi-issuer/Dockerfile
     uses: privacybydesign/github-workflows/.github/workflows/docker-publish.yml@v1
     permissions:
       contents: read
@@ -47,6 +51,9 @@ jobs:
       dockerfile: ${{ matrix.dockerfile }}
       # The old Delivery tagged :latest on every stable release; keep doing so.
       tag-latest: true
+      # The EU issuer's upstream 0.9.4 image ships CVEs we cannot fix without
+      # replacing its signing libraries; reported, not blocking, for that image only.
+      scan-fail-build: ${{ matrix.component != 'eudi-issuer' }}
     secrets:
       # The business-wallet image builds the API with -tags wsca, which clones
       # the private wallet-provider repo (RUN --mount=type=secret). Quoted so

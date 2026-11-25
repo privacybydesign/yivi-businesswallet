@@ -145,7 +145,7 @@ func (f *fakeQerds) Send(_ context.Context, _ uuid.UUID, _, recipient, _, body s
 // scriptedVerifier returns fixed presentations whatever the token.
 type scriptedVerifier []relyingparty.Presented
 
-func (v scriptedVerifier) Verify(map[string][]string, string, string) []relyingparty.Presented {
+func (v scriptedVerifier) Verify(context.Context, map[string][]string, string, string) []relyingparty.Presented {
 	return v
 }
 

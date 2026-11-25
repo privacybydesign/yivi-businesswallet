@@ -281,6 +281,9 @@ type hostedViewResponse struct {
 		// YiviPersonalData is a flow whose Yivi app shares the registered
 		// personal data, not a document.
 		YiviPersonalData bool `json:"yiviPersonalData"`
+		// ScanDocuments are the documents the document photo takes; empty is
+		// any.
+		ScanDocuments []string `json:"scanDocuments"`
 		// BrowserOnly is a flow the browser runs alone: no app is chosen.
 		BrowserOnly bool `json:"browserOnly"`
 		// DiplomaMode is whether the session asks for DUO diploma extracts.
@@ -409,6 +412,7 @@ func (h *Handler) hostedView(w http.ResponseWriter, r *http.Request) error {
 	out.Flow.YiviAvailable = yiviAppAvailable(f)
 	out.Flow.IdemAvailable = idemAppAvailable(f)
 	out.Flow.YiviPersonalData = acceptsPersonalData(f)
+	out.Flow.ScanDocuments = scanDocuments(f)
 	out.Flow.BrowserOnly = f.BrowserOnly
 	out.Flow.DiplomaMode = diplomaModeOf(hosted.Request).forSubject()
 	out.Flow.AddressMode = addressModeOf(hosted.Request).forSubject()

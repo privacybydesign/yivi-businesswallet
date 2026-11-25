@@ -13,7 +13,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        component: [business-wallet, postguard-sidecar, devverifier]
+        component: [business-wallet, postguard-sidecar, devverifier, eudi-issuer]
     uses: privacybydesign/github-workflows/.github/workflows/image-rescan.yml@v1
     permissions:
       contents: read
@@ -23,3 +23,5 @@ jobs:
       image-name: ghcr.io/${{ github.repository }}/${{ matrix.component }}
       tags: edge latest-release
       severity-cutoff: high
+      # See delivery.yml: the EU issuer's upstream CVEs are reported, not blocking.
+      fail-build: ${{ matrix.component != 'eudi-issuer' }}

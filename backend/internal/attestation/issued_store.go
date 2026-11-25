@@ -15,17 +15,19 @@ import (
 
 const issuedColumns = `id, organization_id, template_id, schema_vct, recipient_kind,
 	recipient_user_id, recipient_ref, attributes, qualified, status, delivery, issuance_id,
-	credential_uuid, issued_by_user_id, claimed_at, expires_at, revoked_at, cancelled_at, created_at, updated_at`
+	credential_uuid, issued_by_user_id, claimed_at, expires_at, revoked_at, cancelled_at, created_at, updated_at, revocation_reason`
 
 func scanIssued(row rowScanner) (Issued, error) {
 	var (
 		i        Issued
 		attrsRaw []byte
+		reason   *string
 	)
 	if err := row.Scan(
 		&i.ID, &i.OrganizationID, &i.TemplateID, &i.SchemaVCT, &i.RecipientKind,
 		&i.RecipientUserID, &i.RecipientRef, &attrsRaw, &i.Qualified, &i.Status, &i.Delivery, &i.IssuanceID,
 		&i.CredentialUUID, &i.IssuedByUserID, &i.ClaimedAt, &i.ExpiresAt, &i.RevokedAt, &i.CancelledAt, &i.CreatedAt, &i.UpdatedAt,
+		&reason,
 	); err != nil {
 		return Issued{}, err
 	}
@@ -34,6 +36,9 @@ func scanIssued(row rowScanner) (Issued, error) {
 		return Issued{}, err
 	}
 	i.Attributes = attrs
+	if reason != nil {
+		i.RevocationReason = *reason
+	}
 	return i, nil
 }
 
@@ -215,14 +220,14 @@ func (s *Store) MarkDeclined(ctx context.Context, orgID uuid.UUID, offerHash, se
 // Only already-claimed credentials are revocable — an unclaimed offer is
 // withdrawn via Cancel, not revoked. Rows in any other state (offered, revoked,
 // cancelled, expired, failed) return ErrNotOfferable.
-func (s *Store) Revoke(ctx context.Context, orgID, id uuid.UUID) (Issued, error) {
+func (s *Store) Revoke(ctx context.Context, orgID, id uuid.UUID, reason string) (Issued, error) {
 	var out Issued
 	err := database.InTx(ctx, s.db, func(q database.Querier) error {
-		const update = `UPDATE issued_attestations SET status = $3, revoked_at = now(), updated_at = now()
+		const update = `UPDATE issued_attestations SET status = $3, revoked_at = now(), updated_at = now(), revocation_reason = $5
 			WHERE organization_id = $1 AND id = $2 AND status = $4
 			RETURNING ` + issuedColumns
 		var err error
-		out, err = scanIssued(q.QueryRow(ctx, update, orgID, id, StatusRevoked, StatusClaimed))
+		out, err = scanIssued(q.QueryRow(ctx, update, orgID, id, StatusRevoked, StatusClaimed, reason))
 		if errors.Is(err, pgx.ErrNoRows) {
 			// Distinguish "not found" from "not in a revocable state".
 			if _, getErr := s.getIssuedTx(ctx, q, orgID, id); errors.Is(getErr, ErrIssuedNotFound) {

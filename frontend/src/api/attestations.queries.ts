@@ -57,6 +57,7 @@ import type {
   OnboardingAttestation,
 } from "./attestations";
 import type { AuditEvent } from "./organization";
+import { errorCode } from "../lib/api-error";
 import { toast } from "../lib/toast";
 
 // The ledger reconciles status on read, so an offered attestation is re-fetched
@@ -112,15 +113,35 @@ export function issuedAttestationQueryKey(
   return ["organizations", "detail", slug, "attestations", "issued", issuedId];
 }
 
+// What an attestations event re-reads: the issued ledger (list and each
+// detail), the incoming offers, and the wallet an accepted offer lands in.
+// Schemas, templates and keys only change by the reader's own hand.
+export function attestationReads(
+  slug: string,
+): (query: { queryKey: readonly unknown[] }) => boolean {
+  const prefixes = [
+    issuedAttestationsQueryKey(slug),
+    credentialOffersQueryKey(slug),
+    heldAttestationsBaseQueryKey(slug),
+  ];
+  return ({ queryKey }) =>
+    prefixes.some((prefix) => prefix.every((part, i) => queryKey[i] === part));
+}
+
 export function attestationClaimQueryKey(token: string): readonly string[] {
   return ["attestations", "claim", token];
+}
+
+// The held list and each held credential's reads, in every language.
+function heldAttestationsBaseQueryKey(slug: string): readonly string[] {
+  return ["organizations", "detail", slug, "attestations", "held"];
 }
 
 export function heldAttestationsQueryKey(
   slug: string,
   lang: string,
 ): readonly string[] {
-  return ["organizations", "detail", slug, "attestations", "held", lang];
+  return [...heldAttestationsBaseQueryKey(slug), lang];
 }
 
 export function credentialOffersQueryKey(slug: string): readonly string[] {
@@ -260,6 +281,9 @@ export function useIssuedAttestationQuery(
     queryKey: issuedAttestationQueryKey(slug, issuedId),
     queryFn: ({ signal }) => getIssuedAttestation(slug, issuedId, signal),
     enabled: enabled && slug !== "" && issuedId !== "",
+    // Kept while the stream is up: the issuer cannot say an offer was
+    // claimed, so this read is what asks it. Its result reaches the other
+    // pages through the stream.
     refetchInterval: (query) =>
       query.state.data?.status === OFFERED_STATUS
         ? OFFERED_POLL_INTERVAL_MS
@@ -516,11 +540,16 @@ export function useIssueAttestationMutation(
 
 export function useRevokeIssuedAttestationMutation(
   slug: string,
-): UseMutationResult<IssuedAttestation, Error, { issuedId: string }> {
+): UseMutationResult<
+  IssuedAttestation,
+  Error,
+  { issuedId: string; reason: string }
+> {
   const queryClient = useQueryClient();
   const { t } = useTranslation();
   return useMutation({
-    mutationFn: ({ issuedId }) => revokeIssuedAttestation(slug, issuedId),
+    mutationFn: ({ issuedId, reason }) =>
+      revokeIssuedAttestation(slug, issuedId, reason),
     meta: { suppressErrorToast: true },
     onSuccess: (_data, { issuedId }) => {
       toast.success(t("toasts.attestationRevoked"));
@@ -615,6 +644,9 @@ export function useCredentialOffersQuery(
   });
 }
 
+// OFFER_USED is the backend's code for an offer the issuer no longer accepts.
+const OFFER_USED = "offer_used";
+
 export function useAcceptCredentialOfferMutation(
   slug: string,
 ): UseMutationResult<void, Error, { offerId: string }> {
@@ -623,6 +655,18 @@ export function useAcceptCredentialOfferMutation(
   return useMutation({
     mutationFn: async ({ offerId }) => {
       await acceptCredentialOffer(slug, offerId);
+    },
+    meta: { suppressErrorToast: true },
+    onError: (error) => {
+      if (errorCode(error) !== OFFER_USED) {
+        toast.error(t("toasts.error"));
+        return;
+      }
+      // The backend closed the offer, so it leaves the list.
+      toast.error(t("toasts.credentialOfferUsed"));
+      void queryClient.invalidateQueries({
+        queryKey: credentialOffersQueryKey(slug),
+      });
     },
     onSuccess: () => {
       toast.success(t("toasts.credentialOfferAccepted"));

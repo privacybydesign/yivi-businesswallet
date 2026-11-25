@@ -90,3 +90,18 @@ func TestDisclosedIdentityMapsPersonalData(t *testing.T) {
 		t.Error("a presentation without an identity was accepted")
 	}
 }
+
+// The personal data's yes/no on being Dutch goes apart from the nationality,
+// which a document fills with a country code.
+func TestDisclosedIdentityKeepsDutchNationalityApart(t *testing.T) {
+	p := openid4vpverifier.Presentation{ByCredential: map[string]map[string]string{"personaldata": {
+		openid4vpverifier.ClaimPersonalFamilyName: "Vries", openid4vpverifier.ClaimPersonalNationality: "Yes",
+	}}}
+	doc, err := disclosedIdentity(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if doc.Claims[proofingprovider.AttributeDutchNationality] != "Yes" || doc.Claims[openid4vpverifier.ClaimNationality] != "" {
+		t.Errorf("claims = %v, want the yes/no under %s only", doc.Claims, proofingprovider.AttributeDutchNationality)
+	}
+}

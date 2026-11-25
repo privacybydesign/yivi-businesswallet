@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -23,14 +24,19 @@ import (
 )
 
 // recEmail / recQerds record the recipients delivery was routed to.
-type recEmail struct{ to []string }
+type recEmail struct{ to, revoked []string }
 
 func (r *recEmail) SendCredentialOffer(_ context.Context, _ uuid.UUID, to, _, _, _, _ string) error {
 	r.to = append(r.to, to)
 	return nil
 }
 
-type recQerds struct{ to []string }
+func (r *recEmail) SendCredentialRevoked(_ context.Context, _ uuid.UUID, to, orgName, credentialName, reason string) error {
+	r.revoked = append(r.revoked, to+" "+orgName+" "+credentialName+": "+reason)
+	return nil
+}
+
+type recQerds struct{ to, revoked []string }
 
 func (r *recQerds) SendCredentialOffer(_ context.Context, _ uuid.UUID, toAddress, _, _, _ string) error {
 	r.to = append(r.to, toAddress)
@@ -39,6 +45,11 @@ func (r *recQerds) SendCredentialOffer(_ context.Context, _ uuid.UUID, toAddress
 
 func (r *recQerds) SendOfferDeclined(_ context.Context, _ uuid.UUID, toAddress, _, _ string) error {
 	r.to = append(r.to, toAddress)
+	return nil
+}
+
+func (r *recQerds) SendCredentialRevoked(_ context.Context, _ uuid.UUID, toAddress, credentialName, reason string) error {
+	r.revoked = append(r.revoked, toAddress+" "+credentialName+": "+reason)
 	return nil
 }
 
@@ -202,7 +213,7 @@ func TestIssueOrganizationDeliversOverQerds(t *testing.T) {
 	_, err := e.service.Issue(ctx, e.orgID, &e.actorID, "Caesar", attestation.IssueInput{
 		TemplateID: templateID,
 		Recipient:  attestation.Recipient{Kind: attestation.RecipientOrganization, Ref: "supplier@qerds.example"},
-		Attributes: map[string]any{"name": "Supplier B.V."},
+		Attributes: map[string]any{"name": "Supplier B.V.", attestation.IdentifierClaim: map[string]any{"euid": "NLNHR.12345678"}},
 	})
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
@@ -402,7 +413,7 @@ func TestRevoke(t *testing.T) {
 		t.Fatalf("Issue: %v", err)
 	}
 	// An offer that was never claimed is not revocable.
-	if _, err := e.service.Revoke(ctx, e.orgID, result.ID); !errors.Is(err, attestation.ErrNotOfferable) {
+	if _, err := e.service.Revoke(ctx, e.orgID, result.ID, attestation.RevokeInput{Reason: "Contract ended", IssuerName: "Caesar"}); !errors.Is(err, attestation.ErrNotOfferable) {
 		t.Fatalf("expected ErrNotOfferable revoking an unclaimed offer, got %v", err)
 	}
 
@@ -417,15 +428,47 @@ func TestRevoke(t *testing.T) {
 		t.Fatalf("expected claimed with a captured credential uuid, got %+v", claimed)
 	}
 
-	revoked, err := e.service.Revoke(ctx, e.orgID, result.ID)
+	revoked, err := e.service.Revoke(ctx, e.orgID, result.ID, attestation.RevokeInput{Reason: "Contract ended", IssuerName: "Caesar"})
 	if err != nil {
 		t.Fatalf("Revoke: %v", err)
 	}
-	if revoked.Status != attestation.StatusRevoked || revoked.RevokedAt == nil {
-		t.Fatalf("expected revoked, got %+v", revoked)
+	if revoked.Status != attestation.StatusRevoked || revoked.RevokedAt == nil || revoked.RevocationReason != "Contract ended" {
+		t.Fatalf("expected revoked with its reason, got %+v", revoked)
 	}
-	if _, err := e.service.Revoke(ctx, e.orgID, result.ID); !errors.Is(err, attestation.ErrNotOfferable) {
+	// The holder is told, with the reason (CS-10 ISS-RV-09).
+	if want := []string{"z@example.com Caesar Employee: Contract ended"}; !slices.Equal(e.email.revoked, want) {
+		t.Fatalf("revocation e-mails = %v, want %v", e.email.revoked, want)
+	}
+	if _, err := e.service.Revoke(ctx, e.orgID, result.ID, attestation.RevokeInput{Reason: "Contract ended", IssuerName: "Caesar"}); !errors.Is(err, attestation.ErrNotOfferable) {
 		t.Fatalf("expected ErrNotOfferable on re-revoke, got %v", err)
+	}
+}
+
+// Revoking a credential issued to an organization tells that organization over
+// QERDS, so its wallet re-reads the status list instead of showing it valid.
+func TestRevokeNotifiesHoldingOrganization(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	templateID := orgTemplate(t, ctx, e.store, e.orgID)
+
+	result, err := e.service.Issue(ctx, e.orgID, &e.actorID, "Caesar", attestation.IssueInput{
+		TemplateID: templateID,
+		Recipient:  attestation.Recipient{Kind: attestation.RecipientOrganization, Ref: "supplier@qerds.example"},
+		Attributes: map[string]any{"name": "Supplier B.V.", attestation.IdentifierClaim: map[string]any{"euid": "NLNHR.12345678"}},
+	})
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	openid4vciissuer.MarkStubRedeemed(result.OfferURI)
+	if _, err := e.service.Status(ctx, e.orgID, result.ID); err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if _, err := e.service.Revoke(ctx, e.orgID, result.ID, attestation.RevokeInput{Reason: "Contract ended", IssuerName: "Caesar"}); err != nil {
+		t.Fatalf("Revoke: %v", err)
+	}
+	want := []string{"supplier@qerds.example Approved supplier: Contract ended"}
+	if !slices.Equal(e.qerds.revoked, want) {
+		t.Fatalf("revocation notices = %v, want %v", e.qerds.revoked, want)
 	}
 }
 

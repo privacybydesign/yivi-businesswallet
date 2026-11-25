@@ -57,6 +57,7 @@ export const nl: Translation<typeof en> = {
     flows: "Flows",
     reviews: "Beoordelingen",
     reviewsWaiting: "wachtend",
+    messagesUnread: "ongelezen",
     developers: "Ontwikkelaars",
     qerds: "Veilige bezorging",
     attestations: "Attestaties",
@@ -87,14 +88,13 @@ export const nl: Translation<typeof en> = {
   },
   enroll: {
     title: "Business wallet registreren",
-    subtitle:
-      "Registreer de wallet van je organisatie via de Kamer van Koophandel.",
+    subtitle: "Registreer de wallet van je organisatie met het KVK-nummer.",
     intro:
-      "Voer het KVK-nummer van je organisatie in. We raadplegen de KVK (Kamer van Koophandel) veilig om het bedrijf te bevestigen en te controleren of je als bevoegd vertegenwoordiger geregistreerd staat. Pas dan wordt de wallet aangemaakt en word je eigenaar.",
+      "Voer het KVK-nummer en de naam van je organisatie in. De wallet wordt voor dat bedrijf aangemaakt en je wordt eigenaar.",
     kvkNumber: "KVK-nummer",
     kvkPlaceholder: "bijv. 94861412",
-    submit: "KVK raadplegen & registreren",
-    consulting: "KVK raadplegen…",
+    submit: "Registreren",
+    consulting: "Registreren…",
     registeredAt: "Wallet geregistreerd voor {{org}}",
     yourRole: "De KVK vermeldt je als: {{role}}",
     continue: "Ga naar {{org}}",
@@ -377,9 +377,18 @@ export const nl: Translation<typeof en> = {
     title: "Business wallet registreren",
     subtitle: "Nieuw hier? Registreer je bedrijf — nog geen account nodig.",
     intro:
-      "Voer het KVK-nummer van je organisatie in. Je bevestigt je identiteit met je wallet, en we raadplegen de KVK (Kamer van Koophandel) veilig om te controleren of je een geregistreerde vertegenwoordiger bent. Zo ja, dan maken we de wallet aan en loggen we je in als eigenaar.",
+      "Voer het KVK-nummer en de naam van je organisatie in. Je bevestigt je identiteit met je wallet, en we maken de wallet aan en loggen je in als eigenaar.",
     kvkNumber: "KVK-nummer",
     kvkPlaceholder: "bijv. 94861412",
+    companyName: "Bedrijfsnaam",
+    companyNamePlaceholder: "bijv. Yivi B.V.",
+    companyNameHint:
+      "De naam waaronder je bedrijf bij de KVK staat ingeschreven.",
+    companyNameRequired: "Vul de naam van je bedrijf in, maximaal 200 tekens.",
+    unknownKvk:
+      "Dit KVK-nummer is niet geaccepteerd. Controleer of het de 8 cijfers van het KVK-nummer van je bedrijf zijn.",
+    startsInTestMode:
+      "Je wallet start in testmodus. Yivi zet hem op live zodra je bedrijf is bevestigd.",
     slug: "Wallet-handle (slug)",
     slugPlaceholder: "bijv. yivi",
     slugHint:
@@ -399,16 +408,16 @@ export const nl: Translation<typeof en> = {
     disclosure: {
       identityLabel: "Paspoort, identiteitskaart of verblijfsvergunning",
       identityDetail:
-        "Bevestigt je naam, geboortedatum en nationaliteit, zodat we je kunnen koppelen aan de bij de KVK geregistreerde vertegenwoordigers van het bedrijf.",
+        "Bevestigt je naam, geboortedatum en nationaliteit, zodat bekend is wie dit bedrijf heeft geregistreerd.",
       emailLabel: "E-mailadres",
       emailDetail: "Wordt het adres waarmee je inlogt.",
       phoneLabel: "Telefoonnummer",
       phoneDetail: "Wordt toegevoegd aan je geverifieerde profiel.",
     },
     disclosureFootnote:
-      "Er wordt niets opgeslagen behalve wat nodig is om je wallet aan te maken en je te koppelen bij de Kamer van Koophandel.",
+      "Er wordt niets opgeslagen behalve wat nodig is om je wallet aan te maken en vast te leggen wie hem heeft geregistreerd.",
     onboardTitle: "Je wallet instellen",
-    registering: "KVK raadplegen…",
+    registering: "Je wallet aanmaken…",
     registeredAt: "Wallet geregistreerd voor {{org}}",
     yourRole: "De KVK vermeldt je als: {{role}}",
     enter: "Doorgaan naar {{org}}",
@@ -736,7 +745,8 @@ export const nl: Translation<typeof en> = {
     address: {
       overview: {
         label: "Adres",
-        detail: "Na de identiteitscontrole: het postadres dat je invult",
+        detail: "Je postadres, dat je na de controle zelf invult",
+        detailYivi: "Je woonadres uit de BRP, dat de Yivi-app deelt",
       },
       identityDone: "Je identiteit is geverifieerd.",
       heading: "Vul nu je adres in",
@@ -765,7 +775,7 @@ export const nl: Translation<typeof en> = {
       overview: {
         label: "Diploma's",
         detail:
-          "Na de identiteitscontrole: de diploma-uittreksels die je bij DUO downloadt, gecontroleerd op de handtekening van DUO en op je naam en geboortedatum",
+          "Je diploma-uittreksels van DUO, die je na de controle uploadt. We controleren de handtekening van DUO en of ze op jouw naam en geboortedatum staan.",
       },
       how: {
         login: "Log in bij Mijn DUO met DigiD.",
@@ -787,7 +797,7 @@ export const nl: Translation<typeof en> = {
       overview: {
         label: "Verzekeringsbericht",
         detail:
-          "Na de identiteitscontrole: het Verzekeringsbericht dat je bij UWV downloadt, gecontroleerd op het zegel van UWV en op je naam en geboortedatum",
+          "Je Verzekeringsbericht van UWV, dat je na de controle uploadt. We controleren het zegel van UWV en of het op jouw naam en geboortedatum staat.",
       },
       how: {
         login: "Log in bij Mijn UWV met DigiD.",
@@ -943,7 +953,7 @@ export const nl: Translation<typeof en> = {
         "Je identiteitscontrole is klaar. Iemand beoordeelt hem nadat je hier klaar bent.",
       steps: {
         overview: "Wat er wordt verzameld",
-        document: "Je ID fotograferen",
+        document: "Je document fotograferen",
         method: "Kies een app",
         session: "Scan de QR-code",
         address: "Adres",
@@ -998,7 +1008,19 @@ export const nl: Translation<typeof en> = {
       },
       documentScan: {
         heading: "Fotografeer je identiteitsbewijs",
-        hint: "Maak hieronder in de beveiligde scan van CM.com een foto van de voor- en achterkant van je ID-kaart of rijbewijs, of van de fotopagina van je paspoort.",
+        headings: {
+          passport: "Fotografeer je paspoort",
+          identity_card: "Fotografeer je ID-kaart",
+          residence_permit: "Fotografeer je verblijfsdocument",
+          drivers_license: "Fotografeer je rijbewijs",
+        },
+        hint: "Maak hieronder in de beveiligde scan van CM.com een foto van {{documents}}.",
+        sides: {
+          passport: "de fotopagina van je paspoort",
+          identity_card: "de voor- en achterkant van je ID-kaart",
+          residence_permit: "de voor- en achterkant van je verblijfsdocument",
+          drivers_license: "de voor- en achterkant van je rijbewijs",
+        },
         passportHint:
           "Voor een paspoort: sla het open als een boek en draai het een kwartslag, zodat het opengeslagen paspoort in het kader past.",
         frameTitle: "ID-scan van CM.com",
@@ -1142,6 +1164,9 @@ export const nl: Translation<typeof en> = {
         name: "Naam",
         birthDate: "Geboortedatum",
         nationality: "Nationaliteit",
+        dutch: "Nederlands",
+        notDutch: "Niet Nederlands",
+        bsn: "BSN",
         ageOver: "{{age}} jaar of ouder",
         ageOverYes: "Ja",
         ageOverNo: "Nee",
@@ -2497,6 +2522,8 @@ export const nl: Translation<typeof en> = {
     attestationOfferCancelled: "Aanbod geannuleerd",
     credentialOfferAccepted: "Credential toegevoegd aan de wallet",
     credentialOfferDeclined: "Aanbod geweigerd",
+    credentialOfferUsed:
+      "Dit aanbod kan niet meer worden geaccepteerd. Vraag de afzender om een nieuw aanbod.",
     credentialRequestSent: "Gegevensverzoek verstuurd",
     requestTemplateSaved: "Sjabloon opgeslagen",
     requestTemplateDeleted: "Sjabloon verwijderd",
@@ -2743,6 +2770,7 @@ export const nl: Translation<typeof en> = {
       userPurged: "Gebruiker gewist",
       qerdsMessageSent: "Beveiligd bericht verstuurd",
       qerdsMessageReceived: "Beveiligd bericht ontvangen",
+      qerdsMessageRead: "Beveiligd bericht geopend",
       qerdsAddressProvisioned: "Digitaal adres aangemaakt",
       qerdsAddressDefaultChanged: "Standaardadres gewijzigd",
       qerdsAddressDeleted: "Digitaal adres verwijderd",
@@ -2767,6 +2795,8 @@ export const nl: Translation<typeof en> = {
       wscaAccountRotated: "Wallet-geheim geroteerd",
       kvkRegistrationValidated: "KVK-registratie gevalideerd",
       kvkRegistrationNotValidated: "KVK-registratie afgewezen",
+      kvkRegistrationDeclared:
+        "Bedrijf geregistreerd zoals opgegeven, niet bij KVK gecontroleerd",
       attestationSchemaCreated: "Attestatieschema aangemaakt",
       attestationSchemaUpdated: "Attestatieschema bijgewerkt",
       attestationSchemaDeleted: "Attestatieschema verwijderd",
@@ -2784,6 +2814,8 @@ export const nl: Translation<typeof en> = {
       attestationHeldDeleted: "Ontvangen credential verwijderd",
       attestationOfferAccepted: "Binnengekomen credentialaanbod geaccepteerd",
       attestationOfferDeclined: "Binnengekomen credentialaanbod geweigerd",
+      attestationOfferFailed:
+        "Binnengekomen credentialaanbod kon niet meer worden geaccepteerd",
       emailSettingsUpdated: "E-mailinstellingen bijgewerkt",
       emailTemplateUpdated: "E-mailtekst bijgewerkt",
       emailTemplateReset: "E-mailtekst teruggezet naar de standaard",
@@ -3049,6 +3081,16 @@ export const nl: Translation<typeof en> = {
       "Upload een PDF. De hash wordt met je wallet geautoriseerd, door de provider ondertekend en de ondertekende PDF wordt aan je teruggegeven.",
     signNeedsCredential: "Koppel eerst een ondertekencertificaat.",
     signButton: "Document ondertekenen",
+    reviewButton: "Bekijken en ondertekenen",
+    viewer: {
+      label: "Document {{filename}}",
+      loading: "Het document wordt geladen…",
+      error:
+        "Het document kan niet worden getoond. Laad de pagina opnieuw voordat je ondertekent.",
+      page: "Pagina {{page}} van {{total}}",
+      previous: "Vorige pagina",
+      next: "Volgende pagina",
+    },
     requestTitle: "Ondertekenverzoek",
     requestPending: "Wachten tot je de handtekening in je wallet autoriseert…",
     requestCompleted: "{{filename}} is ondertekend.",
@@ -3101,6 +3143,7 @@ export const nl: Translation<typeof en> = {
     recipientQerdsPlaceholder: "QERDS-adres",
     recipientNamePlaceholder: "Naam ontvanger (optioneel)",
     messagePlaceholder: "Bericht aan de ontvanger (optioneel)",
+    messageSignersPlaceholder: "Bericht aan de ondertekenaars (optioneel)",
     createdToast: "Ondertekenverzoek aangemaakt.",
     documentStepHint: "Upload de PDF die iedereen gaat ondertekenen.",
     documentMeta_one: "{{count}} ondertekenaar",
@@ -3118,6 +3161,8 @@ export const nl: Translation<typeof en> = {
     deliveryStepHint:
       "Dit gebeurt zodra iedereen heeft ondertekend. Je kunt het altijd downloaden bij Geschiedenis.",
     deliveryNoneDesc: "Er wordt niets verstuurd. Op te halen bij Geschiedenis.",
+    deliverySignersDesc:
+      "Iedereen die heeft ondertekend krijgt de pdf per e-mail.",
     deliveryEmailDesc: "Gewone bijlage aan de ontvanger.",
     deliveryQerdsDesc: "Aangetekende bezorging aan de genoemde ontvanger.",
     summaryTitle: "Klaar om te versturen",
@@ -3175,7 +3220,8 @@ export const nl: Translation<typeof en> = {
     },
     channel: {
       none: "Niet versturen (alleen downloaden)",
-      email: "E-mail",
+      signers: "E-mail naar de ondertekenaars",
+      email: "E-mail naar iemand anders",
       qerds: "QERDS (aangetekende bezorging)",
     },
     signerStatus: {
@@ -3216,7 +3262,7 @@ export const nl: Translation<typeof en> = {
       youLabel: "Je ondertekent als",
       progressLabel: "Handtekeningen",
       progress: "{{signed}} van {{total}}",
-      reviewDocument: "Het document openen",
+      reviewDocument: "Openen in een nieuw tabblad",
       needsCredential:
         "Koppel eerst je ondertekencertificaat. Daarvoor identificeer je je één keer met je wallet-app; daarna kun je ondertekenen.",
       linkButton: "Ondertekencertificaat koppelen",
@@ -3273,6 +3319,8 @@ export const nl: Translation<typeof en> = {
       openYivi: "Open de Yivi-app",
       cancelError: "Kon niet annuleren. Probeer het opnieuw.",
       leaving: "Je wordt teruggebracht…",
+      finishing: "Goedgekeurd. Bezig met afronden…",
+      dialogTitle: "Keur goed in de Yivi-app",
       denied: {
         title: "Niet goedgekeurd",
         identityMismatch:
@@ -3760,6 +3808,7 @@ export const nl: Translation<typeof en> = {
     },
     kinds: {
       credential_offer: "Credential uitgegeven",
+      credential_revoked: "Credential ingetrokken",
       event_notification: "Melding van een gebeurtenis",
       identity_overdue: "Identiteit verlopen",
       identity_proofing_requested: "Identiteitsverificatie gevraagd",
@@ -3778,6 +3827,8 @@ export const nl: Translation<typeof en> = {
     kindDescriptions: {
       credential_offer:
         "Gaat naar een persoon als deze organisatie een credential aan die persoon uitgeeft.",
+      credential_revoked:
+        "Verstuurd naar een persoon wanneer deze organisatie een uitgegeven credential intrekt, met de reden.",
       event_notification:
         "Gaat naar de beheerders van deze organisatie als er iets gebeurt waarop zij zich hebben geabonneerd.",
       identity_overdue:
@@ -4296,6 +4347,7 @@ export const nl: Translation<typeof en> = {
         accepting: "Bezig met accepteren…",
         accepted: "Toegevoegd aan de wallet",
         declined: "Geweigerd",
+        failed: "Niet meer geaccepteerd door de uitgever",
       },
       review: "Bekijk bij Attestaties",
       rawEnvelope: "Ruwe envelop",
@@ -4433,6 +4485,13 @@ export const nl: Translation<typeof en> = {
       empty: "Nog geen attestaties uitgegeven.",
       cancel: "Aanbod annuleren",
       revoke: "Intrekken",
+      revokeDialog: {
+        title: "Credential intrekken",
+        hint: "De houder krijgt te horen dat deze credential is ingetrokken, en waarom. Intrekken kan niet ongedaan worden gemaakt.",
+        reasonLabel: "Reden",
+        reasonPlaceholder: "Waarom wordt hij ingetrokken? De houder leest dit.",
+        confirm: "Credential intrekken",
+      },
       columns: {
         recipient: "Ontvanger",
         schema: "Schema",
@@ -4704,6 +4763,10 @@ export const nl: Translation<typeof en> = {
       noSource: "Niet overnemen — voer een vaste waarde in",
       sourcePrefill: "Bij uitgifte overgenomen van de ontvanger",
       error: "Het sjabloon opslaan mislukt: {{message}}",
+      statusListRequired:
+        "Een geldigheid van meer dan 24 uur vereist een statuslijst om de credential op in te trekken, en die heeft deze omgeving niet. Vul 86400 seconden of minder in.",
+      rulebookStatusListRequired:
+        "Rulebook-credentials krijgen hun geldigheid van de rulebook-uitgever, en die heeft in deze omgeving geen statuslijst om ze op in te trekken. Rulebook-sjablonen kunnen pas worden opgeslagen als die er is.",
     },
     sources: {
       givenNames: "Ontvanger · voornaam",
@@ -4746,6 +4809,16 @@ export const nl: Translation<typeof en> = {
       recipientRequired: "Kies een ontvanger.",
       noAttributes: "Dit sjabloon heeft geen attributen om in te vullen.",
       attributeRequired: "Dit attribuut is verplicht.",
+      identifierTitle: "Identificatie (WE BUILD)",
+      identifierHint:
+        "WE BUILD vereist minstens één identificatie van de organisatie. De EUID komt uit het adresboek.",
+      identifierRequired: "Vul minstens één identificatie in.",
+      identifierFields: {
+        euid: "EUID",
+        lei: "LEI",
+        tax: "Fiscaal nummer",
+        other: "Andere identificatie",
+      },
       reviewTemplate: "Sjabloon",
       reviewRecipient: "Ontvanger",
       offerHint:
@@ -4767,6 +4840,10 @@ export const nl: Translation<typeof en> = {
         "Een van de attributen hoort niet bij het schema van dit sjabloon.",
       missingAttribute: "Een verplicht attribuut ontbreekt.",
       invalidClaims: "De claims voldoen niet aan het rulebook. {{message}}",
+      statusListRequired:
+        "De geldigheid van dit sjabloon is meer dan 24 uur. Dat vereist een statuslijst om de credential op in te trekken, en die heeft deze omgeving niet. Zet de geldigheid van het sjabloon op 24 uur of minder.",
+      rulebookStatusListRequired:
+        "De rulebook-uitgever heeft in deze omgeving geen statuslijst om deze credential op in te trekken, dus rulebook-credentials kunnen pas worden uitgegeven als die er is.",
       rulebookClaimsIntro:
         "Dit sjabloon volgt een WE BUILD-rulebook. Bewerk de claims als JSON. Ze beginnen bij het voorbeeld uit het rulebook en worden bij het uitgeven tegen het rulebook gecontroleerd.",
       rulebookClaimsLabel: "Claims (JSON)",

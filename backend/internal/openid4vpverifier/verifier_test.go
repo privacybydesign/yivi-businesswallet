@@ -253,6 +253,29 @@ func TestProofingRequestOffersTheAcceptedSources(t *testing.T) {
 	}
 }
 
+// A driving licence has no nationality, so it is asked everything a passport
+// is but that; the passport still is.
+func TestDrivingLicenceIsNotAskedNationality(t *testing.T) {
+	q := stagingVCTs.proofingRequestQuery(ProofingRequest{Sources: []string{SourcePassport, SourceDrivingLicence}, Claims: []string{ClaimPhoto, "over18"}})
+	claimNames := func(c dcqlCredential) []string {
+		var names []string
+		for _, claim := range c.Claims {
+			names = append(names, claim.Path[0])
+		}
+		return names
+	}
+	if got, want := claimNames(q.Credentials[0]), []string{ClaimGivenNames, ClaimFamilyName, ClaimNationality, ClaimPhoto, "over18"}; !slices.Equal(got, want) {
+		t.Errorf("passport claims = %v, want %v", got, want)
+	}
+	licence := q.Credentials[1]
+	if !slices.Equal(licence.Meta.VctValues, []string{"pbdf-staging.pbdf.drivinglicence"}) {
+		t.Errorf("licence vct = %v", licence.Meta.VctValues)
+	}
+	if got, want := claimNames(licence), []string{ClaimGivenNames, ClaimFamilyName, ClaimPhoto, "over18"}; !slices.Equal(got, want) {
+		t.Errorf("licence claims = %v, want %v", got, want)
+	}
+}
+
 // The personal data is asked its name and date of birth, never the photo, and
 // with the address the registered address is a second required set.
 func TestPersonalDataSource(t *testing.T) {
@@ -262,8 +285,14 @@ func TestPersonalDataSource(t *testing.T) {
 		names = append(names, c.Path[0])
 	}
 	want := []string{ClaimPersonalFirstNames, ClaimPersonalPrefix, ClaimPersonalFamilyName, ClaimPersonalDateOfBirth, "over18"}
-	if !slices.Equal(names, want) {
-		t.Errorf("claims = %v, want %v", names, want)
+	if !slices.Equal(names, append(slices.Clone(want), ClaimPersonalNationality)) {
+		t.Errorf("claims = %v, want %v and the nationality", names, want)
+	}
+	// The nationality is optional in the credential: a holder without it
+	// shares the rest.
+	if sets := q.Credentials[0].ClaimSets; len(sets) != 2 ||
+		!slices.Equal(sets[0], append(slices.Clone(want), ClaimPersonalNationality)) || !slices.Equal(sets[1], want) {
+		t.Errorf("claim sets = %v, want with and without the nationality", sets)
 	}
 	if len(q.CredentialSets) != 2 || q.Credentials[1].ID != credIDAddress {
 		t.Errorf("with the address = %+v", q)

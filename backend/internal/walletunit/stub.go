@@ -34,13 +34,13 @@ func (s *StubAttester) Issue(ctx context.Context, orgID uuid.UUID, req IssueRequ
 	}
 	now := s.now()
 	var out Issued
-	if out.BWIA, err = s.signer.sign(bwiaTyp, s.cfg.bwiaClaims("stub-"+orgID.String(), org, cnf, stubStatusIndex, now)); err != nil {
+	if out.BWIA, err = s.signer.Sign(bwiaTyp, s.cfg.bwiaClaims("stub-"+orgID.String(), org, cnf, stubStatusIndex, now)); err != nil {
 		return Issued{}, err
 	}
 	if len(attested) == 0 {
 		return out, nil
 	}
-	if out.SKA, err = s.signer.sign(skaTyp, s.cfg.skaClaims(attested, stubStatusIndex, now)); err != nil {
+	if out.SKA, err = s.signer.Sign(skaTyp, s.cfg.skaClaims(attested, stubStatusIndex, now)); err != nil {
 		return Issued{}, err
 	}
 	return out, nil
@@ -54,5 +54,5 @@ func (s *StubAttester) StatusList(_ context.Context, list int64) (string, error)
 	if err != nil {
 		return "", err
 	}
-	return s.signer.sign(statusListTyp, s.cfg.statusListClaims(list, lst, s.now()))
+	return s.signer.Sign(statusListTyp, s.cfg.statusListClaims(list, lst, s.now()))
 }

@@ -176,3 +176,69 @@ func TestAttachmentPersistenceAndScoping(t *testing.T) {
 		t.Fatalf("unknown attachment err = %v, want ErrAttachmentNotFound", err)
 	}
 }
+
+func TestMarkReadCountsOnlyUnopenedInbound(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	ctx := context.Background()
+
+	if _, err := pool.Exec(ctx, `INSERT INTO organizations (name, slug, kvk_number, euid, digital_address)
+		VALUES ('Acme', 'acme', 'kvk-acme', 'NLNHR.acme', 'acme@qerds.localhost')`); err != nil {
+		t.Fatalf("create org: %v", err)
+	}
+	org, err := organization.NewStore(pool, audit.NopRecorder{}).GetBySlug(ctx, "acme")
+	if err != nil {
+		t.Fatalf("get org: %v", err)
+	}
+	store := qerds.NewStore(pool, audit.NopRecorder{})
+
+	out, err := store.CreateOutbound(ctx, org.ID, "acme@qerds.localhost", "other@qerds.localhost", "out", "", nil)
+	if err != nil {
+		t.Fatalf("CreateOutbound: %v", err)
+	}
+	var inbound []qerds.Message
+	for _, ref := range []string{"stub-in-1", "stub-in-2"} {
+		m, _, err := store.CreateInbound(ctx, org.ID, qerdsprovider.InboundMessage{
+			ProviderRef: ref, Sender: "other@qerds.localhost", Recipient: "acme@qerds.localhost", Subject: ref,
+		})
+		if err != nil {
+			t.Fatalf("CreateInbound: %v", err)
+		}
+		inbound = append(inbound, m)
+	}
+
+	wantUnread := func(want int) {
+		t.Helper()
+		got, err := store.CountUnread(ctx, org.ID)
+		if err != nil {
+			t.Fatalf("CountUnread: %v", err)
+		}
+		if got != want {
+			t.Fatalf("unread = %d, want %d", got, want)
+		}
+	}
+	wantUnread(2)
+
+	for _, tc := range []struct {
+		name string
+		id   uuid.UUID
+		want bool
+	}{
+		{"inbound", inbound[0].ID, true},
+		{"inbound again", inbound[0].ID, false},
+		{"outbound", out.ID, false},
+	} {
+		moved, err := store.MarkRead(ctx, org.ID, tc.id)
+		if err != nil {
+			t.Fatalf("MarkRead %s: %v", tc.name, err)
+		}
+		if moved != tc.want {
+			t.Fatalf("MarkRead %s moved = %v, want %v", tc.name, moved, tc.want)
+		}
+	}
+	wantUnread(1)
+
+	if moved, err := store.MarkRead(ctx, uuid.New(), inbound[1].ID); err != nil || moved {
+		t.Fatalf("MarkRead from another org = %v, %v; want untouched", moved, err)
+	}
+	wantUnread(1)
+}

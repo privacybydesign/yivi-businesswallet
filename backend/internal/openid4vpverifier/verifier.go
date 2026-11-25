@@ -46,6 +46,9 @@ const (
 	ClaimPersonalFamilyName  = "familyname"
 	ClaimPersonalDateOfBirth = "dateofbirth"
 	ClaimPersonalBSN         = "bsn"
+	// ClaimPersonalNationality is whether the holder is Dutch (yes/no), not a
+	// nationality; the credential may leave it out.
+	ClaimPersonalNationality = "nationality"
 
 	// pbdf.vog claim keys (#242 §4). Named distinctly from the identity claims
 	// above even where the value happens to coincide (ClaimDateOfBirth), because

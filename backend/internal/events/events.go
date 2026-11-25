@@ -34,6 +34,8 @@ const (
 	Qerds    Kind = "qerds"
 	Signing  Kind = "signing"
 	Webhooks Kind = "webhooks"
+	// An issued attestation or an incoming credential offer moved.
+	Attestations Kind = "attestations"
 	// A step of a verify session moved: its request, or its engine session.
 	ProofingProgress Kind = "proofing-progress"
 	// Per row, for a public page that follows one thing by its link.
@@ -42,7 +44,7 @@ const (
 )
 
 // OrgKinds are the kinds a member's page follows for its organisation.
-var OrgKinds = []Kind{Reviews, Qerds, Signing, Webhooks, ProofingProgress}
+var OrgKinds = []Kind{Reviews, Qerds, Signing, Webhooks, ProofingProgress, Attestations}
 
 const topicSeparator = ":"
 

@@ -111,3 +111,48 @@ func ParseOfferDeclinedEnvelope(body string) (OfferDeclinedEnvelope, bool) {
 	}
 	return env, true
 }
+
+// credentialRevokedEnvelopeType marks the QERDS body an issuer sends the holding
+// organization when it revokes a credential it issued to it.
+const credentialRevokedEnvelopeType = "eaa-credential-revoked/v1"
+
+// CredentialRevokedEnvelope tells a holder that one of its credentials was
+// revoked. The receiver only takes it as a cue to re-read its status lists, so
+// the message itself can mark nothing revoked.
+type CredentialRevokedEnvelope struct {
+	Type           string `json:"type"`
+	CredentialName string `json:"credentialName"`
+	Reason         string `json:"reason,omitempty"`
+	Message        string `json:"message,omitempty"`
+}
+
+// MarshalCredentialRevokedEnvelope builds the QERDS body announcing the revocation.
+func MarshalCredentialRevokedEnvelope(issuerOrgName, credentialName, reason string) (string, error) {
+	msg := fmt.Sprintf("%s revoked the credential it issued to your organization (%s).", issuerOrgName, credentialName)
+	if reason != "" {
+		msg += " Reason: " + reason
+	}
+	env := CredentialRevokedEnvelope{
+		Type:           credentialRevokedEnvelopeType,
+		CredentialName: credentialName,
+		Reason:         reason,
+		Message:        msg,
+	}
+	b, err := json.Marshal(env)
+	if err != nil {
+		return "", fmt.Errorf("attestation: marshal credential revoked envelope: %w", err)
+	}
+	return string(b), nil
+}
+
+// ParseCredentialRevokedEnvelope reports whether body is a credential-revoked envelope.
+func ParseCredentialRevokedEnvelope(body string) (CredentialRevokedEnvelope, bool) {
+	var env CredentialRevokedEnvelope
+	if err := json.Unmarshal([]byte(body), &env); err != nil {
+		return CredentialRevokedEnvelope{}, false
+	}
+	if env.Type != credentialRevokedEnvelopeType {
+		return CredentialRevokedEnvelope{}, false
+	}
+	return env, true
+}

@@ -34,6 +34,7 @@ import {
   yiviAppAvailable,
   idemAppAvailable,
   acceptsPersonalData,
+  scanDocuments,
   stepAsked,
 } from "../lib/identity-proofing";
 import { blockingError } from "../lib/query-state";
@@ -181,6 +182,7 @@ function VerifyFlow({
   // browser alone.
   const stages = verifyStages({
     app: !browserOnly && methods.length > 1,
+    session: !browserOnly,
     document: flow.steps.includes(STEP_DOCUMENT_PHOTO),
     // The Yivi app shares the registered address: the person enters none.
     address: stepAsked(flow.addressMode) && method !== "yivi_app",
@@ -278,6 +280,7 @@ function VerifyFlow({
           method={method}
           methods={methods}
           yiviPersonalData={acceptsPersonalData(flow)}
+          scanDocuments={scanDocuments(flow)}
           onStage={setSessionStage}
           onMethod={setMethod}
           diplomaMode={sent.diplomaMode}

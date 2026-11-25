@@ -9,6 +9,7 @@ import {
   proofingWebhookQueryKey,
 } from "./identity-proofing.queries";
 import { qerdsMessagesQueryKey } from "./qerds.queries";
+import { attestationReads } from "./attestations.queries";
 import { signingRequestReads } from "./signing.queries";
 
 function orgEventsUrl(slug: string): string {
@@ -58,6 +59,10 @@ const REREADS: Record<
   signing: {
     gateMs: LIST_GATE_MS,
     reads: (slug) => ({ predicate: signingRequestReads(slug) }),
+  },
+  attestations: {
+    gateMs: LIST_GATE_MS,
+    reads: (slug) => ({ predicate: attestationReads(slug) }),
   },
 };
 

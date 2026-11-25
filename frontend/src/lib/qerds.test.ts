@@ -10,6 +10,10 @@ describe("credentialOfferStatusTone", () => {
     expect(credentialOfferStatusTone("declined")).toBe("red");
   });
 
+  it("reads an offer the issuer refused as an error", () => {
+    expect(credentialOfferStatusTone("failed")).toBe("red");
+  });
+
   it("reads pending, accepting and an unqueued offer (no status) as amber", () => {
     expect(credentialOfferStatusTone("pending")).toBe("amber");
     expect(credentialOfferStatusTone("accepting")).toBe("amber");

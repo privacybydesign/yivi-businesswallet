@@ -112,7 +112,7 @@ func TestOrgToOrgCredentialRequestEndToEnd(t *testing.T) {
 // as a credential of type vct. relyingparty's own tests cover the real check.
 type verifiedAs string
 
-func (v verifiedAs) Verify(token map[string][]string, _, _ string) []relyingparty.Presented {
+func (v verifiedAs) Verify(_ context.Context, token map[string][]string, _, _ string) []relyingparty.Presented {
 	var out []relyingparty.Presented
 	for queryID := range token {
 		out = append(out, relyingparty.Presented{

@@ -131,6 +131,10 @@ func (h *heldViewHolder) Validities(_ context.Context, _ uuid.UUID) (map[string]
 	return h.validities, nil
 }
 
+func (h *heldViewHolder) Payload(context.Context, uuid.UUID, string) (map[string]any, error) {
+	return nil, nil
+}
+
 func TestListHeldCarriesEachCredentialsValidity(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -424,5 +428,37 @@ func TestRecheckAllHeldStopsWhenCancelled(t *testing.T) {
 	}
 	if holder.refreshes != 0 {
 		t.Errorf("refreshed %d orgs after cancel, want none", holder.refreshes)
+	}
+}
+
+// Opening the held credentials re-reads their status lists first, so one the
+// issuer revoked since the last re-check shows revoked; a second view within a
+// minute does not re-read again.
+func TestListHeldRechecksStaleStatuses(t *testing.T) {
+	t.Parallel()
+	row := attestation.HeldAttestation{ID: uuid.New(), CredentialRef: "ref-1", VCT: "eaa.supplier"}
+	store := &heldViewStore{rows: []attestation.HeldAttestation{row}}
+	holder := &heldViewHolder{
+		validities: map[string]eudiholder.HeldValidity{"ref-1": statusListed(false)},
+		refreshed:  map[string]eudiholder.HeldValidity{"ref-1": statusListed(true)},
+	}
+	service := attestation.NewService(nil, nil, nil, nil, nil, store, nil, holder, "http://app.test")
+	ctx, org := context.Background(), uuid.New()
+
+	views, err := service.ListHeld(ctx, org, "en")
+	if err != nil {
+		t.Fatalf("ListHeld: %v", err)
+	}
+	if len(views) != 1 || !views[0].Revoked {
+		t.Fatalf("views = %+v, want the credential revoked", views)
+	}
+	if len(store.statusChanges) != 1 {
+		t.Errorf("audited %v, want the revocation", store.statusChanges)
+	}
+	if _, err := service.ListHeld(ctx, org, "en"); err != nil {
+		t.Fatalf("second ListHeld: %v", err)
+	}
+	if holder.refreshes != 1 {
+		t.Errorf("refreshed %d times, want once within a minute", holder.refreshes)
 	}
 }

@@ -273,6 +273,8 @@ export const issuedAttestationSchema = z.object({
   claimedAt: z.string().optional(),
   expiresAt: z.string().optional(),
   revokedAt: z.string().optional(),
+  // Why the issuer revoked it; the holder was told this.
+  revocationReason: z.string().optional(),
   cancelledAt: z.string().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -886,11 +888,13 @@ export function issueAttestation(
 export function revokeIssuedAttestation(
   slug: string,
   issuedId: string,
+  reason: string,
   signal?: AbortSignal,
 ): Promise<IssuedAttestation> {
   return request(`${base(slug)}/${encodeURIComponent(issuedId)}/revoke`, {
     schema: issuedAttestationSchema,
     method: "POST",
+    body: { reason },
     signal,
   });
 }

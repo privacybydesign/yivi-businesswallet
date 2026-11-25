@@ -4,6 +4,7 @@ package wallet_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/google/uuid"
@@ -116,5 +117,56 @@ func TestOpenWalletSucceedsForSeededRegisterCompany(t *testing.T) {
 	}
 	if inbox.deposited != 1 {
 		t.Fatalf("deposited attestations = %d, want 1", inbox.deposited)
+	}
+}
+
+// A declaring register consults nothing, so a company no dataset knows can open
+// its wallet under the name its registrant states, with the registrant on record
+// as a representative no register confirmed.
+func TestOpenWalletSucceedsForADeclaredCompany(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	ctx := context.Background()
+
+	requester, err := user.NewStore(pool).Create(ctx, user.User{Email: "alice@example.com", GivenNames: "Alice", LastName: "Owner"})
+	if err != nil {
+		t.Fatalf("create requester: %v", err)
+	}
+
+	store := wallet.NewStore(pool, audit.NopRecorder{}, walletunit.NewStore(pool, audit.NopRecorder{}))
+	reg := registryprovider.NewDeclaredRegistry(pool, audit.NewDBRecorder())
+	holder := eudiholder.NewStubHolder()
+	svc := wallet.NewService(store, reg, wallet.OwnerID{Issuer: registryprovider.StubEBWOIDIssuer{}, Holder: holder}, nil, nil, &captureInbox{}, "qerds.localhost")
+
+	const kvkNumber = "12345678"
+	res, err := svc.OpenWallet(ctx, requester.ID, wallet.Requester{
+		GivenNames: "Alice", FamilyName: "Owner", DateOfBirth: "1980-01-02", Disclosed: true, CompanyName: "Acme B.V.",
+	}, kvkNumber, "acme")
+	if err != nil {
+		t.Fatalf("OpenWallet: %v", err)
+	}
+
+	org := res.Organization
+	if org.Name != "Acme B.V." || org.KVKNumber != kvkNumber || org.EUID != "NLNHR."+kvkNumber {
+		t.Fatalf("org = %q kvk %q euid %q, want the stated company", org.Name, org.KVKNumber, org.EUID)
+	}
+	if !org.TestMode {
+		t.Fatal("a registered org must start in test mode")
+	}
+	if res.RepresentationKind != "" {
+		t.Fatalf("representation kind = %q, want none: no register stated one", res.RepresentationKind)
+	}
+	var kind string
+	if err := pool.QueryRow(ctx, `SELECT kind FROM wallet_representations WHERE organization_id = $1 AND claimed_by_user_id = $2`,
+		org.ID, requester.ID).Scan(&kind); err != nil {
+		t.Fatalf("claimed representation missing: %v", err)
+	}
+	if kind != registryprovider.KindOverig {
+		t.Fatalf("representation kind = %q, want overig", kind)
+	}
+
+	// The KVK number is taken from then on.
+	if _, err := svc.OpenWallet(ctx, requester.ID, wallet.Requester{GivenNames: "Alice", FamilyName: "Owner", CompanyName: "Acme Again"},
+		kvkNumber, "acme-again"); !errors.Is(err, wallet.ErrAlreadyRegistered) {
+		t.Fatalf("second registration err = %v, want ErrAlreadyRegistered", err)
 	}
 }

@@ -16,12 +16,19 @@ import (
 // The register did not validate the request; no wallet may be opened.
 var ErrUnknownKVK = errors.New("registryprovider: kvk number not found in the register")
 
+// ErrLegalNameRequired means the register does not supply the company's name and
+// the request stated none it can use.
+var ErrLegalNameRequired = errors.New("registryprovider: a company name is required")
+
 // ConsultRequest is what the requestor sends KVK: the KVK number of the company
 // and the requester's identification data (from their disclosed PID) that KVK
 // matches against the authorised representatives in its register. DateOfBirth is
 // "2006-01-02" and may be empty when the caller has no verified birth date.
 type ConsultRequest struct {
-	KVKNumber   string
+	KVKNumber string
+	// LegalName is the company name the requester states. Only a register that
+	// has no name of its own reads it (DeclaredRegistry).
+	LegalName   string
 	GivenNames  string
 	FamilyName  string
 	DateOfBirth string
@@ -70,5 +77,8 @@ type RegistrationAttestation struct {
 	// Representatives (valid only when the flag is true).
 	RequesterIsRepresentative    bool
 	RequesterRepresentativeIndex int
-	IssuedAt                     time.Time
+	// Declared marks a company no register confirmed: its name, and the
+	// requester's standing as its representative, are the requester's own statement.
+	Declared bool
+	IssuedAt time.Time
 }

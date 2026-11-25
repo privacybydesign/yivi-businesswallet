@@ -31,6 +31,10 @@ import (
 // the stub is selected and the operation has no meaningful in-memory behaviour.
 var ErrNotConfigured = errors.New("eudiholder: engine not configured")
 
+// ErrOfferUsed means the issuer refused the offer's pre-authorized code: it was
+// already used or has expired, so no retry can redeem the offer.
+var ErrOfferUsed = errors.New("eudiholder: the issuer no longer accepts this offer")
+
 // Holder is the per-organization holder-wallet engine seam. Accept the
 // interface; the concrete engine (stub or irmago-backed) is injected at boot.
 type Holder interface {
@@ -90,6 +94,11 @@ type Holder interface {
 	// ref the engine does not know is absent from the map; an org that holds nothing
 	// yields an empty (non-nil) map.
 	Validities(ctx context.Context, orgID uuid.UUID) (map[string]HeldValidity, error)
+
+	// Payload returns a held credential's payload exactly as its issuer signed it,
+	// every disclosure resolved, so it can be checked against a credential schema.
+	// It is nil for a credential the engine holds no signed form of (the stub).
+	Payload(ctx context.Context, orgID uuid.UUID, ref string) (map[string]any, error)
 
 	// RefreshStatuses re-reads the Token Status List of every credential the
 	// organization holds that carries a status reference and stores what it

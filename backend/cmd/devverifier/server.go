@@ -273,7 +273,7 @@ func (s *server) response(w http.ResponseWriter, r *http.Request) {
 	case len(token) == 0:
 		sess.failure = relyingparty.ErrNoPresentations.Error()
 	default:
-		sess.presented = relyingparty.VerifyVPToken(token, s.issuerTrust, sess.nonce, s.identity.ClientID())
+		sess.presented = relyingparty.VerifyVPToken(r.Context(), token, s.issuerTrust, nil, sess.nonce, s.identity.ClientID())
 	}
 	if sess.failure != "" {
 		slog.Warn("response refused", slog.String("session", sess.id), slog.String("error", sess.failure))

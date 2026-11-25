@@ -3,6 +3,7 @@ package signing
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -197,6 +198,7 @@ func TestValidateRecipient(t *testing.T) {
 		want error
 	}{
 		{"none", RecipientInput{Channel: ChannelNone}, nil},
+		{"signers need no address", RecipientInput{Channel: ChannelSigners}, nil},
 		{"email with address", RecipientInput{Channel: ChannelEmail, Address: "a@example.org"}, nil},
 		{"qerds with address", RecipientInput{Channel: ChannelQERDS, Address: "0208:nl:acme"}, nil},
 		{"email without address", RecipientInput{Channel: ChannelEmail}, ErrInvalidRequest},
@@ -209,6 +211,97 @@ func TestValidateRecipient(t *testing.T) {
 				t.Fatalf("validateRecipient = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+type fakeDeliverer struct {
+	to      []string
+	failFor string
+}
+
+func (f *fakeDeliverer) DeliverEmail(_ context.Context, _ uuid.UUID, to, _, _, _ string, _ []byte) error {
+	f.to = append(f.to, to)
+	if to == f.failFor {
+		return errors.New("smtp down")
+	}
+	return nil
+}
+
+func (f *fakeDeliverer) DeliverQERDS(context.Context, uuid.UUID, string, string, string, string, string, []byte) error {
+	return errors.New("not used")
+}
+
+func TestDeliverToSignersMailsEachSignerOnce(t *testing.T) {
+	alice, gone := uuid.New(), uuid.New()
+	members := fakeMemberDirectory{members: []OrgMember{{UserID: alice, Email: "alice@example.org", Name: "Alice"}}}
+	req := Request{Signers: []Signer{
+		memberSigner(alice),
+		externalSignerRow("bob@example.org"),
+		// The same person, selected as a member and as an external signee.
+		externalSignerRow("Alice@Example.org"),
+		// A member who has left the organisation has no address to mail.
+		memberSigner(gone),
+	}}
+
+	fd := &fakeDeliverer{}
+	s := &Service{members: members, deliverer: fd}
+	if err := s.deliverToSigners(context.Background(), uuid.New(), req, "Doc.pdf", []byte("pdf")); err != nil {
+		t.Fatalf("deliverToSigners = %v, want nil", err)
+	}
+	if want := []string{"alice@example.org", "bob@example.org"}; !slices.Equal(fd.to, want) {
+		t.Fatalf("mailed %v, want %v", fd.to, want)
+	}
+
+	// One failed send fails the delivery, after the others were still tried.
+	fd = &fakeDeliverer{failFor: "alice@example.org"}
+	s = &Service{members: members, deliverer: fd}
+	if err := s.deliverToSigners(context.Background(), uuid.New(), req, "Doc.pdf", []byte("pdf")); err == nil {
+		t.Fatal("deliverToSigners = nil, want the failed send reported")
+	}
+	if len(fd.to) != 2 {
+		t.Fatalf("mailed %v, want both signers tried", fd.to)
+	}
+
+	// Nobody to mail is a failed delivery, not a silent success.
+	s = &Service{members: members, deliverer: &fakeDeliverer{}}
+	if err := s.deliverToSigners(context.Background(), uuid.New(), Request{Signers: []Signer{memberSigner(gone)}}, "Doc.pdf", nil); err == nil {
+		t.Fatal("deliverToSigners with no addresses = nil, want an error")
+	}
+}
+
+// failingMemberDirectory is a member directory that cannot be read.
+type failingMemberDirectory struct{}
+
+func (failingMemberDirectory) ListMembers(context.Context, uuid.UUID) ([]OrgMember, error) {
+	return nil, errors.New("directory down")
+}
+
+// A directory that cannot be read leaves the members' addresses unknown. That
+// fails the delivery before anything is sent: mailing only the external signee
+// would record a delivery the members never got.
+func TestDeliverToSignersFailsWhenTheDirectoryCannotBeRead(t *testing.T) {
+	req := Request{Signers: []Signer{
+		memberSigner(uuid.New()),
+		externalSignerRow("bob@example.org"),
+	}}
+	fd := &fakeDeliverer{}
+	s := &Service{members: failingMemberDirectory{}, deliverer: fd}
+	if err := s.deliverToSigners(context.Background(), uuid.New(), req, "Doc.pdf", []byte("pdf")); err == nil {
+		t.Fatal("deliverToSigners = nil, want the directory failure reported")
+	}
+	if len(fd.to) != 0 {
+		t.Fatalf("mailed %v, want nobody mailed while the members are unknown", fd.to)
+	}
+
+	// With only external signees there is nothing to look up, so it is not asked.
+	fd = &fakeDeliverer{}
+	s = &Service{members: failingMemberDirectory{}, deliverer: fd}
+	external := Request{Signers: []Signer{externalSignerRow("bob@example.org")}}
+	if err := s.deliverToSigners(context.Background(), uuid.New(), external, "Doc.pdf", []byte("pdf")); err != nil {
+		t.Fatalf("deliverToSigners for external signees only = %v, want nil", err)
+	}
+	if !slices.Equal(fd.to, []string{"bob@example.org"}) {
+		t.Fatalf("mailed %v, want the external signee", fd.to)
 	}
 }
 

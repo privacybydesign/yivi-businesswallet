@@ -101,6 +101,18 @@ func (q *fakeOfferQueue) ReleaseOffer(_ context.Context, orgID, id uuid.UUID) er
 	return attestation.ErrOfferNotFound
 }
 
+func (q *fakeOfferQueue) FailOffer(_ context.Context, orgID, id uuid.UUID) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	for i, o := range q.offers {
+		if o.ID == id && o.OrganizationID == orgID && o.Status == attestation.OfferAccepting {
+			q.offers[i].Status = attestation.OfferFailed
+			return nil
+		}
+	}
+	return attestation.ErrOfferNotFound
+}
+
 func (q *fakeOfferQueue) AcceptOffer(_ context.Context, orgID, id uuid.UUID, in attestation.HeldInput) (attestation.HeldAttestation, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()

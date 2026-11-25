@@ -2,10 +2,12 @@ package eudiholder
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"slices"
 	"strings"
 	"sync"
@@ -13,9 +15,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/privacybydesign/irmago/common/clientmodels"
 	"github.com/privacybydesign/irmago/eudi"
+	"github.com/privacybydesign/irmago/eudi/credentials/proofs"
 	"github.com/privacybydesign/irmago/eudi/credentials/sdjwtvc"
 	"github.com/privacybydesign/irmago/eudi/credentials/statuslist"
 	eudijwt "github.com/privacybydesign/irmago/eudi/jwt"
+	"github.com/privacybydesign/irmago/eudi/oauth2"
 	"github.com/privacybydesign/irmago/eudi/openid4vci"
 	"github.com/privacybydesign/irmago/eudi/sdjwt"
 	"github.com/privacybydesign/irmago/eudi/services"
@@ -43,7 +47,8 @@ const defaultHolderLocale = "en"
 // per-org holder storage (the same storage.Storage the engine caches). The flow
 // is auto-consented: over the authenticated QERDS channel there is no operator to
 // prompt, and no tx_code (org offers are minted without one — see
-// .ai/features/oid4vci-over-qerds.md §4). Only the pre-authorized-code grant is
+// .ai/features/oid4vci-over-qerds.md §4), except where the offer carries its own
+// value (offerTxCode). Only the pre-authorized-code grant is
 // accepted; an authorization-code offer is declined (it needs interactive auth).
 func (e *Engine) Redeem(ctx context.Context, orgID uuid.UUID, offerURI string) (Redeemed, error) {
 	st, err := e.engineFor(ctx, orgID)
@@ -91,6 +96,7 @@ func (e *Engine) Redeem(ctx context.Context, orgID uuid.UUID, offerURI string) (
 	if err != nil {
 		return Redeemed{}, err
 	}
+	binder = oneCopyBinder{binder}
 	// currentLocale is shared by the credential service and the client (matching
 	// irmago's wallet assembly); receive is headless, so the default locale stands.
 	currentLocale := clientmodels.NewCurrentLocale(defaultHolderLocale)
@@ -122,7 +128,7 @@ func (e *Engine) Redeem(ctx context.Context, orgID uuid.UUID, offerURI string) (
 		client.AllowInsecureHttpForTesting()
 	}
 
-	handler := newRedeemHandler()
+	handler := newRedeemHandler(offerTxCode(offerURI))
 	sessionID := int(e.sessionCounter.Add(1))
 	client.NewSession(sessionID, offerURI, redirectURI, handler)
 
@@ -380,6 +386,22 @@ func (r *storeRecorder) refFor(vct string) string {
 	return ""
 }
 
+// copiesPerCredential is how many copies of a credential the org asks an issuer
+// for. irmago asks for the issuer's whole batch_size, a key and a proof each, and
+// over WSCA each is a call the wallet provider rate-limits. One copy is enough:
+// it can be presented any number of times.
+const copiesPerCredential uint = 1
+
+// oneCopyBinder makes keys for copiesPerCredential copies however many irmago
+// asks for. irmago sends one proof per key, so the issuer signs that many.
+type oneCopyBinder struct {
+	openid4vci.HolderKeyBinder
+}
+
+func (b oneCopyBinder) CreateKeyPairsWithProofs(num uint, proofBuilder proofs.ProofBuilder) ([]models.PublicHolderBindingKey, []string, error) {
+	return b.HolderKeyBinder.CreateKeyPairsWithProofs(min(num, copiesPerCredential), proofBuilder)
+}
+
 // redeemResult carries the outcome of the asynchronous, callback-driven session
 // back to Redeem over a buffered channel.
 type redeemResult struct {
@@ -391,11 +413,38 @@ type redeemResult struct {
 // synchronous result. It auto-grants the pre-authorized-code flow (no tx_code)
 // and the add-to-wallet permission, and declines the authorization-code flow.
 type redeemHandler struct {
-	done chan redeemResult
+	done   chan redeemResult
+	txCode *string
 }
 
-func newRedeemHandler() *redeemHandler {
-	return &redeemHandler{done: make(chan redeemResult, 1)}
+func newRedeemHandler(txCode *string) *redeemHandler {
+	return &redeemHandler{done: make(chan redeemResult, 1), txCode: txCode}
+}
+
+// offerTxCode returns the tx_code value an offer carries itself, as the EU
+// reference issuer's offers do (a non-standard grants.<pre-auth>.tx_code.value);
+// nil when there is none.
+func offerTxCode(offerURI string) *string {
+	u, err := url.Parse(offerURI)
+	if err != nil {
+		return nil
+	}
+	var offer struct {
+		Grants map[string]struct {
+			TxCode *struct {
+				Value json.Number `json:"value"`
+			} `json:"tx_code"`
+		} `json:"grants"`
+	}
+	if json.Unmarshal([]byte(u.Query().Get("credential_offer")), &offer) != nil {
+		return nil
+	}
+	grant, ok := offer.Grants[oauth2.GrantTypePreAuthorizedCode]
+	if !ok || grant.TxCode == nil || grant.TxCode.Value == "" {
+		return nil
+	}
+	code := grant.TxCode.Value.String()
+	return &code
 }
 
 func (h *redeemHandler) Success(_ string, issued []*clientmodels.Credential) {
@@ -441,15 +490,24 @@ func (h *redeemHandler) Failure(err *clientmodels.SessionError) {
 	if detail == "" {
 		detail = "(no detail)"
 	}
+	if strings.Contains(detail, oauth2InvalidGrant) {
+		h.done <- redeemResult{err: fmt.Errorf("%w: openid4vci session failed: %s", ErrOfferUsed, detail)}
+		return
+	}
 	h.done <- redeemResult{err: fmt.Errorf("openid4vci session failed: %s", detail)}
 }
+
+// oauth2InvalidGrant is the token endpoint's error for a used or expired code
+// (RFC 6749 §5.2). irmago hands the failure over only as text, so it is matched
+// there.
+const oauth2InvalidGrant = "invalid_grant"
 
 func (h *redeemHandler) RequestPreAuthorizedCodeFlowPermission(
 	_ *clientmodels.PreAuthorizedCodeFlowPermissionRequest,
 	_ *clientmodels.TrustedParty,
 	callback openid4vci.TokenPermissionHandler,
 ) {
-	callback(true, nil)
+	callback(true, h.txCode)
 }
 
 func (h *redeemHandler) RequestAuthorizationCodeFlowPermission(
@@ -477,4 +535,15 @@ func credentialInstanceRef(c *clientmodels.Credential) string {
 		return id
 	}
 	return ""
+}
+
+// NewStatusListChecker is a Token Status List checker for a verifier: lists
+// verify against trust and are fetched under the same policy a holder's are.
+// Its cache is in memory, as a verifier keeps no per-org storage.
+func NewStatusListChecker(trust eudijwt.X509VerificationContext, allowInsecureHTTP bool) *statuslist.Checker {
+	return statuslist.NewChecker(statuslist.VerificationContext{
+		X509Context: trust,
+		Clock:       eudijwt.NewSystemClock(),
+		HTTPClient:  newStatusClient(safehttp.Policy{AllowInsecureHTTP: allowInsecureHTTP}),
+	}, nil)
 }

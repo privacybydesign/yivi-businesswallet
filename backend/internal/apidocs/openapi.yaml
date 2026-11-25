@@ -1926,6 +1926,85 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/v1/attestations/status-lists/take:
+    post:
+      tags: [attestation]
+      summary: Reserve a status list entry for a rulebook credential
+      description: >-
+        Called by the EU reference issuer (its `revocation.take_url`) while it signs a
+        rulebook credential. Reserves a random free entry tied to the offer whose
+        issuance id is `eudi:<issuer_state>` and returns the `status` claim to embed.
+        Only routed when the rulebook status list is configured.
+      security:
+        - issuerStatusKey: []
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [issuer_state]
+              properties:
+                issuer_state:
+                  type: string
+                  description: The offer's issuer_state.
+                expiry_date:
+                  type: string
+                  format: date
+                  description: The credential's expiry.
+                doctype:
+                  type: string
+                country:
+                  type: string
+      responses:
+        '200':
+          description: The status claim for the credential.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status_list]
+                properties:
+                  status_list:
+                    type: object
+                    required: [idx, uri]
+                    properties:
+                      idx:
+                        type: integer
+                      uri:
+                        type: string
+                        format: uri
+        '400':
+          description: No issuer_state, or an expiry_date that is not a date.
+        '401':
+          description: A missing or wrong API key.
+        '404':
+          description: No open offer with that issuer_state.
+  /api/v1/attestations/status-lists/{list}:
+    parameters:
+      - name: list
+        in: path
+        required: true
+        schema:
+          type: integer
+        description: Status list number.
+    get:
+      tags: [attestation]
+      summary: Get a rulebook credential status list
+      description: >-
+        Public. The Token Status List (1 bit per entry) the `status` claim of a
+        rulebook credential points to, signed with the rulebook issuer's key as an
+        `application/statuslist+jwt`. 404 for an unknown list.
+      security: []
+      responses:
+        '200':
+          description: The signed status list token.
+          content:
+            application/statuslist+jwt:
+              schema:
+                type: string
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/v1/orgs/{slug}/attestations:
     parameters:
       - name: slug
@@ -2194,8 +2273,10 @@ paths:
         the received credential as held. Requires an administrator role. Returns
         404 when the offer is absent, already decided, or being accepted by
         another request: the offer is claimed before the issuer is called, so of
-        several simultaneous accepts exactly one redeems. A redemption that fails
-        returns the offer to the queue so it can be accepted again.
+        several simultaneous accepts exactly one redeems. Returns 410 when the
+        issuer refuses the offer as used or expired (`invalid_grant`); that closes
+        the offer for good. Any other failed redemption returns the offer to the
+        queue so it can be accepted again.
       responses:
         '2XX':
           description: Successful response.
@@ -2211,6 +2292,12 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '410':
+          description: '`offer_used`: the issuer no longer accepts this offer, so it is closed as failed. Ask the sender for a new one.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /api/v1/orgs/{slug}/attestations/offers/{id}/decline:
     parameters:
       - name: slug
@@ -2989,14 +3076,23 @@ paths:
         `revoked`. This is the path backed by the issuer's IETF Token Status
         List. Unclaimed offers are withdrawn via cancel instead. Requires an
         administrator role. Returns 409 when the attestation is not a claimed
-        credential.
+        credential. The holder is told of the revocation and its reason (WE BUILD
+        CS-10 ISS-RV-09): an organization over QERDS, a person by e-mail. The
+        response carries the reason as `revocationReason`.
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              description: JSON request payload; see the endpoint description.
+              required: [reason]
+              properties:
+                reason:
+                  type: string
+                  maxLength: 500
+                  description: >-
+                    Why the credential is revoked, in plain language; sent to the holder.
+                    400 `reason_required` when empty, `reason_too_long` over 500 characters.
       responses:
         '2XX':
           description: Successful response.
@@ -14168,8 +14264,9 @@ paths:
         Requires organisation membership. Accepts a PDF in the `document` multipart
         field plus the chosen signers (`signers`, repeated, one JSON object each),
         the signing `mode` (`parallel` or `sequential`), and the recipient
-        (`recipientChannel` one of `none`/`qerds`/`email`, plus `recipientAddress`,
-        `recipientName`, `message`). A signer is either an internal member
+        (`recipientChannel` one of `none`/`signers`/`qerds`/`email`, plus
+        `recipientAddress`, `recipientName`, `message`; `signers` mails the finished
+        PDF to everyone who signed it and takes no address). A signer is either an internal member
         (`{"kind":"internal","userId":"<uuid>"}`) or an external signee
         (`{"kind":"external","email":"...","name":"..."}`); the order of the values is
         the signing order for sequential mode. Each signer object may carry
@@ -14211,7 +14308,7 @@ paths:
                   enum: [parallel, sequential]
                 recipientChannel:
                   type: string
-                  enum: [none, qerds, email]
+                  enum: [none, signers, qerds, email]
                 recipientAddress:
                   type: string
                 recipientName:
@@ -14286,7 +14383,9 @@ paths:
         Requires organisation membership, a linked signing credential, and that the
         caller is a pending signer whose turn it is. Prepares the current document,
         binds its hash into the authorization, and returns `{requestId, authorizeUrl}`;
-        the browser opens `authorizeUrl` to complete the wallet ceremony.
+        the browser opens `authorizeUrl` to complete the wallet ceremony. With the
+        built-in signing service the answer also carries `authorizeInApp: true`: the
+        page may then ask `authorizeUrl` for JSON and show the Yivi step itself.
       responses:
         '2XX':
           description: Successful response.
@@ -14380,6 +14479,42 @@ paths:
             application/json:
               schema:
                 description: Response payload; shape depends on the endpoint.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/signing/requests/{id}/preview:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: Signing request id.
+    get:
+      tags: [signing]
+      summary: Read the document before signing
+      description: >-
+        Requires organisation membership. Returns the request's PDF as it stands now
+        (`application/pdf`, inline), with the signatures made so far, so a signer can
+        read it before signing. An admin, or a member the request involves; 404 otherwise.
+      responses:
+        '2XX':
+          description: The document.
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -15244,6 +15379,32 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/qerds/messages/unread:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+    get:
+      tags: [qerds]
+      summary: Count unread inbound QERDS messages
+      description: Requires membership of the organisation.
+      responses:
+        '200':
+          description: How many inbound messages no member has opened.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  unread:
+                    type: integer
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /api/v1/orgs/{slug}/qerds/messages/{id}:
     parameters:
       - name: slug
@@ -15275,6 +15436,31 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/qerds/messages/{id}/read:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Resource identifier.
+    post:
+      tags: [qerds]
+      summary: Mark an inbound QERDS message read
+      description: Requires membership of the organisation. The first member to open an inbound message reads it for the whole organisation; an outbound or already read message is left as it is.
+      responses:
+        '204':
+          description: Marked read, or nothing to change.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /api/v1/orgs/{slug}/qerds/messages/{id}/attachments/{attachmentId}:
     parameters:
       - name: slug
@@ -15760,8 +15946,10 @@ paths:
                   description: An https page of yours the signee is offered to return to when done.
                 recipientChannel:
                   type: string
-                  enum: [none, email, qerds]
-                  description: Where the finished PDF is delivered. Default none.
+                  enum: [none, signers, email, qerds]
+                  description: >-
+                    Where the finished PDF is delivered. `signers` mails it to everyone
+                    who signed it and takes no `recipientAddress`. Default none.
                 recipientAddress:
                   type: string
                 recipientName:
@@ -16004,7 +16192,11 @@ paths:
         (comma-separated base64url SHA-256 digests) and `hashAlgorithmOID`; the signer must
         then disclose the same identity the credential's certificate names. PKCE with
         `S256` is required. A `client_id` or `redirect_uri` the service does not know is
-        answered 400 and never redirected.
+        answered 400 and never redirected. A caller that accepts `application/json` and
+        not `text/html` (the wallet's own signing pages, which show the QR code
+        themselves) is answered 200 with `{authorizationId, redirectUrl}` instead of the
+        redirect; `authorizationId` is absent when no authorization was started, and
+        `redirectUrl` is then `redirect_uri` carrying the error.
       security: []
       parameters:
         - name: response_type
@@ -16404,6 +16596,11 @@ components:
       type: apiKey
       in: cookie
       name: ybw_session
+    issuerStatusKey:
+      type: apiKey
+      in: header
+      name: X-Api-Key
+      description: The key the EU reference issuer reserves rulebook status list entries with.
   schemas:
     SigningApiRequest:
       type: object
@@ -16426,7 +16623,7 @@ components:
           format: uri
         recipientChannel:
           type: string
-          enum: [none, email, qerds]
+          enum: [none, signers, email, qerds]
         recipientName:
           type: string
         recipientAddress:
@@ -16947,7 +17144,10 @@ components:
           description: When an approved session was verified.
         identity:
           type: object
-          description: Only for an approved session.
+          description: >-
+            Only for an approved session. `nationality`, `bsn` and `dutchNationality`, like
+            the evidence's checks, are absent when the session's flow does not ask for them,
+            and null when it asked and got nothing.
           properties:
             givenName:
               type: string
@@ -16957,13 +17157,22 @@ components:
               type: string
             nationality:
               type: string
+              nullable: true
             bsn:
               type: string
+              nullable: true
               description: >-
                 The person's BSN, for a flow whose BSN policy keeps it (`retrieve`, or `mask`
                 for a masked one): the registered one when the Yivi app shared the personal
                 data (DigiD), else the one a Dutch document's chip or photo carries. Another
                 country's personal number is never sent. Absent otherwise.
+            dutchNationality:
+              type: boolean
+              nullable: true
+              description: >-
+                Whether the person has Dutch nationality, as the registered personal data
+                (DigiD) says when the Yivi app shared it. It is a yes or no, not a
+                nationality. Absent when not shared.
             ageOver:
               type: object
               description: >-
@@ -17001,24 +17210,35 @@ components:
                 type: string
               passiveAuth:
                 type: string
+                nullable: true
                 enum: [valid, invalid, not_performed]
-                description: The chip's signature check; only on `emrtd` evidence.
+                description: >-
+                  The chip's signature check, for a flow that reads the chip in the Idem app;
+                  absent otherwise, null when the chip was not read.
               activeAuth:
                 type: string
+                nullable: true
                 enum: [valid, invalid, not_performed]
-                description: The chip's clone check; only on `emrtd` evidence.
+                description: The chip's clone check; present exactly when `passiveAuth` is.
               faceMatch:
                 type: number
-                description: The face match score, 0 to 1; absent when no face was matched.
+                nullable: true
+                description: >-
+                  The face match score, 0 to 1, for a flow that checks the face; absent
+                  otherwise, null when no face was matched.
               liveness:
                 type: string
+                nullable: true
                 enum: [passed, failed, not_performed]
+                description: For a flow that checks the face; absent otherwise.
               documentCheck:
                 type: object
+                nullable: true
                 description: >-
-                  The document scan's result on a photographed document (`document_photo`);
-                  absent without one. A `fake` document, or `fields` `invalid`, rejected the
-                  session; `doubtful`, or `zones` `invalid`, sent it to review.
+                  The document scan's result, for a flow that photographs the document
+                  (`document_photo`); absent otherwise, null when there is none. A `fake`
+                  document, or `fields` `invalid`, rejected the session; `doubtful`, or `zones`
+                  `invalid`, sent it to review.
                 properties:
                   verdict:
                     type: string

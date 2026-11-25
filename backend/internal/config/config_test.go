@@ -315,6 +315,9 @@ func TestLoadOrgRequestDefaults(t *testing.T) {
 	if cfg.OpenID4VPRequesterPublicURL != "https://wallet.example.org" {
 		t.Errorf("requester public URL = %q, want it to default to APP_BASE_URL", cfg.OpenID4VPRequesterPublicURL)
 	}
+	if cfg.AttestationStatusListBaseURL != "https://wallet.example.org" {
+		t.Errorf("status list base URL = %q, want it to default to APP_BASE_URL", cfg.AttestationStatusListBaseURL)
+	}
 	if cfg.OpenID4VPOrgRequestTTL.Hours() != 168 {
 		t.Errorf("org request TTL = %v, want a week", cfg.OpenID4VPOrgRequestTTL)
 	}
@@ -484,7 +487,8 @@ func TestLoadSensitiveURLsNeedHTTPS(t *testing.T) {
 	} {
 		for _, key := range []string{
 			envIdentityProofingPublicURL, envRegulaFaceAPIPublicURL, envVogValidatorURL, envIDScanAPIURL,
-			envAppBaseURL, envOpenID4VPRequesterPublicURL, envAddressLookupURL, envSigningRedirectURI,
+			envAppBaseURL, envOpenID4VPRequesterPublicURL, envAttestationStatusListBaseURL, envAddressLookupURL,
+			envSigningRedirectURI,
 		} {
 			t.Run(key+"="+raw, func(t *testing.T) {
 				if _, err := loadWith(t, map[string]string{key: raw}); (err == nil) != ok {
@@ -551,6 +555,54 @@ func TestLoadStubOutcomeNeedsStubProvider(t *testing.T) {
 		envAppBaseURL:                  localStack,
 	}); err == nil {
 		t.Errorf("%s with %s=%s loaded, want an error", envIdentityProofingStubOutcome, envIdentityProofingProvider, ProviderEngine)
+	}
+}
+
+// The stub issuer keeps no status list, so it cannot claim one.
+func TestLoadStatusListNeedsRealIssuer(t *testing.T) {
+	if _, err := loadWith(t, map[string]string{envAttestationIssuerStatusList: "true"}); err == nil {
+		t.Errorf("%s=true with the stub issuer loaded, want an error", envAttestationIssuerStatusList)
+	}
+	cfg, err := loadWith(t, map[string]string{
+		envAttestationIssuerStatusList: "true",
+		envAttestationIssuer:           IssuerVeramo,
+		envAttestationIssuerURL:        "https://issuer.example",
+		envAttestationIssuerInstance:   "test-issuer",
+	})
+	if err != nil {
+		t.Fatalf("loading with a real issuer: %v", err)
+	}
+	if !cfg.AttestationIssuerStatusList {
+		t.Errorf("AttestationIssuerStatusList = false, want true")
+	}
+}
+
+// The rulebook status list is three settings that only make sense together, and
+// only next to the rulebook issuer.
+func TestLoadRulebookStatusList(t *testing.T) {
+	all := map[string]string{
+		envAttestationRulebookIssuerURL:        "https://eudi-issuer.example",
+		envAttestationRulebookStatusListAPIKey: "key",
+		envAttestationRulebookIssuerCert:       "cert",
+		envAttestationRulebookIssuerKey:        "pem",
+	}
+	t.Run("all set", func(t *testing.T) {
+		cfg, err := loadWith(t, all)
+		if err != nil {
+			t.Fatalf("loading the full rulebook status list: %v", err)
+		}
+		if cfg.AttestationRulebookStatusListAPIKey != "key" || cfg.AttestationRulebookIssuerCert != "cert" || cfg.AttestationRulebookIssuerKey != "pem" {
+			t.Errorf("rulebook status list = %q, %q, %q", cfg.AttestationRulebookStatusListAPIKey, cfg.AttestationRulebookIssuerCert, cfg.AttestationRulebookIssuerKey)
+		}
+	})
+	for _, drop := range []string{envAttestationRulebookIssuerURL, envAttestationRulebookStatusListAPIKey, envAttestationRulebookIssuerCert, envAttestationRulebookIssuerKey} {
+		t.Run("without "+drop, func(t *testing.T) {
+			env := maps.Clone(all)
+			delete(env, drop)
+			if _, err := loadWith(t, env); err == nil {
+				t.Errorf("loaded without %s, want an error", drop)
+			}
+		})
 	}
 }
 

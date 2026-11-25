@@ -2452,6 +2452,9 @@ func disclosedIdentity(p openid4vpverifier.Presentation) (openid4vpverifier.Iden
 		case openid4vpverifier.ClaimPersonalFirstNames, openid4vpverifier.ClaimPersonalPrefix, openid4vpverifier.ClaimPersonalFamilyName:
 		case openid4vpverifier.ClaimPersonalDateOfBirth:
 			claims[openid4vpverifier.ClaimDateOfBirth] = v
+		case openid4vpverifier.ClaimPersonalNationality:
+			// A yes/no, kept apart from a document's nationality code.
+			claims[proofingprovider.AttributeDutchNationality] = v
 		default:
 			claims[k] = v
 		}

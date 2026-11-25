@@ -46,6 +46,7 @@ export const en = {
     flows: "Flows",
     reviews: "Reviews",
     reviewsWaiting: "waiting",
+    messagesUnread: "unread",
     developers: "Developers",
     qerds: "Secure delivery",
     attestations: "Attestations",
@@ -76,14 +77,13 @@ export const en = {
   },
   enroll: {
     title: "Register a business wallet",
-    subtitle:
-      "Register your organization's wallet via the Chamber of Commerce.",
+    subtitle: "Register your organization's wallet with its KVK number.",
     intro:
-      "Enter your organization's KVK number. We securely consult the KVK (Kamer van Koophandel) to confirm the company and to check that you are registered as an authorized representative. Only then is the wallet created and you become an owner.",
+      "Enter your organization's KVK number and name. The wallet is created for that company and you become an owner.",
     kvkNumber: "KVK number",
     kvkPlaceholder: "e.g. 94861412",
-    submit: "Consult KVK & register",
-    consulting: "Consulting KVK…",
+    submit: "Register",
+    consulting: "Registering…",
     registeredAt: "Wallet registered for {{org}}",
     yourRole: "The KVK lists you as: {{role}}",
     continue: "Go to {{org}}",
@@ -363,9 +363,17 @@ export const en = {
     title: "Register a business wallet",
     subtitle: "New here? Register your company — no account needed yet.",
     intro:
-      "Enter your organization's KVK number. You'll confirm your identity with your wallet, and we securely consult the KVK (Kamer van Koophandel) to check that you're a registered representative. If so, we create the wallet and log you in as an owner.",
+      "Enter your organization's KVK number and name. You'll confirm your identity with your wallet, and we create the wallet and log you in as an owner.",
     kvkNumber: "KVK number",
     kvkPlaceholder: "e.g. 94861412",
+    companyName: "Company name",
+    companyNamePlaceholder: "e.g. Yivi B.V.",
+    companyNameHint: "The name your company is registered under at the KVK.",
+    companyNameRequired: "Enter your company's name, at most 200 characters.",
+    unknownKvk:
+      "This KVK number was not accepted. Check that it is the 8 digits of your company's KVK number.",
+    startsInTestMode:
+      "Your wallet starts in test mode. Yivi switches it to live once your company is confirmed.",
     slug: "Wallet handle (slug)",
     slugPlaceholder: "e.g. yivi",
     slugHint: "Used in the URL. Lowercase letters, numbers and hyphens.",
@@ -384,16 +392,16 @@ export const en = {
     disclosure: {
       identityLabel: "Passport, ID card or residence permit",
       identityDetail:
-        "Confirms your name, date of birth and nationality, so we can match you to the company's registered representatives at the KVK.",
+        "Confirms your name, date of birth and nationality, so it is known who registered this company.",
       emailLabel: "Email address",
       emailDetail: "Becomes the address you sign in with.",
       phoneLabel: "Phone number",
       phoneDetail: "Added to your verified profile.",
     },
     disclosureFootnote:
-      "Nothing is stored beyond what's needed to create your wallet and match you at the Chamber of Commerce.",
+      "Nothing is stored beyond what's needed to create your wallet and record who registered it.",
     onboardTitle: "Onboarding your wallet",
-    registering: "Consulting KVK…",
+    registering: "Creating your wallet…",
     registeredAt: "Wallet registered for {{org}}",
     yourRole: "The KVK lists you as: {{role}}",
     enter: "Continue to {{org}}",
@@ -712,7 +720,9 @@ export const en = {
     address: {
       overview: {
         label: "Address",
-        detail: "After the identity check: the postal address you enter",
+        detail: "Your postal address, which you enter yourself after the check",
+        detailYivi:
+          "Your registered address from the BRP, which the Yivi app shares",
       },
       identityDone: "Your identity is verified.",
       heading: "Now enter your address",
@@ -741,7 +751,7 @@ export const en = {
       overview: {
         label: "Diplomas",
         detail:
-          "After the identity check: the diploma extracts you download from DUO, checked against DUO's signature and your name and date of birth",
+          "Your diploma extracts from DUO, which you upload after the check. We check DUO's signature and that they are in your name and date of birth.",
       },
       how: {
         login: "Log in to Mijn DUO with DigiD.",
@@ -763,7 +773,7 @@ export const en = {
       overview: {
         label: "Verzekeringsbericht",
         detail:
-          "After the identity check: the Verzekeringsbericht you download from UWV, checked against UWV's seal and your name and date of birth",
+          "Your Verzekeringsbericht from UWV, which you upload after the check. We check UWV's seal and that it is in your name and date of birth.",
       },
       how: {
         login: "Log in to Mijn UWV with DigiD.",
@@ -917,7 +927,7 @@ export const en = {
         "Your identity check is done. Someone will review it after you finish here.",
       steps: {
         overview: "What is collected",
-        document: "Photograph your ID",
+        document: "Photograph your document",
         method: "Choose an app",
         session: "Scan the QR code",
         address: "Address",
@@ -971,7 +981,19 @@ export const en = {
       },
       documentScan: {
         heading: "Photograph your ID",
-        hint: "Take a photo of the front and back of your ID card or driving licence, or of the photo page of your passport, in CM.com's secure scan below.",
+        headings: {
+          passport: "Photograph your passport",
+          identity_card: "Photograph your ID card",
+          residence_permit: "Photograph your residence permit",
+          drivers_license: "Photograph your driving licence",
+        },
+        hint: "Take a photo of {{documents}} in CM.com's secure scan below.",
+        sides: {
+          passport: "the photo page of your passport",
+          identity_card: "the front and back of your ID card",
+          residence_permit: "the front and back of your residence permit",
+          drivers_license: "the front and back of your driving licence",
+        },
         passportHint:
           "For a passport, open it like a book and turn it sideways, so the open passport fits the frame.",
         frameTitle: "CM.com ID scan",
@@ -1111,6 +1133,9 @@ export const en = {
         name: "Name",
         birthDate: "Date of birth",
         nationality: "Nationality",
+        dutch: "Dutch",
+        notDutch: "Not Dutch",
+        bsn: "BSN",
         ageOver: "{{age}} or older",
         ageOverYes: "Yes",
         ageOverNo: "No",
@@ -2443,6 +2468,8 @@ export const en = {
     attestationOfferCancelled: "Offer cancelled",
     credentialOfferAccepted: "Credential added to the wallet",
     credentialOfferDeclined: "Offer declined",
+    credentialOfferUsed:
+      "This offer can no longer be accepted. Ask the sender for a new one.",
     credentialRequestSent: "Credential request sent",
     requestTemplateSaved: "Template saved",
     requestTemplateDeleted: "Template deleted",
@@ -2686,6 +2713,7 @@ export const en = {
       userPurged: "User purged",
       qerdsMessageSent: "Sent secure message",
       qerdsMessageReceived: "Received secure message",
+      qerdsMessageRead: "Opened secure message",
       qerdsAddressProvisioned: "Provisioned digital address",
       qerdsAddressDefaultChanged: "Changed default address",
       qerdsAddressDeleted: "Deleted digital address",
@@ -2709,6 +2737,8 @@ export const en = {
       wscaAccountRotated: "Rotated the wallet secret",
       kvkRegistrationValidated: "KVK validated registration",
       kvkRegistrationNotValidated: "KVK rejected registration",
+      kvkRegistrationDeclared:
+        "Company registered as stated, not checked at KVK",
       attestationSchemaCreated: "Created attestation schema",
       attestationSchemaUpdated: "Updated attestation schema",
       attestationSchemaDeleted: "Deleted attestation schema",
@@ -2726,6 +2756,8 @@ export const en = {
       attestationHeldDeleted: "Removed a received credential",
       attestationOfferAccepted: "Accepted an incoming credential offer",
       attestationOfferDeclined: "Declined an incoming credential offer",
+      attestationOfferFailed:
+        "An incoming credential offer could no longer be accepted",
       emailSettingsUpdated: "Updated email settings",
       emailTemplateUpdated: "Updated mail template",
       emailTemplateReset: "Reverted mail template to the default",
@@ -2978,6 +3010,16 @@ export const en = {
       "Upload a PDF. Its hash is authorized with your wallet, signed by the provider, and the signed PDF is returned to you.",
     signNeedsCredential: "Link a signing credential first.",
     signButton: "Sign document",
+    reviewButton: "Review and sign",
+    viewer: {
+      label: "Document {{filename}}",
+      loading: "Loading the document…",
+      error:
+        "The document could not be shown. Reload the page to try again before you sign.",
+      page: "Page {{page}} of {{total}}",
+      previous: "Previous page",
+      next: "Next page",
+    },
     requestTitle: "Signing request",
     requestPending:
       "Waiting for you to authorize the signature in your wallet…",
@@ -3028,6 +3070,7 @@ export const en = {
     recipientQerdsPlaceholder: "QERDS address",
     recipientNamePlaceholder: "Recipient name (optional)",
     messagePlaceholder: "Message to the recipient (optional)",
+    messageSignersPlaceholder: "Message to the signees (optional)",
     createdToast: "Signing request created.",
     documentStepHint: "Upload the PDF that everyone will sign.",
     documentMeta_one: "{{count}} signee",
@@ -3045,6 +3088,7 @@ export const en = {
     deliveryStepHint:
       "This happens once everyone has signed. You can always download it from History.",
     deliveryNoneDesc: "Nothing is sent. Pick it up from History.",
+    deliverySignersDesc: "Everyone who signed gets the PDF by email.",
     deliveryEmailDesc: "Plain attachment to the recipient.",
     deliveryQerdsDesc: "Registered delivery to the named recipient.",
     summaryTitle: "Ready to send",
@@ -3100,7 +3144,8 @@ export const en = {
     },
     channel: {
       none: "Do not send (download only)",
-      email: "Email",
+      signers: "Email the signees",
+      email: "Email someone else",
       qerds: "QERDS (registered delivery)",
     },
     signerStatus: {
@@ -3141,7 +3186,7 @@ export const en = {
       youLabel: "Signing as",
       progressLabel: "Signatures",
       progress: "{{signed}} of {{total}}",
-      reviewDocument: "Open the document",
+      reviewDocument: "Open in a new tab",
       needsCredential:
         "Link your signing certificate first. You identify with your wallet app once; after that you can sign.",
       linkButton: "Link signing certificate",
@@ -3194,6 +3239,8 @@ export const en = {
       openYivi: "Open the Yivi app",
       cancelError: "Could not cancel. Try again.",
       leaving: "Taking you back…",
+      finishing: "Approved. Finishing up…",
+      dialogTitle: "Approve in the Yivi app",
       denied: {
         title: "Not approved",
         identityMismatch:
@@ -3669,6 +3716,7 @@ export const en = {
     },
     kinds: {
       credential_offer: "Credential offer",
+      credential_revoked: "Credential revoked",
       event_notification: "Event notification",
       identity_overdue: "Identity overdue",
       identity_proofing_requested: "Identity proofing requested",
@@ -3687,6 +3735,8 @@ export const en = {
     kindDescriptions: {
       credential_offer:
         "Sent to a person when this organization issues them a credential.",
+      credential_revoked:
+        "Sent to a person when this organization revokes a credential it issued them, with the reason.",
       event_notification:
         "Sent to this organization's admins when something happens that they subscribed to.",
       identity_overdue:
@@ -4195,6 +4245,7 @@ export const en = {
         accepting: "Accepting…",
         accepted: "Added to the wallet",
         declined: "Declined",
+        failed: "No longer accepted by the issuer",
       },
       review: "Review in Attestations",
       rawEnvelope: "Raw envelope",
@@ -4330,6 +4381,13 @@ export const en = {
       empty: "No attestations issued yet.",
       cancel: "Cancel offer",
       revoke: "Revoke",
+      revokeDialog: {
+        title: "Revoke credential",
+        hint: "The holder is told this credential is revoked, and why. Revoking cannot be undone.",
+        reasonLabel: "Reason",
+        reasonPlaceholder: "Why is it revoked? The holder reads this.",
+        confirm: "Revoke credential",
+      },
       columns: {
         recipient: "Recipient",
         schema: "Schema",
@@ -4599,6 +4657,10 @@ export const en = {
       noSource: "No copy — enter a static value",
       sourcePrefill: "Copied from the recipient at issue time",
       error: "Could not save the template: {{message}}",
+      statusListRequired:
+        "A validity over 24 hours needs a status list to revoke the credential on, and this environment has none. Enter 86400 seconds or less.",
+      rulebookStatusListRequired:
+        "Rulebook credentials get their validity from the rulebook issuer, and it has no status list to revoke them on in this environment. Rulebook templates cannot be saved until it has one.",
     },
     sources: {
       givenNames: "Recipient · first name",
@@ -4641,6 +4703,16 @@ export const en = {
       recipientRequired: "Choose a recipient.",
       noAttributes: "This template has no attributes to fill in.",
       attributeRequired: "This attribute is required.",
+      identifierTitle: "Identifier (WE BUILD)",
+      identifierHint:
+        "WE BUILD requires at least one identifier of the organization. The EUID is filled in from the address book.",
+      identifierRequired: "Fill in at least one identifier.",
+      identifierFields: {
+        euid: "EUID",
+        lei: "LEI",
+        tax: "Tax number",
+        other: "Other identifier",
+      },
       reviewTemplate: "Template",
       reviewRecipient: "Recipient",
       offerHint:
@@ -4661,6 +4733,10 @@ export const en = {
         "One of the attributes is not part of this template's schema.",
       missingAttribute: "A required attribute is missing.",
       invalidClaims: "The claims do not match the rulebook. {{message}}",
+      statusListRequired:
+        "This template's validity is over 24 hours, which needs a status list to revoke the credential on, and this environment has none. Set the template's validity to 24 hours or less.",
+      rulebookStatusListRequired:
+        "The rulebook issuer has no status list to revoke this credential on in this environment, so rulebook credentials cannot be issued until it has one.",
       rulebookClaimsIntro:
         "This template follows a WE BUILD rulebook. Edit the claims as JSON. They start from the rulebook's example and are checked against the rulebook when you issue.",
       rulebookClaimsLabel: "Claims (JSON)",

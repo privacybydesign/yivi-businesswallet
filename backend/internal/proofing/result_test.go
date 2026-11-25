@@ -132,3 +132,43 @@ func TestAPIResultLeavesOutWhatTheFlowHasNot(t *testing.T) {
 		}
 	}
 }
+
+// A field the flow asked for shows even empty, as null; one it never asked
+// for is absent.
+func TestAPIResultShowsWhatTheFlowAskedFor(t *testing.T) {
+	req := Request{ID: uuid.New(), Status: StatusApproved}
+	identity := proofingprovider.Identity{
+		Result:   proofingprovider.Result{Status: proofingprovider.StatusApproved},
+		Asked:    &proofingprovider.Asked{Nationality: true, BSN: false, Face: true, DocumentCheck: true},
+		Evidence: &proofingprovider.Evidence{Type: proofingprovider.EvidenceDocumentPhoto, Liveness: "passed"},
+	}
+	raw, err := json.Marshal(newAPIResultResponse(req, identity, time.Now()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatal(err)
+	}
+	person := got["identity"].(map[string]any)
+	entry := got["evidence"].([]any)[0].(map[string]any)
+	for key, want := range map[string]any{"nationality": nil, "faceMatch": nil, "liveness": "passed", "documentCheck": nil} {
+		fields := entry
+		if key == "nationality" {
+			fields = person
+		}
+		if v, ok := fields[key]; !ok || v != want {
+			t.Errorf("%s = %v (present %v), want %v", key, v, ok, want)
+		}
+	}
+	for _, key := range []string{"bsn", "dutchNationality"} {
+		if _, ok := person[key]; ok {
+			t.Errorf("%s present, the flow never asked for it", key)
+		}
+	}
+	for _, key := range []string{"passiveAuth", "activeAuth"} {
+		if _, ok := entry[key]; ok {
+			t.Errorf("%s present, the flow reads no chip", key)
+		}
+	}
+}

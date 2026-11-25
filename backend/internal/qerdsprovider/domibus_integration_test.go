@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -76,16 +77,21 @@ const (
 	// pmodeMismatchMarker is the ebMS error name Domibus returns while the just-
 	// uploaded PMode has not yet reached the submit path (EBMS:0010).
 	pmodeMismatchMarker = "ProcessingModeMismatch"
+	// genericFaultMarker is CXF's unhandled-exception fault, which a submit can
+	// also hit while that reload is in flight.
+	genericFaultMarker = "Fault occurred while processing"
 )
 
-// sendAwaitingPMode submits msg, retrying ONLY the transient
+// sendAwaitingPMode submits msg, retrying the transient
 // "ProcessingModeMismatch: PMode could not be found" fault until the PMode is
 // live or pmodeReloadWindow elapses. uploadPMode persists the PMode
 // synchronously (the /rest/pmode POST returns 200) but the MSH submit path
 // picks it up via an async PModeProvider refresh, so the first submit after a
 // fresh CI boot can race ahead of that reload and be rejected with EBMS:0010.
 // Such a submit is rejected outright (nothing is queued), so retrying is safe —
-// it cannot double-deliver. Any other error fails the test immediately.
+// it cannot double-deliver. The generic CXF fault is retried too; a duplicate
+// would be harmless, as the tests match on a per-run body. Any other error fails
+// the test immediately.
 func sendAwaitingPMode(ctx context.Context, t *testing.T, provider *qerdsprovider.DomibusProvider, msg qerdsprovider.OutboundMessage) qerdsprovider.SendReceipt {
 	t.Helper()
 	deadline := time.Now().Add(pmodeReloadWindow)
@@ -94,7 +100,7 @@ func sendAwaitingPMode(ctx context.Context, t *testing.T, provider *qerdsprovide
 		if err == nil {
 			return receipt
 		}
-		if !strings.Contains(err.Error(), pmodeMismatchMarker) {
+		if !strings.Contains(err.Error(), pmodeMismatchMarker) && !strings.Contains(err.Error(), genericFaultMarker) {
 			t.Fatalf("Send: %v", err)
 		}
 		if time.Now().After(deadline) || ctx.Err() != nil {
@@ -199,10 +205,23 @@ func TestDomibusProviderInboundRoundTripIntegration(t *testing.T) {
 // so the test must do it.
 func provisionDomibus(t *testing.T, base string) {
 	t.Helper()
+	provisionMu.Lock()
+	defer provisionMu.Unlock()
+	if provisioned {
+		return
+	}
 	client, xsrf := domibusLogin(t, base)
 	uploadPMode(t, base, client, xsrf)
 	configureMessageFilter(t, base, client, xsrf)
+	provisioned = true
 }
+
+// Provision once per run: a re-upload restarts Domibus's async PMode reload, and
+// the next test's submit then races it.
+var (
+	provisionMu sync.Mutex
+	provisioned bool
+)
 
 // domibusLogin authenticates to the admin REST API and returns a cookie-jar
 // client plus the XSRF-TOKEN value (Domibus uses CSRF double-submit: the token

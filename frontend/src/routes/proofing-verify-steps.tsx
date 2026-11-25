@@ -46,6 +46,7 @@ import type {
 } from "../api/identity-proofing";
 import { EMPLOYMENT_KIND } from "../api/identity-proofing";
 import {
+  scanDocumentKinds,
   ATTRIBUTE_AGE_OVER,
   ATTRIBUTE_DOCUMENT,
   addressLookup,
@@ -238,7 +239,11 @@ export function Overview({
     items.push({
       icon: "personal",
       label: t("identityProofing.address.overview.label"),
-      detail: t("identityProofing.address.overview.detail"),
+      // The Yivi app shares the registered address: the person enters none.
+      detail:
+        onlyApp === "yivi_app"
+          ? t("identityProofing.address.overview.detailYivi")
+          : t("identityProofing.address.overview.detail"),
     });
   }
   if (flow.diplomaMode !== undefined && flow.diplomaMode !== "off") {
@@ -497,6 +502,7 @@ export function Session({
   method,
   methods = [],
   yiviPersonalData = false,
+  scanDocuments = [],
   onStage,
   onMethod,
   onRestart,
@@ -522,6 +528,8 @@ export function Session({
   methods?: ProofingAppMethod[];
   // The Yivi app shares the registered personal data (MethodChoice).
   yiviPersonalData?: boolean;
+  // The documents the document photo takes, which its text names; empty is any.
+  scanDocuments?: readonly string[];
   // Told where the session stands, for the page's stepper.
   onStage?: (stage: SessionStage) => void;
   // Told the app picked in the session (method pending).
@@ -739,7 +747,11 @@ export function Session({
     // The ID scan follows the app's part, in the browser.
     case "scan":
       return (
-        <DocumentScanStep target={target} sessionSecondsLeft={secondsLeft} />
+        <DocumentScanStep
+          target={target}
+          documents={scanDocuments}
+          sessionSecondsLeft={secondsLeft}
+        />
       );
     // With no app, the photo decides the session: its outcome is on its way.
     case "finishing":
@@ -826,9 +838,11 @@ export const DOCUMENT_SCAN_WIDE_PAGE =
 // (documentScanMessage), and the result is handed to the backend once.
 function DocumentScanStep({
   target,
+  documents,
   sessionSecondsLeft,
 }: Readonly<{
   target: VerifyTarget;
+  documents: readonly string[];
   sessionSecondsLeft: number;
 }>): React.JSX.Element {
   const { t, i18n } = useTranslation();
@@ -846,6 +860,7 @@ function DocumentScanStep({
   const scanUrl = scan.url;
   const showsFrame = scanUrl !== undefined && !unfinished && finish.isIdle;
   const locale = i18n.resolvedLanguage ?? i18n.language;
+  const kinds = scanDocumentKinds(documents);
   const { mutateAsync: startScan } = start;
   const begin = useCallback((): void => {
     setStarting(true);
@@ -921,12 +936,26 @@ function DocumentScanStep({
         <Icon name="personal" size={24} />
       </span>
       <StepHeading>
-        {t("identityProofing.onScreen.documentScan.heading")}
+        {kinds.length === 1
+          ? t(`identityProofing.onScreen.documentScan.headings.${kinds[0]}`)
+          : t("identityProofing.onScreen.documentScan.heading")}
       </StepHeading>
-      <p className={HINT}>{t("identityProofing.onScreen.documentScan.hint")}</p>
       <p className={HINT}>
-        {t("identityProofing.onScreen.documentScan.passportHint")}
+        {t("identityProofing.onScreen.documentScan.hint", {
+          documents: new Intl.ListFormat(locale, {
+            type: "disjunction",
+          }).format(
+            kinds.map((kind) =>
+              t(`identityProofing.onScreen.documentScan.sides.${kind}`),
+            ),
+          ),
+        })}
       </p>
+      {kinds.includes("passport") && (
+        <p className={HINT}>
+          {t("identityProofing.onScreen.documentScan.passportHint")}
+        </p>
+      )}
       {starting || showsFrame ? (
         <div
           className="relative w-full"

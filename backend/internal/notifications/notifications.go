@@ -156,6 +156,9 @@ var catalog = []CatalogEntry{
 	{audit.AttestationKeyAdded, GroupAttestation},
 	{audit.AttestationKeySuspended, GroupAttestation},
 	{audit.AttestationKeyRevoked, GroupAttestation},
+	// A held credential found revoked or valid again (CS-10 WU-RV-02); its
+	// metadata is the credential type and the status.
+	{audit.AttestationHeldStatusChanged, GroupAttestation},
 
 	// Signing lifecycle. Safe to publish: the metadata these actions record is the
 	// org's own document filename, the signing mode, signer counts, and redaction-safe

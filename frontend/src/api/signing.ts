@@ -37,6 +37,8 @@ export type SigningMode = (typeof SIGNING_MODE)[keyof typeof SIGNING_MODE];
 
 export const RECIPIENT_CHANNEL = {
   none: "none",
+  // Mails the finished document to everyone who signed it; names no recipient.
+  signers: "signers",
   qerds: "qerds",
   email: "email",
 } as const;
@@ -149,6 +151,10 @@ export type SigningRequestPage = z.infer<typeof signingRequestPageSchema>;
 export const signingStartSchema = z.object({
   requestId: z.string().optional(),
   authorizeUrl: z.string(),
+  // True when the authorization is the wallet's own signing service's: the page
+  // shows the Yivi step itself (SigningAuthorizationDialog) instead of sending
+  // the browser to authorizeUrl.
+  authorizeInApp: z.boolean().optional(),
 });
 export type SigningStart = z.infer<typeof signingStartSchema>;
 
@@ -388,6 +394,31 @@ export function declineExternalSign(
 // inline so they can read it in the browser before signing.
 export function externalDocumentUrl(token: string): string {
   return absoluteApiUrl(`${externalBase(token)}/document`);
+}
+
+// getExternalDocument fetches that document for the viewer on the signing page.
+export async function getExternalDocument(
+  token: string,
+  signal?: AbortSignal,
+): Promise<Blob> {
+  const { blob } = await requestBlob(`${externalBase(token)}/document`, {
+    signal,
+  });
+  return blob;
+}
+
+// getSigningDocumentPreview fetches the document a member is asked to sign, as
+// it stands now, for the viewer they read it in before signing.
+export async function getSigningDocumentPreview(
+  slug: string,
+  id: string,
+  signal?: AbortSignal,
+): Promise<Blob> {
+  const { blob } = await requestBlob(
+    `${base(slug)}/requests/${encodeURIComponent(id)}/preview`,
+    { signal },
+  );
+  return blob;
 }
 
 // downloadSignedDocument fetches the signed PDF and triggers a browser save,
