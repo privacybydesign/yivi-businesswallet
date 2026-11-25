@@ -138,7 +138,7 @@ func (s *Store) ListPendingOffers(ctx context.Context, orgID uuid.UUID) ([]Crede
 }
 
 // GetOfferBySourceMessage returns the offer queued from a QERDS message,
-// whatever its status — pending, accepting, accepted or declined. Unlike
+// whatever its status — pending, accepting, accepted, declined or failed. Unlike
 // ListPendingOffers, this is not filtered to pending: it backs the QERDS message
 // screen's "what became of this offer" annotation (see qerds.Handler.offers),
 // which has to say so for a decided offer too, not just link a pending one.

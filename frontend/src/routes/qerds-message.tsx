@@ -45,6 +45,8 @@ function credentialOfferStatusLabel(
       return t("qerds.offer.status.accepted");
     case "declined":
       return t("qerds.offer.status.declined");
+    case "failed":
+      return t("qerds.offer.status.failed");
     default:
       return t("attestations.offers.pending");
   }

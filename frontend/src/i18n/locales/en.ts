@@ -4158,6 +4158,7 @@ export const en = {
         accepting: "Accepting…",
         accepted: "Added to the wallet",
         declined: "Declined",
+        failed: "No longer accepted by the issuer",
       },
       review: "Review in Attestations",
       rawEnvelope: "Raw envelope",

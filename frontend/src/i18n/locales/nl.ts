@@ -4259,6 +4259,7 @@ export const nl: Translation<typeof en> = {
         accepting: "Bezig met accepteren…",
         accepted: "Toegevoegd aan de wallet",
         declined: "Geweigerd",
+        failed: "Niet meer geaccepteerd door de uitgever",
       },
       review: "Bekijk bij Attestaties",
       rawEnvelope: "Ruwe envelop",
