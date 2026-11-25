@@ -31,6 +31,10 @@ import (
 // the stub is selected and the operation has no meaningful in-memory behaviour.
 var ErrNotConfigured = errors.New("eudiholder: engine not configured")
 
+// ErrOfferUsed means the issuer refused the offer's pre-authorized code: it was
+// already used or has expired, so no retry can redeem the offer.
+var ErrOfferUsed = errors.New("eudiholder: the issuer no longer accepts this offer")
+
 // Holder is the per-organization holder-wallet engine seam. Accept the
 // interface; the concrete engine (stub or irmago-backed) is injected at boot.
 type Holder interface {

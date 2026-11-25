@@ -6,6 +6,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/privacybydesign/irmago/common/clientmodels"
+	"github.com/privacybydesign/irmago/eudi/credentials/proofs"
+	"github.com/privacybydesign/irmago/eudi/openid4vci"
 	"github.com/privacybydesign/irmago/eudi/storage/db"
 	"github.com/privacybydesign/irmago/eudi/storage/db/models"
 	"gorm.io/datatypes"
@@ -174,5 +177,75 @@ func TestOfferTxCodeReadsTheValueTheOfferCarries(t *testing.T) {
 		if got := offerTxCode(uri); got != nil {
 			t.Errorf("offerTxCode(%q) = %q, want nil", uri, *got)
 		}
+	}
+}
+
+type countingBinder struct {
+	openid4vci.HolderKeyBinder
+
+	asked []uint
+}
+
+func (c *countingBinder) CreateKeyPairsWithProofs(num uint, _ proofs.ProofBuilder) ([]models.PublicHolderBindingKey, []string, error) {
+	c.asked = append(c.asked, num)
+	return make([]models.PublicHolderBindingKey, num), make([]string, num), nil
+}
+
+// TestOneCopyBinderAsksForOneCopy: the EU reference issuer advertises batch_size
+// 100, and 100 WSCA keys plus their proofs exceed the wallet provider's rate limit.
+func TestOneCopyBinderAsksForOneCopy(t *testing.T) {
+	t.Parallel()
+
+	for _, num := range []uint{0, 1, 100} {
+		inner := &countingBinder{}
+		keys, proofsOut, err := oneCopyBinder{inner}.CreateKeyPairsWithProofs(num, nil)
+		if err != nil {
+			t.Fatalf("num %d: %v", num, err)
+		}
+		want := min(num, copiesPerCredential)
+		if len(inner.asked) != 1 || inner.asked[0] != want {
+			t.Errorf("num %d: inner binder asked for %v, want [%d]", num, inner.asked, want)
+		}
+		if uint(len(keys)) != want || uint(len(proofsOut)) != want {
+			t.Errorf("num %d: got %d keys and %d proofs, want %d each", num, len(keys), len(proofsOut), want)
+		}
+	}
+}
+
+// TestRedeemFailureMarksUsedOffer: only the issuer refusing the code makes the
+// offer unredeemable; a failure before that, like WSCA throttling, stays
+// retryable. The wrapped errors are the ones staging logged.
+func TestRedeemFailureMarksUsedOffer(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		wrapped string
+		used    bool
+	}{
+		{
+			name:    "code refused",
+			wrapped: "could not continue issuance session: token response returned status code 400, invalid_grantCode inactive - .",
+			used:    true,
+		},
+		{
+			name:    "wsca throttled",
+			wrapped: `could not obtain credential "we-build-eucc": could not create key pairs: irmabinding: WSCA GenerateKey failed: execute: server returned 429: too many attempts; please retry later`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			h := newRedeemHandler(nil)
+			h.Failure(&clientmodels.SessionError{WrappedError: tt.wrapped})
+			res := <-h.done
+			if res.err == nil {
+				t.Fatal("want an error")
+			}
+			if got := errors.Is(res.err, ErrOfferUsed); got != tt.used {
+				t.Errorf("errors.Is(ErrOfferUsed) = %v, want %v (err: %v)", got, tt.used, res.err)
+			}
+		})
 	}
 }

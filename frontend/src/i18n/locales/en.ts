@@ -2387,6 +2387,8 @@ export const en = {
     attestationOfferCancelled: "Offer cancelled",
     credentialOfferAccepted: "Credential added to the wallet",
     credentialOfferDeclined: "Offer declined",
+    credentialOfferUsed:
+      "This offer can no longer be accepted. Ask the sender for a new one.",
     credentialRequestSent: "Credential request sent",
     requestTemplateSaved: "Template saved",
     requestTemplateDeleted: "Template deleted",
@@ -2671,6 +2673,8 @@ export const en = {
       attestationHeldDeleted: "Removed a received credential",
       attestationOfferAccepted: "Accepted an incoming credential offer",
       attestationOfferDeclined: "Declined an incoming credential offer",
+      attestationOfferFailed:
+        "An incoming credential offer could no longer be accepted",
       emailSettingsUpdated: "Updated email settings",
       emailTemplateUpdated: "Updated mail template",
       emailTemplateReset: "Reverted mail template to the default",
@@ -4154,6 +4158,7 @@ export const en = {
         accepting: "Accepting…",
         accepted: "Added to the wallet",
         declined: "Declined",
+        failed: "No longer accepted by the issuer",
       },
       review: "Review in Attestations",
       rawEnvelope: "Raw envelope",

@@ -127,6 +127,7 @@ const (
 	AttestationHeldStatusChanged = "attestation.held_status_changed"
 	AttestationOfferAccepted     = "attestation.offer_accepted"
 	AttestationOfferDeclined     = "attestation.offer_declined"
+	AttestationOfferFailed       = "attestation.offer_failed"
 
 	EmailSettingsUpdated = "email.settings_updated"
 	EmailTemplateUpdated = "email.template_updated"

@@ -20,7 +20,7 @@ export function qerdsStatusTone(status: string): QerdsStatusTone {
 }
 
 // Maps a credential-offer's decision status (backend/internal/attestation's
-// OfferPending/Accepting/Accepted/Declined) to a Tag tone. An offer not yet
+// OfferPending/Accepting/Accepted/Declined/Failed) to a Tag tone. An offer not yet
 // queued (no status at all) reads the same as pending: nothing has been
 // decided either way.
 export function credentialOfferStatusTone(status: string): QerdsStatusTone {
@@ -28,6 +28,7 @@ export function credentialOfferStatusTone(status: string): QerdsStatusTone {
     case "accepted":
       return "green";
     case "declined":
+    case "failed":
       return "red";
     default:
       return "amber";

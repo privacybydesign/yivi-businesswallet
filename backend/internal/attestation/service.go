@@ -82,6 +82,7 @@ type offerStore interface {
 	ListPendingOffers(ctx context.Context, orgID uuid.UUID) ([]CredentialOffer, error)
 	ClaimOffer(ctx context.Context, orgID, id uuid.UUID) (CredentialOffer, error)
 	ReleaseOffer(ctx context.Context, orgID, id uuid.UUID) error
+	FailOffer(ctx context.Context, orgID, id uuid.UUID) error
 	AcceptOffer(ctx context.Context, orgID, id uuid.UUID, in HeldInput) (HeldAttestation, error)
 	DeclineOffer(ctx context.Context, orgID, id uuid.UUID) (CredentialOffer, error)
 }
@@ -523,6 +524,10 @@ func (s *Service) AcceptOffer(ctx context.Context, orgID, id uuid.UUID) (HeldAtt
 		return HeldAttestation{}, err
 	}
 	redeemed, err := s.holder.Redeem(ctx, orgID, offer.Offer)
+	if errors.Is(err, eudiholder.ErrOfferUsed) {
+		s.settleClaim(ctx, orgID, id, s.offers.FailOffer)
+		return HeldAttestation{}, fmt.Errorf("%w: offer %s org %s: %w", ErrOfferUsed, id, orgID, err)
+	}
 	if err != nil {
 		s.releaseClaim(ctx, orgID, id)
 		return HeldAttestation{}, fmt.Errorf("attestation: redeem accepted offer %s org %s: %w", id, orgID, err)
@@ -558,10 +563,16 @@ func (s *Service) AcceptOffer(ctx context.Context, orgID, id uuid.UUID) (HeldAtt
 // fails anyway is logged rather than returned, because the redemption error is
 // what the admin needs to see.
 func (s *Service) releaseClaim(ctx context.Context, orgID, id uuid.UUID) {
+	s.settleClaim(ctx, orgID, id, s.offers.ReleaseOffer)
+}
+
+// settleClaim moves a claim on after a failed redemption, back to pending or to
+// failed, on a detached context for the reason releaseClaim gives.
+func (s *Service) settleClaim(ctx context.Context, orgID, id uuid.UUID, settle func(context.Context, uuid.UUID, uuid.UUID) error) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), releaseClaimTimeout)
 	defer cancel()
-	if err := s.offers.ReleaseOffer(ctx, orgID, id); err != nil {
-		slog.ErrorContext(ctx, "attestation: reopening a credential offer after a failed redemption",
+	if err := settle(ctx, orgID, id); err != nil {
+		slog.ErrorContext(ctx, "attestation: settling a credential offer after a failed redemption",
 			slog.String("orgId", orgID.String()),
 			slog.String("offerId", id.String()),
 			slog.String("error", err.Error()))

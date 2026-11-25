@@ -2440,6 +2440,8 @@ export const nl: Translation<typeof en> = {
     attestationOfferCancelled: "Aanbod geannuleerd",
     credentialOfferAccepted: "Credential toegevoegd aan de wallet",
     credentialOfferDeclined: "Aanbod geweigerd",
+    credentialOfferUsed:
+      "Dit aanbod kan niet meer worden geaccepteerd. Vraag de afzender om een nieuw aanbod.",
     credentialRequestSent: "Gegevensverzoek verstuurd",
     requestTemplateSaved: "Sjabloon opgeslagen",
     requestTemplateDeleted: "Sjabloon verwijderd",
@@ -2728,6 +2730,8 @@ export const nl: Translation<typeof en> = {
       attestationHeldDeleted: "Ontvangen credential verwijderd",
       attestationOfferAccepted: "Binnengekomen credentialaanbod geaccepteerd",
       attestationOfferDeclined: "Binnengekomen credentialaanbod geweigerd",
+      attestationOfferFailed:
+        "Binnengekomen credentialaanbod kon niet meer worden geaccepteerd",
       emailSettingsUpdated: "E-mailinstellingen bijgewerkt",
       emailTemplateUpdated: "E-mailtekst bijgewerkt",
       emailTemplateReset: "E-mailtekst teruggezet naar de standaard",
@@ -4255,6 +4259,7 @@ export const nl: Translation<typeof en> = {
         accepting: "Bezig met accepteren…",
         accepted: "Toegevoegd aan de wallet",
         declined: "Geweigerd",
+        failed: "Niet meer geaccepteerd door de uitgever",
       },
       review: "Bekijk bij Attestaties",
       rawEnvelope: "Ruwe envelop",
