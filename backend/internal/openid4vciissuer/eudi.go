@@ -51,6 +51,10 @@ type StatusEntries interface {
 // EudiIssuanceID is the issuance id of the offer whose issuer_state is issuerState.
 func EudiIssuanceID(issuerState string) string { return eudiIDPrefix + issuerState }
 
+// IsEudiIssuance reports whether issuanceID is an offer of the EU reference
+// issuer.
+func IsEudiIssuance(issuanceID string) bool { return strings.HasPrefix(issuanceID, eudiIDPrefix) }
+
 func NewEudiIssuer(baseURL string, httpClient *http.Client) *EudiIssuer {
 	return &EudiIssuer{baseURL: strings.TrimRight(baseURL, "/"), http: httpClient}
 }

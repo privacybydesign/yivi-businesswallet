@@ -353,20 +353,27 @@ func TestAcceptOfferClosesAnOfferTheIssuerRefuses(t *testing.T) {
 	}
 }
 
-// declineRecorder records the declines a service sends back to an issuer.
-type declineRecorder struct{ sent []string }
+// localDirectory knows which digital addresses belong to organizations in this
+// wallet.
+type localDirectory map[string]uuid.UUID
 
-func (*declineRecorder) SendCredentialOffer(context.Context, uuid.UUID, string, string, string, string) error {
-	return nil
+func (d localDirectory) OrgByAddress(_ context.Context, address string) (uuid.UUID, error) {
+	if id, ok := d[address]; ok {
+		return id, nil
+	}
+	return uuid.Nil, qerds.ErrAddressNotFound
 }
 
-func (r *declineRecorder) SendOfferDeclined(_ context.Context, _ uuid.UUID, toAddress, _, offerURI string) error {
-	r.sent = append(r.sent, toAddress+" "+offerURI)
-	return nil
+func (localDirectory) DefaultAddress(context.Context, uuid.UUID) (qerds.Address, error) {
+	return qerds.Address{Address: "ru@qerds.localhost"}, nil
 }
 
-func (*declineRecorder) SendCredentialRevoked(context.Context, uuid.UUID, string, string, string) error {
-	return nil
+// declineMarks records the declines marked at an issuer in this wallet.
+type declineMarks struct{ marked []string }
+
+func (m *declineMarks) MarkDeclined(_ context.Context, orgID uuid.UUID, offerHash, _ string) (attestation.Issued, error) {
+	m.marked = append(m.marked, orgID.String()+" "+offerHash)
+	return attestation.Issued{}, nil
 }
 
 // Declining is the other half of the acceptance requirement: the credential must
@@ -378,14 +385,18 @@ func TestDeclineOfferNeverLoadsTheCredential(t *testing.T) {
 	queue, offerID := queuedOffer(t, ctx, ruOrg)
 
 	holder := &flakyHolder{StubHolder: eudiholder.NewStubHolder()}
-	replies := &declineRecorder{}
-	service := attestation.NewService(nil, nil, nil, nil, replies, nil, queue, holder, "http://app.test")
+	service := attestation.NewService(nil, nil, nil, nil, nil, nil, queue, holder, "http://app.test")
+	issuerOrg := uuid.New()
+	marks := &declineMarks{}
+	service.SetLocalIssuers(localDirectory{yiviAddress: issuerOrg}, marks)
 
 	if err := service.DeclineOffer(ctx, ruOrg, offerID); err != nil {
 		t.Fatalf("decline offer: %v", err)
 	}
-	if len(replies.sent) != 1 || replies.sent[0] != yiviAddress+" openid-credential-offer://?x=1" {
-		t.Fatalf("the issuer was not told of the decline: %v", replies.sent)
+	// The issuer is in this wallet, so the decline reaches it without a message.
+	want := issuerOrg.String() + " " + attestation.OfferHash("openid-credential-offer://?x=1")
+	if len(marks.marked) != 1 || marks.marked[0] != want {
+		t.Fatalf("the issuer's offer was not marked declined: %v", marks.marked)
 	}
 	if queue.heldCount() != 0 {
 		t.Fatalf("declining loaded %d credentials into the wallet", queue.heldCount())
@@ -522,4 +533,35 @@ type cancellingHolder struct {
 func (h *cancellingHolder) Redeem(ctx context.Context, _ uuid.UUID, _ string) (eudiholder.Redeemed, error) {
 	h.cancel()
 	return eudiholder.Redeemed{}, ctx.Err()
+}
+
+// An issuer outside this wallet is not told of a decline: OpenID4VCI has no
+// decline, so its offer expires there. The decline is still recorded here.
+func TestDeclineOfferTellsNoIssuerElsewhere(t *testing.T) {
+	ctx := context.Background()
+	ruOrg := uuid.New()
+
+	queue := newFakeOfferQueue()
+	rec := attestation.NewOfferReceiver(queue, attestation.NewTrustedOfferSenders(nil, nil))
+	body, err := attestation.MarshalCredentialOfferEnvelope("Partner", "Approved supplier", "openid-credential-offer://?x=1")
+	if err != nil {
+		t.Fatalf("marshal offer: %v", err)
+	}
+	if err := rec.OnInboundMessage(ctx, inbound(ruOrg, uuid.New(), "blue_gw", "partner@qerds.elsewhere", body)); err != nil {
+		t.Fatalf("OnInboundMessage: %v", err)
+	}
+
+	service := attestation.NewService(nil, nil, nil, nil, nil, nil, queue, eudiholder.NewStubHolder(), "http://app.test")
+	marks := &declineMarks{}
+	service.SetLocalIssuers(localDirectory{}, marks)
+
+	if err := service.DeclineOffer(ctx, ruOrg, queue.queued()[0].ID); err != nil {
+		t.Fatalf("decline offer: %v", err)
+	}
+	if len(marks.marked) != 0 {
+		t.Fatalf("an issuer outside this wallet was marked: %v", marks.marked)
+	}
+	if got := queue.queued()[0].Status; got != attestation.OfferDeclined {
+		t.Fatalf("offer status = %q, want declined", got)
+	}
 }

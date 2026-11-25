@@ -474,20 +474,6 @@ func (a qerdsOfferSender) SendCredentialOffer(ctx context.Context, orgID uuid.UU
 	return err
 }
 
-func (a qerdsOfferSender) SendOfferDeclined(ctx context.Context, orgID uuid.UUID, toAddress, credentialName, offerURI string) error {
-	org, err := a.orgs.GetByID(ctx, orgID)
-	if err != nil {
-		return err
-	}
-	body, err := attestation.MarshalOfferDeclinedEnvelope(org.Name, credentialName, offerURI)
-	if err != nil {
-		return err
-	}
-	subject := fmt.Sprintf("Credential offer declined: %s", credentialName)
-	_, err = a.svc.Send(ctx, orgID, "", toAddress, subject, body, nil)
-	return err
-}
-
 func (a qerdsOfferSender) SendCredentialRevoked(ctx context.Context, orgID uuid.UUID, toAddress, credentialName, reason string) error {
 	org, err := a.orgs.GetByID(ctx, orgID)
 	if err != nil {
@@ -1163,6 +1149,7 @@ func (w *wiring) buildAttestations(ctx context.Context) error {
 	startQerdsInboundPoller(ctx, w.qerdsService, cfg.QerdsInboundPollInterval)
 	// A revoked EBWOID means the company ended: its wallet is revoked (Art 6(2)).
 	attestationService.SetOwnerIDRevoker(walletService)
+	attestationService.SetLocalIssuers(w.qerdsStore, attestationStore)
 	attestationService.SetStatusListPolicy(attestation.StatusListPolicy{
 		Enforce:        !cfg.DevMode,
 		Default:        cfg.AttestationIssuerStatusList,

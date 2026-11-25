@@ -445,3 +445,66 @@ func TestPollRespectsContextWhileWaitingForTheDrainSlot(t *testing.T) {
 		t.Errorf("Poll error = %v, want context.DeadlineExceeded", err)
 	}
 }
+
+// loopbackProvider delivers what it sends to the recipient's inbox, like one
+// gateway serving both organizations.
+type loopbackProvider struct {
+	mu    sync.Mutex
+	inbox map[string][]qerdsprovider.InboundMessage
+}
+
+func (p *loopbackProvider) Send(_ context.Context, msg qerdsprovider.OutboundMessage) (qerdsprovider.SendReceipt, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	ref := "ref-" + uuid.NewString()
+	p.inbox[string(msg.Recipient)] = append(p.inbox[string(msg.Recipient)], qerdsprovider.InboundMessage{
+		ProviderRef: ref, Sender: msg.Sender, Recipient: msg.Recipient, Subject: msg.Subject, Body: msg.Body,
+	})
+	return qerdsprovider.SendReceipt{ProviderRef: ref}, nil
+}
+
+func (p *loopbackProvider) Fetch(_ context.Context, addr qerdsprovider.Address) ([]qerdsprovider.InboundMessage, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	got := p.inbox[string(addr)]
+	delete(p.inbox, string(addr))
+	return got, nil
+}
+
+func (p *loopbackProvider) ResolveAddress(_ context.Context, id string) (qerdsprovider.Address, error) {
+	return qerdsprovider.Address(id), nil
+}
+
+// signallingConsumer reports each message it is told of.
+type signallingConsumer struct{ got chan Inbound }
+
+func (c signallingConsumer) OnInboundMessage(_ context.Context, in Inbound) error {
+	c.got <- in
+	return nil
+}
+
+// A message to an organization in this wallet reaches its inbox right after the
+// send, without the background poller.
+func TestSendFetchesALocalRecipientAtOnce(t *testing.T) {
+	sender, recipient := uuid.New(), uuid.New()
+	store := newMultiOrgStore(
+		Address{ID: uuid.New(), OrganizationID: sender, Address: "acme@qerds.localhost", IsDefault: true},
+		Address{ID: uuid.New(), OrganizationID: recipient, Address: "globex@qerds.localhost", IsDefault: true},
+	)
+	store.defaultAddr = Address{ID: uuid.New(), OrganizationID: sender, Address: "acme@qerds.localhost", IsDefault: true}
+	svc := NewService(store, store, &loopbackProvider{inbox: map[string][]qerdsprovider.InboundMessage{}})
+	consumer := signallingConsumer{got: make(chan Inbound, 1)}
+	svc.SetInboundConsumer(consumer)
+
+	if _, err := svc.Send(context.Background(), sender, "", "globex@qerds.localhost", "hello", "body", nil); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	select {
+	case in := <-consumer.got:
+		if in.OrgID != recipient || in.Body != "body" {
+			t.Fatalf("delivered %+v, want the message in the recipient's inbox", in)
+		}
+	case <-time.After(localFetchTimeout):
+		t.Fatal("the message to a local recipient was not fetched without the poller")
+	}
+}

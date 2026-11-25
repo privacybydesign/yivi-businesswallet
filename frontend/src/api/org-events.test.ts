@@ -151,6 +151,46 @@ describe("followOrgEvents", () => {
     stop();
   });
 
+  // A tab the browser froze keeps the lock but says nothing; the other tabs
+  // must not wait on it forever.
+  it("takes the stream over from a leader that went silent", async () => {
+    const streams: FakeStream[] = [];
+    const signals: OrgSignal[] = [];
+    let release = (): void => undefined;
+    void navigator.locks
+      .request(
+        "org-events:frozen",
+        () =>
+          new Promise<void>((resolve) => {
+            release = resolve;
+          }),
+      )
+      .catch(() => undefined);
+    await settle();
+    const stop = followOrgEvents(
+      "frozen",
+      () => {
+        const stream = new FakeStream();
+        streams.push(stream);
+        return stream;
+      },
+      (what) => signals.push(what),
+      30,
+    );
+    await settle();
+    expect(streams).toHaveLength(0);
+    // Past twice the stale limit without a word from the leader.
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    const live = streams.filter((stream) => !stream.closed);
+    expect(live).toHaveLength(1);
+    live[0].emit("open");
+    live[0].emit("attestations");
+    await settle();
+    expect(signals.slice(-2)).toEqual(["connected", "attestations"]);
+    stop();
+    release();
+  });
+
   it("gives another org a stream of its own", async () => {
     let opened = 0;
     const open = (): FakeStream => {

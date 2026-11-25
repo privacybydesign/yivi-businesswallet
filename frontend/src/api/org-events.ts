@@ -31,6 +31,14 @@ export interface OrgStream {
   close(): void;
 }
 
+// What a leader tells its followers on each ping, so they know it still leads.
+const LEADER_ALIVE = "leader-alive";
+
+// How many stale limits a follower waits on a silent leader before it takes
+// the stream over; above one, so a leader reopening its own stream is not
+// raced.
+const LEADER_SILENCE_FACTOR = 2;
+
 // The lock and channel name for one org's stream.
 function shareName(slug: string): string {
   return `org-events:${slug}`;
@@ -58,40 +66,76 @@ export function followOrgEvents(
     return lead(open, signal, staleAfterMs);
   }
   const channel = new BroadcastChannel(shareName(slug));
-  channel.onmessage = (message: MessageEvent<OrgSignal>) =>
-    signal(message.data);
   const stop = new AbortController();
-  void navigator.locks
-    .request(shareName(slug), { signal: stop.signal }, async () => {
-      // Granted just as this tab stopped following: leading now would hold
-      // the lock, and the stream, for nobody, and keep the next follower out.
-      if (stop.signal.aborted) {
-        return;
-      }
-      const close = lead(
-        open,
-        (what) => {
-          if (!stop.signal.aborted) {
-            channel.postMessage(what);
-          }
-          signal(what);
-        },
-        staleAfterMs,
-      );
-      // Hold the lock, and so the stream, until this tab stops following.
-      await new Promise((resolve) => {
-        stop.signal.addEventListener("abort", resolve, { once: true });
-      });
-      close();
-    })
-    .catch((error: unknown) => {
-      // Stopped while another tab led: there is nothing to close.
-      if (!(error instanceof DOMException && error.name === "AbortError")) {
-        throw error;
-      }
+  let leading = false;
+  let silence: ReturnType<typeof setTimeout> | undefined;
+  const leadWhileHeld = async (): Promise<void> => {
+    // Granted just as this tab stopped following: leading now would hold
+    // the lock, and the stream, for nobody, and keep the next follower out.
+    if (stop.signal.aborted || leading) {
+      return;
+    }
+    leading = true;
+    clearTimeout(silence);
+    const close = lead(
+      open,
+      (what) => {
+        if (!stop.signal.aborted) {
+          channel.postMessage(what);
+        }
+        signal(what);
+      },
+      staleAfterMs,
+      () => {
+        if (!stop.signal.aborted) {
+          channel.postMessage(LEADER_ALIVE);
+        }
+      },
+    );
+    // Hold the lock, and so the stream, until this tab stops following.
+    await new Promise((resolve) => {
+      stop.signal.addEventListener("abort", resolve, { once: true });
     });
+    close();
+  };
+  const ignoreAbort = (error: unknown): void => {
+    // Stopped while another tab led, or the lock was taken over: there is
+    // nothing to close.
+    if (!(error instanceof DOMException && error.name === "AbortError")) {
+      throw error;
+    }
+  };
+  // A leader that says nothing for this long sits in a tab the browser froze,
+  // or one whose stream died with it: the follower takes the lock over.
+  const takeOverAfterMs = staleAfterMs * LEADER_SILENCE_FACTOR;
+  const listen = (): void => {
+    clearTimeout(silence);
+    if (leading || stop.signal.aborted) {
+      return;
+    }
+    silence = setTimeout(() => {
+      if (!leading && !stop.signal.aborted) {
+        void navigator.locks
+          .request(shareName(slug), { steal: true }, leadWhileHeld)
+          .catch(ignoreAbort);
+      }
+    }, takeOverAfterMs);
+  };
+  channel.onmessage = (
+    message: MessageEvent<OrgSignal | typeof LEADER_ALIVE>,
+  ) => {
+    listen();
+    if (message.data !== LEADER_ALIVE) {
+      signal(message.data);
+    }
+  };
+  listen();
+  void navigator.locks
+    .request(shareName(slug), { signal: stop.signal }, leadWhileHeld)
+    .catch(ignoreAbort);
   return () => {
     stop.abort();
+    clearTimeout(silence);
     channel.close();
   };
 }
@@ -99,11 +143,12 @@ export function followOrgEvents(
 // Opens the stream and signals each event, connect and drop. A stream that
 // errors is opened again after a pause; one that went silent (staleAfterMs
 // without a ping or an event) is dead without the browser knowing, and is
-// opened again at once.
+// opened again at once. alive is told of every sign of life, pings included.
 function lead(
   open: () => OrgStream,
   signal: (what: OrgSignal) => void,
   staleAfterMs: number,
+  alive: () => void = () => undefined,
 ): () => void {
   let stream: OrgStream | undefined;
   let reopen: ReturnType<typeof setTimeout> | undefined;
@@ -122,6 +167,7 @@ function lead(
     const heard = (): void => {
       clearTimeout(stale);
       stale = setTimeout(() => drop(0), staleAfterMs);
+      alive();
     };
     heard();
     current.addEventListener("open", () => {

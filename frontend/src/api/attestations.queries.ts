@@ -281,11 +281,12 @@ export function useIssuedAttestationQuery(
     queryKey: issuedAttestationQueryKey(slug, issuedId),
     queryFn: ({ signal }) => getIssuedAttestation(slug, issuedId, signal),
     enabled: enabled && slug !== "" && issuedId !== "",
-    // Kept while the stream is up: the issuer cannot say an offer was
-    // claimed, so this read is what asks it. Its result reaches the other
-    // pages through the stream.
+    // Kept while the stream is up for an issuer that cannot say an offer was
+    // claimed (Veramo), so this read is what asks it. The EU issuer reports
+    // it, which arrives as an event.
     refetchInterval: (query) =>
-      query.state.data?.status === OFFERED_STATUS
+      query.state.data?.status === OFFERED_STATUS &&
+      query.state.data.claimReported !== true
         ? OFFERED_POLL_INTERVAL_MS
         : false,
   });

@@ -17,6 +17,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/eudiholder"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/openid4vciissuer"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/qerds"
 )
 
 const claimTokenBytes = 24
@@ -117,8 +118,6 @@ type emailNotifier interface {
 // not a claim link.
 type qerdsNotifier interface {
 	SendCredentialOffer(ctx context.Context, orgID uuid.UUID, toAddress, orgName, credentialName, offerURI string) error
-	// SendOfferDeclined tells the issuer at toAddress that its offer was declined.
-	SendOfferDeclined(ctx context.Context, orgID uuid.UUID, toAddress, credentialName, offerURI string) error
 	// SendCredentialRevoked tells the holder at toAddress that a credential it
 	// was issued has been revoked, and why.
 	SendCredentialRevoked(ctx context.Context, orgID uuid.UUID, toAddress, credentialName, reason string) error
@@ -140,6 +139,8 @@ type Service struct {
 	statusLists StatusListPolicy
 	heldFresh   heldFreshness
 	ownerID     ownerIDRevoker
+	localOrgs   localOrgs
+	localIssued declineMarker
 }
 
 // ownerIDRevoker acts on the org's owner identification data (the EBWOID its
@@ -187,6 +188,18 @@ type StatusListPolicy struct {
 
 // SetStatusListPolicy sets what CheckValidity refuses. Without it nothing is refused.
 func (s *Service) SetStatusListPolicy(p StatusListPolicy) { s.statusLists = p }
+
+// localOrgs finds the organization in this wallet behind a digital address.
+type localOrgs interface {
+	OrgByAddress(ctx context.Context, address string) (uuid.UUID, error)
+	DefaultAddress(ctx context.Context, orgID uuid.UUID) (qerds.Address, error)
+}
+
+// SetLocalIssuers lets a decline reach an issuer in this wallet directly.
+// Without it a decline tells no issuer, and its offer expires.
+func (s *Service) SetLocalIssuers(orgs localOrgs, issued declineMarker) {
+	s.localOrgs, s.localIssued = orgs, issued
+}
 
 // CheckValidity refuses a template this deployment may not issue: one whose
 // credentials live over 24 hours without a status list to revoke them on.
@@ -601,15 +614,34 @@ func (s *Service) DeclineOffer(ctx context.Context, orgID, id uuid.UUID) error {
 	if err != nil {
 		return err
 	}
-	if offer.SenderAddress == "" {
-		return nil
+	s.declineAtIssuer(ctx, orgID, offer)
+	return nil
+}
+
+// declineAtIssuer marks the offer declined at its issuer when that issuer is an
+// organization in this wallet, so no message is needed. An issuer elsewhere is
+// not told: OpenID4VCI has no decline, and its offer expires. A failure is
+// logged, not returned: the decline itself is recorded.
+func (s *Service) declineAtIssuer(ctx context.Context, orgID uuid.UUID, offer CredentialOffer) {
+	if offer.SenderAddress == "" || s.localOrgs == nil {
+		return
 	}
-	if err := s.qerds.SendOfferDeclined(ctx, orgID, offer.SenderAddress, offer.CredentialName, offer.Offer); err != nil {
-		slog.ErrorContext(ctx, "attestation: tell issuer of declined offer",
-			slog.String("offerId", offer.ID.String()), slog.String("to", offer.SenderAddress),
+	issuerOrgID, err := s.localOrgs.OrgByAddress(ctx, offer.SenderAddress)
+	if errors.Is(err, qerds.ErrAddressNotFound) {
+		return
+	}
+	var own qerds.Address
+	if err == nil {
+		own, err = s.localOrgs.DefaultAddress(ctx, orgID)
+	}
+	if err == nil {
+		_, err = s.localIssued.MarkDeclined(ctx, issuerOrgID, OfferHash(offer.Offer), own.Address)
+	}
+	if err != nil && !errors.Is(err, ErrIssuedNotFound) {
+		slog.ErrorContext(ctx, "attestation: mark declined offer at its issuer",
+			slog.String("offerId", offer.ID.String()), slog.String("issuer", offer.SenderAddress),
 			slog.String("error", err.Error()))
 	}
-	return nil
 }
 
 // HeldClaimsView is a held credential's index metadata plus its disclosed
