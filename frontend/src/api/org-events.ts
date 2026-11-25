@@ -68,6 +68,7 @@ export function followOrgEvents(
   const channel = new BroadcastChannel(shareName(slug));
   const stop = new AbortController();
   let leading = false;
+  let resign: (() => void) | undefined;
   let silence: ReturnType<typeof setTimeout> | undefined;
   const leadWhileHeld = async (): Promise<void> => {
     // Granted just as this tab stopped following: leading now would hold
@@ -92,6 +93,7 @@ export function followOrgEvents(
         }
       },
     );
+    resign = close;
     // Hold the lock, and so the stream, until this tab stops following.
     await new Promise((resolve) => {
       stop.signal.addEventListener("abort", resolve, { once: true });
@@ -99,10 +101,15 @@ export function followOrgEvents(
     close();
   };
   const ignoreAbort = (error: unknown): void => {
-    // Stopped while another tab led, or the lock was taken over: there is
-    // nothing to close.
     if (!(error instanceof DOMException && error.name === "AbortError")) {
       throw error;
+    }
+    // A stolen lock does not stop leadWhileHeld, so close the stream here and
+    // follow again, or this tab and the one that took over each keep one.
+    if (leading) {
+      resign?.();
+      leading = false;
+      listen();
     }
   };
   // A leader that says nothing for this long sits in a tab the browser froze,

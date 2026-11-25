@@ -191,6 +191,34 @@ describe("followOrgEvents", () => {
     release();
   });
 
+  it("closes its stream when another tab takes the lock over", async () => {
+    const streams: FakeStream[] = [];
+    const stop = followOrgEvents(
+      "stolen",
+      () => {
+        const stream = new FakeStream();
+        streams.push(stream);
+        return stream;
+      },
+      () => undefined,
+    );
+    await settle();
+    expect(streams).toHaveLength(1);
+    let release = (): void => undefined;
+    void navigator.locks.request(
+      "org-events:stolen",
+      { steal: true },
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    );
+    await settle();
+    expect(streams[0].closed).toBe(true);
+    stop();
+    release();
+  });
+
   it("gives another org a stream of its own", async () => {
     let opened = 0;
     const open = (): FakeStream => {

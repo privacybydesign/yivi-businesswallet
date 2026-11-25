@@ -57,6 +57,7 @@ import type {
   OnboardingAttestation,
 } from "./attestations";
 import type { AuditEvent } from "./organization";
+import { useOrgStreamConnected } from "./org-events";
 import { errorCode } from "../lib/api-error";
 import { toast } from "../lib/toast";
 
@@ -277,6 +278,7 @@ export function useIssuedAttestationQuery(
   issuedId: string,
   enabled = true,
 ): UseQueryResult<IssuedAttestation, Error> {
+  const streaming = useOrgStreamConnected(slug);
   return useQuery({
     queryKey: issuedAttestationQueryKey(slug, issuedId),
     queryFn: ({ signal }) => getIssuedAttestation(slug, issuedId, signal),
@@ -286,7 +288,7 @@ export function useIssuedAttestationQuery(
     // it, which arrives as an event.
     refetchInterval: (query) =>
       query.state.data?.status === OFFERED_STATUS &&
-      query.state.data.claimReported !== true
+      (query.state.data.claimReported !== true || !streaming)
         ? OFFERED_POLL_INTERVAL_MS
         : false,
   });
