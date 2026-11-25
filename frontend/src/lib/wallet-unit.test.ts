@@ -49,6 +49,8 @@ describe("revoke reasons", () => {
     const backend = [...source.matchAll(/Reason\w+\s*=\s*"([a-z_]+)"/g)].map(
       (m) => m[1],
     );
-    expect([...backend].sort()).toEqual([...WALLET_UNIT_REVOKED_REASONS].sort());
+    expect([...backend].sort()).toEqual(
+      [...WALLET_UNIT_REVOKED_REASONS].sort(),
+    );
   });
 });
