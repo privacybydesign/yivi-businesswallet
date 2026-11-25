@@ -211,7 +211,10 @@ func (s *Store) SourceConfig(ctx context.Context, orgID uuid.UUID) (provisioner.
 // ListEnabled returns the organisations whose provisioning is switched on, for
 // the scheduler to walk.
 func (s *Store) ListEnabled(ctx context.Context) ([]uuid.UUID, error) {
-	const query = `SELECT organization_id FROM org_provisioning_settings WHERE enabled ORDER BY organization_id`
+	// A suspended or revoked wallet is not synced: it gets no new members.
+	const query = `SELECT p.organization_id FROM org_provisioning_settings p
+		JOIN organizations o ON o.id = p.organization_id
+		WHERE p.enabled AND o.status = 'active' ORDER BY p.organization_id`
 	rows, err := s.db.Query(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("provisioning: list enabled: %w", err)

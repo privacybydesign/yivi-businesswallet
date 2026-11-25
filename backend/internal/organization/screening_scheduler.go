@@ -60,6 +60,10 @@ func (s *ScreeningScheduler) SweepAll(ctx context.Context) error {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
+		// A suspended or revoked wallet starts nothing new.
+		if org.Status != StatusActive {
+			continue
+		}
 		s.sweepOne(ctx, org)
 	}
 	return nil

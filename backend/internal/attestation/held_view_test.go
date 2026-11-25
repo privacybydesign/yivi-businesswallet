@@ -462,3 +462,52 @@ func TestListHeldRechecksStaleStatuses(t *testing.T) {
 		t.Errorf("refreshed %d times, want once within a minute", holder.refreshes)
 	}
 }
+
+// ownerIDRevocations records the orgs whose EBWOID a re-check found revoked.
+type ownerIDRevocations struct {
+	orgs []uuid.UUID
+	err  error
+}
+
+func (r *ownerIDRevocations) OwnerIDRevoked(_ context.Context, orgID uuid.UUID) error {
+	r.orgs = append(r.orgs, orgID)
+	return r.err
+}
+
+// A revoked EBWOID the wallet opened with revokes the wallet, on every re-check
+// that reads it revoked so a failed revoke is retried; a revoked credential from
+// elsewhere does not.
+func TestRecheckRevokesWalletWithRevokedOwnerID(t *testing.T) {
+	t.Parallel()
+	ownerID := attestation.HeldAttestation{ID: uuid.New(), CredentialRef: "ref-ebwoid", VCT: "uri:eu.ebw.oid.1", Source: attestation.HeldSourceBootstrap}
+	received := attestation.HeldAttestation{ID: uuid.New(), CredentialRef: "ref-received", VCT: "uri:eu.ebw.oid.1", Source: attestation.HeldSourceQERDS}
+	store := &heldViewStore{rows: []attestation.HeldAttestation{ownerID, received}}
+	holder := &heldViewHolder{
+		validities: map[string]eudiholder.HeldValidity{"ref-ebwoid": statusListed(false), "ref-received": statusListed(true)},
+		refreshed:  map[string]eudiholder.HeldValidity{"ref-ebwoid": statusListed(false)},
+	}
+	revoker := &ownerIDRevocations{}
+	service := attestation.NewService(nil, nil, nil, nil, nil, store, nil, holder, "http://app.test")
+	service.SetOwnerIDRevoker(revoker)
+	org := uuid.New()
+
+	if _, err := service.RecheckHeld(context.Background(), org); err != nil {
+		t.Fatalf("RecheckHeld: %v", err)
+	}
+	if len(revoker.orgs) != 0 {
+		t.Fatalf("revoked wallets %v while the EBWOID is valid, want none", revoker.orgs)
+	}
+
+	holder.refreshed["ref-ebwoid"] = statusListed(true)
+	revoker.err = errors.New("wallet store down")
+	if _, err := service.RecheckHeld(context.Background(), org); !errors.Is(err, revoker.err) {
+		t.Fatalf("RecheckHeld error = %v, want the failed revoke", err)
+	}
+	revoker.err = nil
+	if _, err := service.RecheckHeld(context.Background(), org); err != nil {
+		t.Fatalf("RecheckHeld: %v", err)
+	}
+	if want := []uuid.UUID{org, org}; !slices.Equal(revoker.orgs, want) {
+		t.Errorf("revoked wallets %v, want %v", revoker.orgs, want)
+	}
+}

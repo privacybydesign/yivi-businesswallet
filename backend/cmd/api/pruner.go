@@ -27,11 +27,16 @@ func startPruner(ctx context.Context, name string, every time.Duration, prune fu
 	}()
 }
 
-// startPrunerAtBoot is startPruner that also runs prune once at start: for a
-// job whose interval is long next to how often the API is redeployed.
-func startPrunerAtBoot(ctx context.Context, name string, every time.Duration, prune func(context.Context) (int64, error)) {
-	go runPrune(ctx, name, prune)
-	startPruner(ctx, name, every, prune)
+// startPrunerAfter is startPruner with its first run delay after start, for a
+// job that needs something not up yet at boot.
+func startPrunerAfter(ctx context.Context, name string, delay, every time.Duration, prune func(context.Context) (int64, error)) {
+	go func() {
+		select {
+		case <-ctx.Done():
+		case <-time.After(delay):
+			startPruner(ctx, name, every, prune)
+		}
+	}()
 }
 
 func runPrune(ctx context.Context, name string, prune func(context.Context) (int64, error)) {

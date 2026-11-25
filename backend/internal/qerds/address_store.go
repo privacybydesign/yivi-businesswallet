@@ -169,7 +169,10 @@ func (s *Store) ListAddresses(ctx context.Context, orgID uuid.UUID) ([]Address, 
 // currently looking at — an offer pushed by a remote party must land without an
 // operator having a browser tab open.
 func (s *Store) AllAddresses(ctx context.Context) ([]Address, error) {
-	const query = `SELECT ` + addressColumns + ` FROM qerds_addresses ORDER BY created_at`
+	// A suspended or revoked wallet receives nothing new (Art 6(2)(f)).
+	const query = `SELECT ` + addressColumns + ` FROM qerds_addresses
+		WHERE organization_id IN (SELECT id FROM organizations WHERE status = 'active')
+		ORDER BY created_at`
 	rows, err := s.db.Query(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("qerds: list all addresses: %w", err)

@@ -3501,7 +3501,10 @@ export const en = {
     reasons: {
       owner_request: "Organization request",
       key_compromise: "Key compromise",
+      cessation: "Company ended (owner identification revoked)",
     },
+    ceasedHint:
+      "The issuer revoked this organization's owner identification data because the company ended. The wallet is revoked and no new wallet unit can be activated.",
     loadError: "Could not load the wallet unit: {{message}}",
     createdAt: "Unit created",
     issuedCount: "Attestations issued",
@@ -3988,6 +3991,12 @@ export const en = {
       organizationsHint: "Total in this deployment",
     },
     viewAll: "View all organizations",
+  },
+  walletReadOnly: {
+    suspended:
+      "This wallet is suspended. You can read and export everything in it, but nothing new can be sent, requested, issued or signed.",
+    revoked:
+      "This wallet is revoked. You can read and export everything in it, but nothing new can be sent, requested, issued or signed.",
   },
   testMode: {
     banner:

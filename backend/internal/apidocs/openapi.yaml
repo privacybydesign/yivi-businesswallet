@@ -1999,6 +1999,23 @@ paths:
                 type: string
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/v1/registry/ebwoid-status-list:
+    get:
+      tags: [wallet]
+      summary: Get the stub KVK's EBWOID status list
+      description: >-
+        Public. The Token Status List (1 bit per entry) the `status` claim of an
+        EBWOID from the stub KVK points to, as an `application/statuslist+jwt`.
+        KVK revokes a company's EBWOID when the company ends, and the wallet that
+        holds it is then revoked.
+      security: []
+      responses:
+        '200':
+          description: The signed status list token.
+          content:
+            application/statuslist+jwt:
+              schema:
+                type: string
   /api/v1/orgs/{slug}/attestations:
     parameters:
       - name: slug

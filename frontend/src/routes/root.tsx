@@ -125,6 +125,15 @@ export default function Root(): React.JSX.Element | null {
                 {t("testMode.banner")}
               </output>
             )}
+            {activeOrg && activeOrg.status !== "active" && (
+              <output className="bg-error-bg text-error block px-4 py-2 text-[13px] font-semibold sm:px-8">
+                {t(
+                  activeOrg.status === "suspended"
+                    ? "walletReadOnly.suspended"
+                    : "walletReadOnly.revoked",
+                )}
+              </output>
+            )}
             <Outlet />
           </main>
         </div>

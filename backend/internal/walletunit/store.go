@@ -15,6 +15,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/attestation"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/database"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
 )
 
 const (
@@ -125,22 +126,29 @@ func (s *Store) Revoke(ctx context.Context, orgID uuid.UUID, reason string) (Uni
 	}
 	var out Unit
 	err := database.InTx(ctx, s.db, func(q database.Querier) error {
-		const update = `UPDATE wallet_units SET status = 'revoked', revoked_reason = $2, revoked_at = now()
-			WHERE organization_id = $1 AND status = 'active'
-			RETURNING ` + unitColumns
 		var err error
-		out, err = scanUnit(q.QueryRow(ctx, update, orgID, reason))
-		if errors.Is(err, pgx.ErrNoRows) {
-			return ErrNoActiveUnit
-		}
-		if err != nil {
-			return fmt.Errorf("walletunit: revoke org %s: %w", orgID, err)
-		}
-		return s.audit.Record(ctx, q, audit.WalletUnitRevoked,
-			audit.Target{Type: audit.TargetWalletUnit, ID: out.ID.String(), OrgID: &orgID},
-			audit.Updated(map[string]any{"status": UnitActive}, map[string]any{"status": out.Status, "reason": reason}))
+		out, err = s.RevokeIn(ctx, q, orgID, reason)
+		return err
 	})
 	return out, err
+}
+
+// RevokeIn revokes the org's active unit for reason and audits, inside the
+// caller's tx. Unlike Revoke it takes any reason, ReasonCessation included.
+func (s *Store) RevokeIn(ctx context.Context, q database.Querier, orgID uuid.UUID, reason string) (Unit, error) {
+	const update = `UPDATE wallet_units SET status = 'revoked', revoked_reason = $2, revoked_at = now()
+		WHERE organization_id = $1 AND status = 'active'
+		RETURNING ` + unitColumns
+	out, err := scanUnit(q.QueryRow(ctx, update, orgID, reason))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Unit{}, ErrNoActiveUnit
+	}
+	if err != nil {
+		return Unit{}, fmt.Errorf("walletunit: revoke org %s: %w", orgID, err)
+	}
+	return out, s.audit.Record(ctx, q, audit.WalletUnitRevoked,
+		audit.Target{Type: audit.TargetWalletUnit, ID: out.ID.String(), OrgID: &orgID},
+		audit.Updated(map[string]any{"status": UnitActive}, map[string]any{"status": out.Status, "reason": reason}))
 }
 
 // Activate creates a new active unit for an org whose unit was revoked, and
@@ -148,6 +156,14 @@ func (s *Store) Revoke(ctx context.Context, orgID uuid.UUID, reason string) (Uni
 func (s *Store) Activate(ctx context.Context, orgID uuid.UUID) (Unit, error) {
 	var out Unit
 	err := database.InTx(ctx, s.db, func(q database.Querier) error {
+		// A suspended or revoked wallet gets no new unit: revocation is final.
+		var status string
+		if err := q.QueryRow(ctx, `SELECT status FROM organizations WHERE id = $1 FOR SHARE`, orgID).Scan(&status); err != nil {
+			return fmt.Errorf("walletunit: org status %s: %w", orgID, err)
+		}
+		if status != organization.StatusActive {
+			return ErrOrgNotActive
+		}
 		var err error
 		out, err = s.Provision(ctx, q, orgID)
 		return err

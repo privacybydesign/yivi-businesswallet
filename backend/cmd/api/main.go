@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"errors"
@@ -107,6 +108,7 @@ const (
 	// heldStatusRecheckEvery is how often held credentials' status lists are
 	// re-read: issuers publish revocations on the scale of hours, not seconds.
 	heldStatusRecheckEvery = 6 * time.Hour
+	heldStatusBootDelay    = 2 * time.Minute
 
 	issuerProbeTimeout = 10 * time.Second
 	issuerHTTPTimeout  = 15 * time.Second
@@ -403,7 +405,8 @@ func newDefaultAttestationIssuer(cfg config.Config) (attestationIssuer, error) {
 
 // newAttestationHolder builds the holder-wallet engine chosen by config: the
 // in-process stub (dev / CI) or the irmago EUDI engine backed by Postgres.
-func newAttestationHolder(cfg config.Config, wscaStore *wsca.Store) (eudiholder.Holder, error) {
+// extraTrustPEM is added to the holder's configured trust chain.
+func newAttestationHolder(cfg config.Config, wscaStore *wsca.Store, extraTrustPEM []byte) (eudiholder.Holder, error) {
 	switch cfg.AttestationHolder {
 	case config.HolderStub:
 		return eudiholder.NewStubHolder(), nil
@@ -413,7 +416,7 @@ func newAttestationHolder(cfg config.Config, wscaStore *wsca.Store) (eudiholder.
 			return nil, err
 		}
 		engine := eudiholder.NewEngine(cfg.DatabaseDSN, cfg.AttestationHolderStorageDir, key, eudiholder.RedeemConfig{
-			TrustChainPEM:       []byte(cfg.AttestationHolderTrustChain),
+			TrustChainPEM:       bytes.Join([][]byte{[]byte(cfg.AttestationHolderTrustChain), extraTrustPEM}, []byte("\n")),
 			StagingTrustAnchors: cfg.AttestationHolderStagingAnchors,
 			AllowInsecureHTTP:   cfg.AttestationHolderAllowInsecureHTTP,
 		})
@@ -801,6 +804,7 @@ type wiring struct {
 	attestationHandler    *attestation.Handler
 	// issuerStatusHandler is nil without a rulebook status list.
 	issuerStatusHandler  *issuerstatus.Handler
+	ebwoidStatusHandler  *registryprovider.EBWOIDStatusHandler
 	wscaWalletHandler    *wscawallet.Handler
 	walletUnitHandler    *walletunit.Handler
 	notificationsHandler *notifications.Handler
@@ -1031,11 +1035,25 @@ func (w *wiring) buildMessaging(ctx context.Context) error {
 // buildWallet wires wallet registration: the KVK registry from buildMessaging and
 // the EBWOID issuer, which stores the org's owner identification data in holder.
 // Only the seeded register's stub issuer exists until KVK's issuer (YIV-622).
-func (w *wiring) buildWallet(holder eudiholder.Holder) error {
+func (w *wiring) buildWallet(holder eudiholder.Holder, ebwoidStatus *registryprovider.EBWOIDStatusList) *wallet.Service {
 	walletStore := wallet.NewStore(w.pool, w.recorder, walletunit.NewStore(w.pool, w.recorder))
-	walletService := wallet.NewService(walletStore, w.walletRegistry, wallet.OwnerID{Issuer: registryprovider.StubEBWOIDIssuer{}, Holder: holder}, w.authService, w.userStore, w.qerdsStore, w.cfg.QerdsDefaultAddressDomain)
+	ownerID := wallet.OwnerID{Issuer: registryprovider.StubEBWOIDIssuer{Status: ebwoidStatus}, Holder: holder}
+	walletService := wallet.NewService(walletStore, w.walletRegistry, ownerID, w.authService, w.userStore, w.qerdsStore, w.cfg.QerdsDefaultAddressDomain)
 	w.walletHandler = wallet.NewHandler(walletService, w.sessionIssuer, w.requireUser, w.orgHandler.Authorize)
-	return nil
+	return walletService
+}
+
+// stubKVKSignerName names the stub KVK's status list certificate.
+const stubKVKSignerName = "Stub KVK EBWOID issuer"
+
+// newEBWOIDStatusList is the stub KVK's EBWOID status list. Its key is new on every
+// start, which works because the irmago holder runs as one replica (ops enforces it).
+func newEBWOIDStatusList(cfg config.Config, pool database.DB) (*registryprovider.EBWOIDStatusList, *walletunit.Signer, error) {
+	signer, err := walletunit.NewEphemeralSigner(stubKVKSignerName)
+	if err != nil {
+		return nil, nil, fmt.Errorf("stub KVK status list signer: %w", err)
+	}
+	return registryprovider.NewEBWOIDStatusList(pool, signer, cfg.AttestationStatusListBaseURL), signer, nil
 }
 
 func (w *wiring) buildAttestations(ctx context.Context) error {
@@ -1071,13 +1089,16 @@ func (w *wiring) buildAttestations(ctx context.Context) error {
 
 	w.themeSettingsHandler = themesettings.NewHandler(w.themeSettingsStore, w.requireUser, w.orgHandler.Authorize)
 
-	attHolder, err := w.openAttestationHolder(ctx, wscaStore)
+	ebwoidStatus, kvkSigner, err := newEBWOIDStatusList(cfg, w.pool)
 	if err != nil {
 		return err
 	}
-	if err := w.buildWallet(attHolder); err != nil {
+	w.ebwoidStatusHandler = registryprovider.NewEBWOIDStatusHandler(ebwoidStatus)
+	attHolder, err := w.openAttestationHolder(ctx, wscaStore, kvkSigner.RootPEM())
+	if err != nil {
 		return err
 	}
+	walletService := w.buildWallet(attHolder, ebwoidStatus)
 
 	// Inbound OpenID4VP: an external verifier invoking the business wallet as
 	// the holder (#188), and — via the QERDS receiver wired into qerdsService
@@ -1140,6 +1161,8 @@ func (w *wiring) buildAttestations(ctx context.Context) error {
 	// Drain inbound for every provisioned address on a ticker, so a remote party's
 	// credential offer is received without an operator being logged in.
 	startQerdsInboundPoller(ctx, w.qerdsService, cfg.QerdsInboundPollInterval)
+	// A revoked EBWOID means the company ended: its wallet is revoked (Art 6(2)).
+	attestationService.SetOwnerIDRevoker(walletService)
 	attestationService.SetStatusListPolicy(attestation.StatusListPolicy{
 		Enforce:        !cfg.DevMode,
 		Default:        cfg.AttestationIssuerStatusList,
@@ -1149,7 +1172,10 @@ func (w *wiring) buildAttestations(ctx context.Context) error {
 	// Re-read the issuer status list of every held credential, so a credential
 	// revoked after it was received stops reading as valid. Deploys come more
 	// often than the interval, so it also runs at boot.
-	startPrunerAtBoot(ctx, "attestation_held_status", heldStatusRecheckEvery, attestationService.RecheckAllHeld)
+	// The stub KVK's EBWOID list is served by this backend, so the first run waits
+	// until it serves, and until an old replica of a rollout, signing with another
+	// key, has stopped.
+	startPrunerAfter(ctx, "attestation_held_status", heldStatusBootDelay, heldStatusRecheckEvery, attestationService.RecheckAllHeld)
 	// Auto-issue an org's configured onboarding attestations when a member accepts
 	// an invitation. Wired via a setter (like the inbound QERDS consumer) because
 	// the org service is constructed before the attestation service.
@@ -1180,8 +1206,8 @@ func (w *wiring) buildAttestations(ctx context.Context) error {
 }
 
 // openAttestationHolder opens the holder engine, closed when run returns.
-func (w *wiring) openAttestationHolder(ctx context.Context, wscaStore *wsca.Store) (eudiholder.Holder, error) {
-	attHolder, err := newAttestationHolder(w.cfg, wscaStore)
+func (w *wiring) openAttestationHolder(ctx context.Context, wscaStore *wsca.Store, extraTrustPEM []byte) (eudiholder.Holder, error) {
+	attHolder, err := newAttestationHolder(w.cfg, wscaStore, extraTrustPEM)
 	if err != nil {
 		return nil, err
 	}
@@ -1557,6 +1583,7 @@ func (w *wiring) httpServer() *http.Server {
 	if w.issuerStatusHandler != nil {
 		features = append(features, w.issuerStatusHandler)
 	}
+	features = append(features, w.ebwoidStatusHandler)
 	handler := server.New(w.pool, w.cfg.StaticDir, features...)
 	// Outermost, so every route and the SPA's page headers see the client
 	// address the trusted proxies report.

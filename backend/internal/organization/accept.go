@@ -134,6 +134,8 @@ func mapInviteError(err error) error {
 		return &respond.APIError{Status: http.StatusNotFound, Code: "invitation_not_found", Message: "invitation not found"}
 	case errors.Is(err, ErrInvitationExpired):
 		return &respond.APIError{Status: http.StatusGone, Code: "invitation_expired", Message: "this invitation has expired"}
+	case errors.Is(err, ErrWalletNotActive):
+		return &respond.APIError{Status: http.StatusConflict, Code: WalletNotActiveCode, Message: "this organization's wallet is suspended or revoked"}
 	default:
 		return err
 	}

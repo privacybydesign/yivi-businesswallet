@@ -428,3 +428,42 @@ func (f fakeRepo) ScreeningMatchContext(context.Context, uuid.UUID, uuid.UUID) (
 func (f fakeRepo) MemberStatusSnapshots(context.Context, uuid.UUID) ([]MemberStatusSnapshot, error) {
 	return nil, nil
 }
+
+// A suspended or revoked wallet stays readable, and refuses every change but the
+// few that only touch what is already there.
+func TestAuthorizeInactiveWalletIsReadOnly(t *testing.T) {
+	for _, status := range []string{StatusSuspended, StatusRevoked} {
+		h := &Handler{store: fakeRepo{
+			org:        Organization{ID: uuid.New(), Slug: "acme", Status: status},
+			membership: Membership{Role: RoleAdmin},
+		}}
+		ok := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+		mux := http.NewServeMux()
+		for _, pattern := range []string{
+			"GET /orgs/{slug}/qerds/messages",
+			"POST /orgs/{slug}/qerds/messages",
+			"POST /orgs/{slug}/qerds/messages/{id}/read",
+			"DELETE /orgs/{slug}/members/{userId}",
+		} {
+			mux.Handle(pattern, h.Authorize(ok))
+		}
+		tests := []struct {
+			method, path string
+			want         int
+		}{
+			{http.MethodGet, "/orgs/acme/qerds/messages", http.StatusOK},
+			{http.MethodPost, "/orgs/acme/qerds/messages", http.StatusConflict},
+			{http.MethodPost, "/orgs/acme/qerds/messages/1/read", http.StatusOK},
+			{http.MethodDelete, "/orgs/acme/members/1", http.StatusConflict},
+		}
+		for _, tt := range tests {
+			req := httptest.NewRequest(tt.method, tt.path, nil)
+			req = req.WithContext(auth.ContextWithUser(req.Context(), user.User{ID: uuid.New(), Email: "user@example.com"}))
+			rec := httptest.NewRecorder()
+			mux.ServeHTTP(rec, req)
+			if rec.Code != tt.want {
+				t.Errorf("%s wallet: %s %s = %d, want %d", status, tt.method, tt.path, rec.Code, tt.want)
+			}
+		}
+	}
+}

@@ -91,6 +91,8 @@ type APIKeyCaller struct {
 	Org       Org
 	// TestMode is the key's org being in test mode now.
 	TestMode bool
+	// WalletActive is the key's org wallet being neither suspended nor revoked.
+	WalletActive bool
 	// LastUsedAt is when the key was last recorded used (Touch); nil never.
 	LastUsedAt *time.Time
 }
@@ -225,10 +227,10 @@ func (s *APIKeyStore) Authenticate(ctx context.Context, raw string) (APIKeyCalle
 	}
 	hash := sha256.Sum256([]byte(raw))
 	var c APIKeyCaller
-	err := s.db.QueryRow(ctx, `SELECT k.id, k.name, k.prefix, k.scopes, o.id, o.name, o.test_mode, k.last_used_at
+	err := s.db.QueryRow(ctx, `SELECT k.id, k.name, k.prefix, k.scopes, o.id, o.name, o.test_mode, o.status = 'active', k.last_used_at
 		FROM identity_proofing_api_keys k JOIN organizations o ON o.id = k.organization_id
 		WHERE k.secret_hash = $1 AND k.revoked_at IS NULL`, hash[:]).
-		Scan(&c.KeyID, &c.KeyName, &c.KeyPrefix, &c.Scopes, &c.Org.ID, &c.Org.Name, &c.TestMode, &c.LastUsedAt)
+		Scan(&c.KeyID, &c.KeyName, &c.KeyPrefix, &c.Scopes, &c.Org.ID, &c.Org.Name, &c.TestMode, &c.WalletActive, &c.LastUsedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return APIKeyCaller{}, ErrAPIKeyInvalid
 	}

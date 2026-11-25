@@ -178,6 +178,11 @@ func (e *Engine) Store(ctx context.Context, orgID uuid.UUID, cred Credential) (s
 	if cred.ExpiresAt != nil {
 		batch.ExpiresAt = datatypes.NewNull(*cred.ExpiresAt)
 	}
+	if cred.Status != nil {
+		uri, idx := cred.Status.URI, cred.Status.Index
+		batch.Instances[0].StatusListURI = &uri
+		batch.Instances[0].StatusListIdx = &idx
+	}
 
 	if err := eng.Db().WithContext(ctx).Create(batch).Error; err != nil {
 		return "", fmt.Errorf("eudiholder: store credential org %s: %w", orgID, err)

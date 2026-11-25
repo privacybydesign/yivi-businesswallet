@@ -26,6 +26,10 @@ const (
 	ReasonKeyCompromise = "key_compromise"
 )
 
+// ReasonCessation is the wallet unit's revocation when the owner's activity ends,
+// seen as its EBWOID being revoked (Art 6(2)(f)). Only the system sets it.
+const ReasonCessation = "cessation"
+
 // Attestation kinds as stored.
 const (
 	KindBWIA = "bwia"

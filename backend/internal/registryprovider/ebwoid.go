@@ -42,14 +42,23 @@ const stubEBWOIDLifetime = 365 * 24 * time.Hour
 // stubEBWOIDHeader marks the stub EBWOID's token as an unsigned SD-JWT VC.
 const stubEBWOIDHeader = `{"alg":"none","typ":"dc+sd-jwt"}`
 
+// ebwoidStatusEntries reserves an EBWOID's entry in the stub KVK's status list.
+type ebwoidStatusEntries interface {
+	Take(ctx context.Context, euid string) (eudiholder.StatusReference, error)
+}
+
 // StubEBWOIDIssuer stores an EBWOID built from the seeded register's attestation,
 // for dev / CI. It is unsigned: nothing outside this wallet should rely on it.
-type StubEBWOIDIssuer struct{}
+// With Status set, the EBWOID gets an entry in that status list, so revoking the
+// company there revokes it.
+type StubEBWOIDIssuer struct {
+	Status ebwoidStatusEntries
+}
 
 func (StubEBWOIDIssuer) Ping(context.Context) error { return nil }
 
-func (StubEBWOIDIssuer) Obtain(ctx context.Context, h EBWOIDHolder, orgID uuid.UUID, att RegistrationAttestation) (HeldEBWOID, error) {
-	payload, err := json.Marshal(map[string]string{
+func (i StubEBWOIDIssuer) Obtain(ctx context.Context, h EBWOIDHolder, orgID uuid.UUID, att RegistrationAttestation) (HeldEBWOID, error) {
+	claims := map[string]any{
 		"vct":                        EBWOIDVCT,
 		"iss":                        stubEBWOIDIssuer,
 		EBWOIDClaimID:                att.EUID,
@@ -57,7 +66,17 @@ func (StubEBWOIDIssuer) Obtain(ctx context.Context, h EBWOIDHolder, orgID uuid.U
 		"issuing_authority":          RegisterLegalName,
 		"issuing_country":            "NL",
 		"attestation_legal_category": "PuB-EAA",
-	})
+	}
+	var status *eudiholder.StatusReference
+	if i.Status != nil {
+		ref, err := i.Status.Take(ctx, att.EUID)
+		if err != nil {
+			return HeldEBWOID{}, fmt.Errorf("registryprovider: stub ebwoid status: %w", err)
+		}
+		status = &ref
+		claims["status"] = map[string]any{"status_list": map[string]any{"idx": ref.Index, "uri": ref.URI}}
+	}
+	payload, err := json.Marshal(claims)
 	if err != nil {
 		return HeldEBWOID{}, fmt.Errorf("registryprovider: stub ebwoid payload: %w", err)
 	}
@@ -72,6 +91,7 @@ func (StubEBWOIDIssuer) Obtain(ctx context.Context, h EBWOIDHolder, orgID uuid.U
 		ProcessedPayload: payload,
 		IssuedAt:         issuedAt,
 		ExpiresAt:        &expiresAt,
+		Status:           status,
 	})
 	if err != nil {
 		return HeldEBWOID{}, fmt.Errorf("registryprovider: store stub ebwoid: %w", err)

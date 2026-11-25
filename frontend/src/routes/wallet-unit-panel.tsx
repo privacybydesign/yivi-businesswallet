@@ -117,7 +117,12 @@ export function WalletUnitPanel({
           </Button>
         </div>
       )}
-      {state === "revoked" && (
+      {state === "revoked" && summary?.unit.revokedReason === "cessation" && (
+        <p className="text-ink-soft mt-5 text-[13px]">
+          {t("walletUnit.ceasedHint")}
+        </p>
+      )}
+      {state === "revoked" && summary?.unit.revokedReason !== "cessation" && (
         <div className="mt-5">
           <p className="text-ink-soft mb-3 text-[13px]">
             {t("walletUnit.activateHint")}
