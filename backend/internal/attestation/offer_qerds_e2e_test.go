@@ -261,13 +261,10 @@ func TestCredentialOfferQueuedOnceOnRedelivery(t *testing.T) {
 	}
 }
 
-// An offer whose redemption fails at the moment of acceptance must stay pending,
-// so the admin can accept again once the issuer is back or the org's wallet is
-// activated — the offer is never spent on a failed attempt.
-func TestAcceptOfferRetriableAfterRedeemFailure(t *testing.T) {
-	ctx := context.Background()
-	ruOrg := uuid.New()
-
+// queuedOffer delivers one credential offer from Yivi to ruOrg and returns the
+// queue holding it.
+func queuedOffer(t *testing.T, ctx context.Context, ruOrg uuid.UUID) (*fakeOfferQueue, uuid.UUID) {
+	t.Helper()
 	queue := newFakeOfferQueue()
 	rec := attestation.NewOfferReceiver(queue, attestation.NewTrustedOfferSenders(nil, nil))
 	body, err := attestation.MarshalCredentialOfferEnvelope("Yivi", "Approved supplier", "openid-credential-offer://?x=1")
@@ -278,6 +275,17 @@ func TestAcceptOfferRetriableAfterRedeemFailure(t *testing.T) {
 		t.Fatalf("OnInboundMessage: %v", err)
 	}
 	offerID := queue.queued()[0].ID
+	return queue, offerID
+}
+
+// An offer whose redemption fails at the moment of acceptance must stay pending,
+// so the admin can accept again once the issuer is back or the org's wallet is
+// activated — the offer is never spent on a failed attempt.
+func TestAcceptOfferRetriableAfterRedeemFailure(t *testing.T) {
+	ctx := context.Background()
+	ruOrg := uuid.New()
+
+	queue, offerID := queuedOffer(t, ctx, ruOrg)
 
 	holder := &flakyHolder{StubHolder: eudiholder.NewStubHolder(), failuresLeft: 1}
 	service := attestation.NewService(nil, nil, nil, nil, nil, nil, queue, holder, "http://app.test")
@@ -323,16 +331,7 @@ func TestAcceptOfferClosesAnOfferTheIssuerRefuses(t *testing.T) {
 	ctx := context.Background()
 	ruOrg := uuid.New()
 
-	queue := newFakeOfferQueue()
-	rec := attestation.NewOfferReceiver(queue, attestation.NewTrustedOfferSenders(nil, nil))
-	body, err := attestation.MarshalCredentialOfferEnvelope("Yivi", "Approved supplier", "openid-credential-offer://?x=1")
-	if err != nil {
-		t.Fatalf("marshal offer: %v", err)
-	}
-	if err := rec.OnInboundMessage(ctx, inbound(ruOrg, uuid.New(), "blue_gw", yiviAddress, body)); err != nil {
-		t.Fatalf("OnInboundMessage: %v", err)
-	}
-	offerID := queue.queued()[0].ID
+	queue, offerID := queuedOffer(t, ctx, ruOrg)
 
 	service := attestation.NewService(nil, nil, nil, nil, nil, nil, queue, usedOfferHolder{eudiholder.NewStubHolder()}, "http://app.test")
 
@@ -376,16 +375,7 @@ func TestDeclineOfferNeverLoadsTheCredential(t *testing.T) {
 	ctx := context.Background()
 	ruOrg := uuid.New()
 
-	queue := newFakeOfferQueue()
-	rec := attestation.NewOfferReceiver(queue, attestation.NewTrustedOfferSenders(nil, nil))
-	body, err := attestation.MarshalCredentialOfferEnvelope("Yivi", "Approved supplier", "openid-credential-offer://?x=1")
-	if err != nil {
-		t.Fatalf("marshal offer: %v", err)
-	}
-	if err := rec.OnInboundMessage(ctx, inbound(ruOrg, uuid.New(), "blue_gw", yiviAddress, body)); err != nil {
-		t.Fatalf("OnInboundMessage: %v", err)
-	}
-	offerID := queue.queued()[0].ID
+	queue, offerID := queuedOffer(t, ctx, ruOrg)
 
 	holder := &flakyHolder{StubHolder: eudiholder.NewStubHolder()}
 	replies := &declineRecorder{}
