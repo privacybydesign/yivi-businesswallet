@@ -373,3 +373,40 @@ func TestReleaseOfferReturnsTheOfferToTheQueue(t *testing.T) {
 		t.Fatalf("ReleaseOffer on an accepted offer = %v, want ErrOfferNotFound", err)
 	}
 }
+
+// An offer the issuer refuses is closed for good: it leaves the queue and can be
+// neither claimed nor released again. Only a claim can fail.
+func TestFailOfferClosesTheOffer(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	messageID := inboundMessage(t, ctx, e, "ref-fail")
+
+	offer, _, err := e.store.RecordOffer(ctx, e.orgID, offerInput(messageID))
+	if err != nil {
+		t.Fatalf("RecordOffer: %v", err)
+	}
+	if err := e.store.FailOffer(ctx, e.orgID, offer.ID); !errors.Is(err, attestation.ErrOfferNotFound) {
+		t.Fatalf("FailOffer on a pending offer = %v, want ErrOfferNotFound", err)
+	}
+
+	if _, err := e.store.ClaimOffer(ctx, e.orgID, offer.ID); err != nil {
+		t.Fatalf("ClaimOffer: %v", err)
+	}
+	if err := e.store.FailOffer(ctx, e.orgID, offer.ID); err != nil {
+		t.Fatalf("FailOffer: %v", err)
+	}
+
+	pending, err := e.store.ListPendingOffers(ctx, e.orgID)
+	if err != nil {
+		t.Fatalf("ListPendingOffers: %v", err)
+	}
+	if len(pending) != 0 {
+		t.Fatalf("pending offers after fail = %d, want 0", len(pending))
+	}
+	if _, err := e.store.ClaimOffer(ctx, e.orgID, offer.ID); !errors.Is(err, attestation.ErrOfferNotFound) {
+		t.Fatalf("ClaimOffer on a failed offer = %v, want ErrOfferNotFound", err)
+	}
+	if err := e.store.ReleaseOffer(ctx, e.orgID, offer.ID); !errors.Is(err, attestation.ErrOfferNotFound) {
+		t.Fatalf("ReleaseOffer on a failed offer = %v, want ErrOfferNotFound", err)
+	}
+}

@@ -57,6 +57,7 @@ import type {
   OnboardingAttestation,
 } from "./attestations";
 import type { AuditEvent } from "./organization";
+import { errorCode } from "../lib/api-error";
 import { toast } from "../lib/toast";
 
 // The ledger reconciles status on read, so an offered attestation is re-fetched
@@ -643,6 +644,9 @@ export function useCredentialOffersQuery(
   });
 }
 
+// OFFER_USED is the backend's code for an offer the issuer no longer accepts.
+const OFFER_USED = "offer_used";
+
 export function useAcceptCredentialOfferMutation(
   slug: string,
 ): UseMutationResult<void, Error, { offerId: string }> {
@@ -651,6 +655,18 @@ export function useAcceptCredentialOfferMutation(
   return useMutation({
     mutationFn: async ({ offerId }) => {
       await acceptCredentialOffer(slug, offerId);
+    },
+    meta: { suppressErrorToast: true },
+    onError: (error) => {
+      if (errorCode(error) !== OFFER_USED) {
+        toast.error(t("toasts.error"));
+        return;
+      }
+      // The backend closed the offer, so it leaves the list.
+      toast.error(t("toasts.credentialOfferUsed"));
+      void queryClient.invalidateQueries({
+        queryKey: credentialOffersQueryKey(slug),
+      });
     },
     onSuccess: () => {
       toast.success(t("toasts.credentialOfferAccepted"));

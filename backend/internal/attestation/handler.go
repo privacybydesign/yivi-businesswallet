@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"unicode/utf8"
@@ -360,6 +361,9 @@ func (h *Handler) acceptOffer(w http.ResponseWriter, r *http.Request) error {
 	switch {
 	case errors.Is(err, ErrOfferNotFound):
 		return notFound("offer_not_found", "credential offer not found")
+	case errors.Is(err, ErrOfferUsed):
+		slog.WarnContext(r.Context(), "attestation: issuer refused a credential offer", slog.String("error", err.Error()))
+		return &respond.APIError{Status: http.StatusGone, Code: "offer_used", Message: "the issuer no longer accepts this credential offer; ask the sender for a new one"}
 	case err != nil:
 		return fmt.Errorf("accepting credential offer: %w", err)
 	}

@@ -26,6 +26,9 @@ const (
 	OfferAccepting = "accepting"
 	OfferAccepted  = "accepted"
 	OfferDeclined  = "declined"
+	// OfferFailed is an offer the issuer refused to redeem: its code was used or
+	// expired. Terminal like declined.
+	OfferFailed = "failed"
 )
 
 // CredentialOffer is an OpenID4VCI credential offer that arrived over QERDS and
@@ -193,6 +196,29 @@ func (s *Store) ReleaseOffer(ctx context.Context, orgID, id uuid.UUID) error {
 		return ErrOfferNotFound
 	}
 	return nil
+}
+
+// FailOffer closes a claimed offer the issuer will no longer redeem, and audits,
+// in one tx. Like ReleaseOffer it only takes a claim.
+func (s *Store) FailOffer(ctx context.Context, orgID, id uuid.UUID) error {
+	return database.InTx(ctx, s.db, func(q database.Querier) error {
+		const update = `UPDATE credential_offers SET status = $3, decided_at = now(), updated_at = now()
+			WHERE id = $1 AND organization_id = $2 AND status = $4
+			RETURNING ` + offerColumns
+		offer, err := scanOffer(q.QueryRow(ctx, update, id, orgID, OfferFailed, OfferAccepting))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrOfferNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("attestation: fail offer %s org %s: %w", id, orgID, err)
+		}
+		return s.audit.Record(ctx, q, audit.AttestationOfferFailed,
+			audit.Target{Type: audit.TargetCredentialOffer, ID: offer.ID.String(), OrgID: &orgID},
+			audit.Updated(nil, map[string]any{
+				"status": offer.Status, "sender": offer.SenderOrgName,
+				"credentialName": offer.CredentialName,
+			}))
+	})
 }
 
 // AcceptOffer settles a claimed offer as accepted and indexes the credential the

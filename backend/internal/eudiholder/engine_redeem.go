@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/privacybydesign/irmago/common/clientmodels"
 	"github.com/privacybydesign/irmago/eudi"
+	"github.com/privacybydesign/irmago/eudi/credentials/proofs"
 	"github.com/privacybydesign/irmago/eudi/credentials/sdjwtvc"
 	"github.com/privacybydesign/irmago/eudi/credentials/statuslist"
 	eudijwt "github.com/privacybydesign/irmago/eudi/jwt"
@@ -95,6 +96,7 @@ func (e *Engine) Redeem(ctx context.Context, orgID uuid.UUID, offerURI string) (
 	if err != nil {
 		return Redeemed{}, err
 	}
+	binder = oneCopyBinder{binder}
 	// currentLocale is shared by the credential service and the client (matching
 	// irmago's wallet assembly); receive is headless, so the default locale stands.
 	currentLocale := clientmodels.NewCurrentLocale(defaultHolderLocale)
@@ -384,6 +386,22 @@ func (r *storeRecorder) refFor(vct string) string {
 	return ""
 }
 
+// copiesPerCredential is how many copies of a credential the org asks an issuer
+// for. irmago asks for the issuer's whole batch_size, a key and a proof each, and
+// over WSCA each is a call the wallet provider rate-limits. One copy is enough:
+// it can be presented any number of times.
+const copiesPerCredential uint = 1
+
+// oneCopyBinder makes keys for copiesPerCredential copies however many irmago
+// asks for. irmago sends one proof per key, so the issuer signs that many.
+type oneCopyBinder struct {
+	openid4vci.HolderKeyBinder
+}
+
+func (b oneCopyBinder) CreateKeyPairsWithProofs(num uint, proofBuilder proofs.ProofBuilder) ([]models.PublicHolderBindingKey, []string, error) {
+	return b.HolderKeyBinder.CreateKeyPairsWithProofs(min(num, copiesPerCredential), proofBuilder)
+}
+
 // redeemResult carries the outcome of the asynchronous, callback-driven session
 // back to Redeem over a buffered channel.
 type redeemResult struct {
@@ -472,8 +490,17 @@ func (h *redeemHandler) Failure(err *clientmodels.SessionError) {
 	if detail == "" {
 		detail = "(no detail)"
 	}
+	if strings.Contains(detail, oauth2InvalidGrant) {
+		h.done <- redeemResult{err: fmt.Errorf("%w: openid4vci session failed: %s", ErrOfferUsed, detail)}
+		return
+	}
 	h.done <- redeemResult{err: fmt.Errorf("openid4vci session failed: %s", detail)}
 }
+
+// oauth2InvalidGrant is the token endpoint's error for a used or expired code
+// (RFC 6749 §5.2). irmago hands the failure over only as text, so it is matched
+// there.
+const oauth2InvalidGrant = "invalid_grant"
 
 func (h *redeemHandler) RequestPreAuthorizedCodeFlowPermission(
 	_ *clientmodels.PreAuthorizedCodeFlowPermissionRequest,

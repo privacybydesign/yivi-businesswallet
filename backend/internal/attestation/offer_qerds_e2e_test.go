@@ -3,6 +3,7 @@ package attestation_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 
@@ -304,6 +305,52 @@ func TestAcceptOfferRetriableAfterRedeemFailure(t *testing.T) {
 	// The offer is spent: accepting the same one again finds nothing pending.
 	if _, err := service.AcceptOffer(ctx, ruOrg, offerID); !errors.Is(err, attestation.ErrOfferNotFound) {
 		t.Fatalf("re-accepting a decided offer = %v, want ErrOfferNotFound", err)
+	}
+}
+
+// usedOfferHolder is a holder engine whose issuer refuses every offer's code.
+type usedOfferHolder struct {
+	*eudiholder.StubHolder
+}
+
+func (usedOfferHolder) Redeem(context.Context, uuid.UUID, string) (eudiholder.Redeemed, error) {
+	return eudiholder.Redeemed{}, fmt.Errorf("%w: invalid_grant", eudiholder.ErrOfferUsed)
+}
+
+// An offer whose code the issuer refuses can never be redeemed, so it closes as
+// failed instead of going back to pending for retries that cannot succeed.
+func TestAcceptOfferClosesAnOfferTheIssuerRefuses(t *testing.T) {
+	ctx := context.Background()
+	ruOrg := uuid.New()
+
+	queue := newFakeOfferQueue()
+	rec := attestation.NewOfferReceiver(queue, attestation.NewTrustedOfferSenders(nil, nil))
+	body, err := attestation.MarshalCredentialOfferEnvelope("Yivi", "Approved supplier", "openid-credential-offer://?x=1")
+	if err != nil {
+		t.Fatalf("marshal offer: %v", err)
+	}
+	if err := rec.OnInboundMessage(ctx, inbound(ruOrg, uuid.New(), "blue_gw", yiviAddress, body)); err != nil {
+		t.Fatalf("OnInboundMessage: %v", err)
+	}
+	offerID := queue.queued()[0].ID
+
+	service := attestation.NewService(nil, nil, nil, nil, nil, nil, queue, usedOfferHolder{eudiholder.NewStubHolder()}, "http://app.test")
+
+	if _, err := service.AcceptOffer(ctx, ruOrg, offerID); !errors.Is(err, attestation.ErrOfferUsed) {
+		t.Fatalf("accept = %v, want ErrOfferUsed", err)
+	}
+	if got := queue.queued()[0].Status; got != attestation.OfferFailed {
+		t.Fatalf("offer status = %q, want %q", got, attestation.OfferFailed)
+	}
+	pending, err := service.ListOffers(ctx, ruOrg)
+	if err != nil {
+		t.Fatalf("ListOffers: %v", err)
+	}
+	if len(pending) != 0 {
+		t.Fatalf("a failed offer is still listed (%d pending)", len(pending))
+	}
+	if _, err := service.AcceptOffer(ctx, ruOrg, offerID); !errors.Is(err, attestation.ErrOfferNotFound) {
+		t.Fatalf("re-accepting a failed offer = %v, want ErrOfferNotFound", err)
 	}
 }
 

@@ -35,6 +35,9 @@ var (
 	// ErrRulebookStatusListRequired means rulebook credentials go to an issuer
 	// that sets their validity itself and has no status list to revoke them on.
 	ErrRulebookStatusListRequired = errors.New("attestation: the rulebook issuer has no status list")
+	// ErrOfferUsed means the issuer refused the offer's code, so the offer was
+	// closed as failed: only a new offer from the sender can deliver it.
+	ErrOfferUsed = errors.New("attestation: the issuer no longer accepts this credential offer")
 
 	// ErrUnknownAttribute and ErrMissingAttribute enforce data minimisation
 	// (Art 5(1)(b)): the schema's attribute list is the allow-list.
