@@ -12,3 +12,9 @@ RUN patch -p1 < issuer-state-in-take.patch
 
 FROM upstream
 COPY --from=patched /src/app/formatter_func.py /src/app/dynamic_func.py /app/app/
+
+# The issuer writes its Flask instance and file sessions under /app.
+RUN useradd --system --uid 10001 --no-create-home issuer \
+    && mkdir -p /app/instance /app/flask_session \
+    && chown issuer /app/instance /app/flask_session
+USER 10001
