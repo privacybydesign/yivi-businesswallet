@@ -2267,8 +2267,10 @@ paths:
         the received credential as held. Requires an administrator role. Returns
         404 when the offer is absent, already decided, or being accepted by
         another request: the offer is claimed before the issuer is called, so of
-        several simultaneous accepts exactly one redeems. A redemption that fails
-        returns the offer to the queue so it can be accepted again.
+        several simultaneous accepts exactly one redeems. Returns 410 when the
+        issuer refuses the offer as used or expired (`invalid_grant`); that closes
+        the offer for good. Any other failed redemption returns the offer to the
+        queue so it can be accepted again.
       responses:
         '2XX':
           description: Successful response.
@@ -2284,6 +2286,12 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '410':
+          description: '`offer_used`: the issuer no longer accepts this offer, so it is closed as failed. Ask the sender for a new one.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /api/v1/orgs/{slug}/attestations/offers/{id}/decline:
     parameters:
       - name: slug
