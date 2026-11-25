@@ -2,6 +2,7 @@ import { MutationCache, QueryClient } from "@tanstack/react-query";
 import { setUnauthorizedHandler } from "./api/http";
 import { meQueryKey } from "./api/auth.queries";
 import { DEFAULT_STALE_TIME_MS } from "./api/stale-time";
+import { walletNotActive } from "./lib/api-error";
 import { toast } from "./lib/toast";
 import i18n from "./i18n";
 
@@ -12,11 +13,15 @@ export const queryClient = new QueryClient({
   // fails silently. Forms that show the error inline opt out via
   // `meta: { suppressErrorToast: true }`.
   mutationCache: new MutationCache({
-    onError: (_error, _variables, _context, mutation) => {
+    onError: (error, _variables, _context, mutation) => {
       if (mutation.meta?.suppressErrorToast) {
         return;
       }
-      toast.error(i18n.t("toasts.error"));
+      toast.error(
+        i18n.t(
+          walletNotActive(error) ? "toasts.walletNotActive" : "toasts.error",
+        ),
+      );
     },
   }),
   defaultOptions: {

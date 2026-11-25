@@ -2385,6 +2385,8 @@ export const nl: Translation<typeof en> = {
       "Status opnieuw gecontroleerd: deze credential is veranderd",
     dismiss: "Sluiten",
     error: "Er is iets misgegaan. Probeer het opnieuw.",
+    walletNotActive:
+      "Deze wallet is geschorst of ingetrokken. Je kunt alles nog lezen en exporteren, maar er kan niets worden gewijzigd.",
     invitationSent: "Uitnodiging verstuurd",
     invitationResent: "Uitnodiging opnieuw verstuurd",
     invitationRevoked: "Uitnodiging ingetrokken",

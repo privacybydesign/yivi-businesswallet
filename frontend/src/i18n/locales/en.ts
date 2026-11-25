@@ -2332,6 +2332,8 @@ export const en = {
     attestationHeldRechecked: "Status re-checked: this credential changed",
     dismiss: "Dismiss",
     error: "Something went wrong. Please try again.",
+    walletNotActive:
+      "This wallet is suspended or revoked. You can still read and export everything, but nothing can be changed.",
     invitationSent: "Invitation sent",
     invitationResent: "Invitation resent",
     invitationRevoked: "Invitation revoked",
