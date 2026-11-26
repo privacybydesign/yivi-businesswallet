@@ -386,14 +386,15 @@ func (s *Service) OwnerIDRevoked(ctx context.Context, orgID uuid.UUID) error {
 	return s.store.Cease(ctx, orgID)
 }
 
-// ProviderDelisted suspends every active wallet because we as provider are off
-// the trusted list (Art 6(2)(f)): read-only, and its units show as suspended on
-// the status list. It returns the orgs it suspended.
+// ProviderDelisted revokes the validity of every wallet because we as provider
+// are off the trusted list (Art 6(2)(f)): its unit is revoked and the wallet is
+// suspended, so read-only. It returns the orgs it changed.
 func (s *Service) ProviderDelisted(ctx context.Context) ([]uuid.UUID, error) {
 	return s.store.SuspendForProvider(ctx)
 }
 
-// ProviderRelisted makes the wallets ProviderDelisted suspended active again.
+// ProviderRelisted makes the wallets ProviderDelisted suspended active again,
+// each with a new unit.
 func (s *Service) ProviderRelisted(ctx context.Context) ([]uuid.UUID, error) {
 	return s.store.ResumeForProvider(ctx)
 }

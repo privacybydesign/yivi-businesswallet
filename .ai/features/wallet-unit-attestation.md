@@ -44,7 +44,8 @@ holder needs irmago support first (part 2, below).
 - **Revocation is per unit.** An admin revokes for `owner_request` or `key_compromise`.
   `Issue` then refuses (`ErrUnitRevoked`) until an admin activates a new unit, so a
   compromised unit is not silently replaced. The first unit is created by the first
-  `Issue`.
+  `Issue`. The system revokes for `cessation` (final) and `provider_delisted` (we are
+  off the trusted list; `internal/providerlisting` gives a new unit once we are back).
 - **Lifetimes:**
   - token `exp` 1 hour (CS-05: under 24 h, single-use);
   - status `exp` 90 days (CS-05: at least 31 days ahead at presentation).
@@ -77,4 +78,3 @@ holder needs irmago support first (part 2, below).
 - **Trust.** The provider certificate is not on the WE BUILD Wallet Provider Trust List
   (YIV-518). Until it is, a relying party can only trust it by adding the root.
 - CS-05 discovery registry (Annex C) and the throughput profile.
-- Revocation when the provider itself drops off the trusted list: not ours to trigger.

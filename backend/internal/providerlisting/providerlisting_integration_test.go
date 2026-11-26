@@ -116,21 +116,40 @@ func (f fixture) seedOrg(t *testing.T, slug string) uuid.UUID {
 	return orgID
 }
 
-func (f fixture) status(t *testing.T, orgID uuid.UUID) (wallet, unit string) {
+// status returns the org's wallet status and its latest unit's status and reason,
+// with how many units it had.
+func (f fixture) status(t *testing.T, orgID uuid.UUID) (wallet, unit, reason string, units int) {
 	t.Helper()
-	if err := f.pool.QueryRow(context.Background(), `SELECT o.status, u.status
-		FROM organizations o JOIN wallet_units u ON u.organization_id = o.id WHERE o.id = $1`, orgID).
-		Scan(&wallet, &unit); err != nil {
+	var r *string
+	if err := f.pool.QueryRow(context.Background(), `SELECT o.status, u.status, u.revoked_reason,
+			(SELECT count(*) FROM wallet_units WHERE organization_id = o.id)
+		FROM organizations o JOIN wallet_units u ON u.organization_id = o.id WHERE o.id = $1
+		ORDER BY (u.status = 'active') DESC, u.created_at DESC LIMIT 1`, orgID).
+		Scan(&wallet, &unit, &r, &units); err != nil {
 		t.Fatalf("status of %s: %v", orgID, err)
 	}
-	return wallet, unit
+	if r != nil {
+		reason = *r
+	}
+	return wallet, unit, reason, units
 }
 
-func (f fixture) wantStatus(t *testing.T, orgID uuid.UUID, want string) {
+// wantActive fails unless the org's wallet and its latest unit are active, and it
+// had units units.
+func (f fixture) wantActive(t *testing.T, orgID uuid.UUID, units int) {
 	t.Helper()
-	wallet, unit := f.status(t, orgID)
-	if wallet != want || unit != walletunit.UnitActive {
-		t.Fatalf("org %s = wallet %q, unit %q; want wallet %q, unit active", orgID, wallet, unit, want)
+	if wallet, unit, _, n := f.status(t, orgID); wallet != organization.StatusActive || unit != walletunit.UnitActive || n != units {
+		t.Fatalf("org %s = wallet %q, unit %q, %d units; want active, active, %d units", orgID, wallet, unit, n, units)
+	}
+}
+
+// wantDelisted fails unless the org's unit is revoked as delisted and its wallet
+// is in wallet status.
+func (f fixture) wantDelisted(t *testing.T, orgID uuid.UUID, wallet string) {
+	t.Helper()
+	if w, unit, reason, _ := f.status(t, orgID); w != wallet || unit != walletunit.UnitRevoked || reason != walletunit.ReasonProviderDelisted {
+		t.Fatalf("org %s = wallet %q, unit %q for %q; want wallet %q, unit revoked for %q",
+			orgID, w, unit, reason, wallet, walletunit.ReasonProviderDelisted)
 	}
 }
 
@@ -141,10 +160,11 @@ func (f fixture) setListed(t *testing.T, listed bool) {
 	}
 }
 
-// Off the list suspends every active wallet and mails its admins; back on it
-// resumes exactly those, as they were. A wallet an admin suspended stays
-// suspended, and one revoked in between stays revoked.
-func TestOffTheListSuspendsUntilBackOnIt(t *testing.T) {
+// Off the list revokes every wallet unit, suspends every active wallet and mails
+// the admins; back on it the wallets we suspended are active again with a new
+// unit. A wallet an admin suspended stays suspended, and one revoked in between
+// stays revoked.
+func TestOffTheListRevokesUnitsUntilBackOnIt(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
 	acme, globex, initech := f.seedOrg(t, "acme"), f.seedOrg(t, "globex"), f.seedOrg(t, "initech")
@@ -156,20 +176,20 @@ func TestOffTheListSuspendsUntilBackOnIt(t *testing.T) {
 	if n, err := w.Check(ctx); err != nil || n != 0 {
 		t.Fatalf("Check while listed = %d, %v; want 0, nil", n, err)
 	}
-	f.wantStatus(t, acme, organization.StatusActive)
+	f.wantActive(t, acme, 1)
 
 	f.setListed(t, false)
-	if n, err := w.Check(ctx); err != nil || n != 2 {
-		t.Fatalf("Check off the list = %d, %v; want 2, nil", n, err)
+	if n, err := w.Check(ctx); err != nil || n != 3 {
+		t.Fatalf("Check off the list = %d, %v; want 3, nil", n, err)
 	}
 	for _, org := range []uuid.UUID{acme, globex, initech} {
-		f.wantStatus(t, org, organization.StatusSuspended)
+		f.wantDelisted(t, org, organization.StatusSuspended)
 	}
-	if got := f.mail.mailed("delisted"); !slices.Equal(got, []uuid.UUID{acme, globex}) {
-		t.Fatalf("delisted mails to %v, want acme and globex", got)
+	if got := f.mail.mailed("delisted"); !slices.Equal(got, []uuid.UUID{acme, globex, initech}) {
+		t.Fatalf("delisted mails to %v, want every org", got)
 	}
 	for _, m := range f.mail.sent {
-		if len(m.recipients) != 1 || !slices.Contains([]string{"admin@acme.example", "admin@globex.example"}, m.recipients[0]) {
+		if len(m.recipients) != 1 || !slices.Contains([]string{"admin@acme.example", "admin@globex.example", "admin@initech.example"}, m.recipients[0]) {
 			t.Fatalf("mail for %s went to %v, want its admin", m.orgID, m.recipients)
 		}
 	}
@@ -185,11 +205,9 @@ func TestOffTheListSuspendsUntilBackOnIt(t *testing.T) {
 	if n, err := w.Check(ctx); err != nil || n != 1 {
 		t.Fatalf("Check back on the list = %d, %v; want 1, nil", n, err)
 	}
-	f.wantStatus(t, acme, organization.StatusActive)
-	f.wantStatus(t, initech, organization.StatusSuspended)
-	if wallet, _ := f.status(t, globex); wallet != organization.StatusRevoked {
-		t.Fatalf("globex = %q, want still revoked", wallet)
-	}
+	f.wantActive(t, acme, 2)
+	f.wantDelisted(t, initech, organization.StatusSuspended)
+	f.wantDelisted(t, globex, organization.StatusRevoked)
 	if got := f.mail.mailed("relisted"); !slices.Equal(got, []uuid.UUID{acme}) {
 		t.Fatalf("relisted mails to %v, want acme", got)
 	}
@@ -197,7 +215,7 @@ func TestOffTheListSuspendsUntilBackOnIt(t *testing.T) {
 	if n, err := w.Check(ctx); err != nil || n != 0 {
 		t.Fatalf("next Check while listed = %d, %v; want 0, nil", n, err)
 	}
-	if len(f.mail.sent) != 3 {
+	if len(f.mail.sent) != 4 {
 		t.Fatalf("mails = %d, want no new ones", len(f.mail.sent))
 	}
 }
@@ -236,7 +254,7 @@ func TestGraceKeepsWalletsUntilItRunsOut(t *testing.T) {
 	if n, err := w.Check(ctx); err != nil || n != 0 {
 		t.Fatalf("Check off again = %d, %v; want 0, the grace starts over", n, err)
 	}
-	f.wantStatus(t, acme, organization.StatusActive)
+	f.wantActive(t, acme, 1)
 
 	at(3 * time.Hour)
 	if n, err := w.Check(ctx); err != nil || n != 1 {
@@ -253,7 +271,7 @@ func TestUnreadableListChangesNothing(t *testing.T) {
 	if n, err := f.watcher(unreadableList{}, 0).Check(ctx); err == nil || n != 0 {
 		t.Fatalf("Check on an unreadable list = %d, %v; want 0 and an error", n, err)
 	}
-	f.wantStatus(t, acme, organization.StatusActive)
+	f.wantActive(t, acme, 1)
 	var rows int
 	if err := f.pool.QueryRow(ctx, `SELECT count(*) FROM provider_listing_state WHERE missing_since IS NOT NULL`).Scan(&rows); err != nil || rows != 0 {
 		t.Fatalf("missing_since rows = %d, %v; want 0", rows, err)

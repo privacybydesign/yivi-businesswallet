@@ -122,20 +122,28 @@ export function WalletUnitPanel({
           {t("walletUnit.ceasedHint")}
         </p>
       )}
-      {state === "revoked" && summary?.unit.revokedReason !== "cessation" && (
-        <div className="mt-5">
-          <p className="text-ink-soft mb-3 text-[13px]">
-            {t("walletUnit.activateHint")}
+      {state === "revoked" &&
+        summary?.unit.revokedReason === "provider_delisted" && (
+          <p className="text-ink-soft mt-5 text-[13px]">
+            {t("walletUnit.delistedHint")}
           </p>
-          <Button
-            size="sm"
-            disabled={activate.isPending}
-            onClick={() => activate.mutate()}
-          >
-            {t("walletUnit.activate")}
-          </Button>
-        </div>
-      )}
+        )}
+      {state === "revoked" &&
+        summary?.unit.revokedReason !== "cessation" &&
+        summary?.unit.revokedReason !== "provider_delisted" && (
+          <div className="mt-5">
+            <p className="text-ink-soft mb-3 text-[13px]">
+              {t("walletUnit.activateHint")}
+            </p>
+            <Button
+              size="sm"
+              disabled={activate.isPending}
+              onClick={() => activate.mutate()}
+            >
+              {t("walletUnit.activate")}
+            </Button>
+          </div>
+        )}
       {actionError && (
         <p role="alert" className="text-error mt-3 text-[13px]">
           {t("walletUnit.actionError", { message: actionError.message })}

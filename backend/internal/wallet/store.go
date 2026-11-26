@@ -258,35 +258,62 @@ func (s *Store) Cease(ctx context.Context, orgID uuid.UUID) error {
 	})
 }
 
-// SuspendForProvider suspends every active wallet, in one tx, because we as
-// provider are off the trusted list, and returns the orgs it suspended. Each is
+// SuspendForProvider revokes every live wallet unit and suspends every active
+// wallet, in one tx, because we as provider are off the trusted list (Art
+// 6(2)(f)), and returns the orgs it changed. Each wallet it suspends is
 // remembered, so ResumeForProvider brings back exactly these and not a wallet an
 // admin suspended.
 func (s *Store) SuspendForProvider(ctx context.Context) ([]uuid.UUID, error) {
-	var ids []uuid.UUID
+	var changed []uuid.UUID
 	err := database.InTx(ctx, s.db, func(q database.Querier) error {
-		var err error
-		ids, err = orgIDs(ctx, q, `SELECT id FROM organizations WHERE status = $1 ORDER BY created_at FOR UPDATE`,
-			organization.StatusActive)
+		changed = nil
+		rows, err := q.Query(ctx, `SELECT id, status FROM organizations WHERE status IN ($1, $2) ORDER BY created_at FOR UPDATE`,
+			organization.StatusActive, organization.StatusSuspended)
 		if err != nil {
-			return err
+			return fmt.Errorf("wallet: live orgs: %w", err)
 		}
-		for _, id := range ids {
-			if _, err := s.setStatusIn(ctx, q, id, organization.StatusSuspended); err != nil {
+		type liveOrg struct {
+			ID     uuid.UUID
+			Status string
+		}
+		live, err := pgx.CollectRows(rows, pgx.RowToStructByPos[liveOrg])
+		if err != nil {
+			return fmt.Errorf("wallet: live orgs rows: %w", err)
+		}
+		for _, org := range live {
+			_, err := s.units.RevokeIn(ctx, q, org.ID, walletunit.ReasonProviderDelisted)
+			revoked := err == nil
+			if err != nil && !errors.Is(err, walletunit.ErrNoActiveUnit) {
 				return err
 			}
-			if _, err := q.Exec(ctx, `INSERT INTO provider_suspended_wallets (organization_id) VALUES ($1)
-				ON CONFLICT DO NOTHING`, id); err != nil {
-				return fmt.Errorf("wallet: remember provider suspension org %s: %w", id, err)
+			if org.Status == organization.StatusActive {
+				if err := s.suspendForProviderIn(ctx, q, org.ID); err != nil {
+					return err
+				}
+			}
+			if revoked || org.Status == organization.StatusActive {
+				changed = append(changed, org.ID)
 			}
 		}
 		return nil
 	})
-	return ids, err
+	return changed, err
+}
+
+func (s *Store) suspendForProviderIn(ctx context.Context, q database.Querier, orgID uuid.UUID) error {
+	if _, err := s.setStatusIn(ctx, q, orgID, organization.StatusSuspended); err != nil {
+		return err
+	}
+	if _, err := q.Exec(ctx, `INSERT INTO provider_suspended_wallets (organization_id) VALUES ($1)
+		ON CONFLICT DO NOTHING`, orgID); err != nil {
+		return fmt.Errorf("wallet: remember provider suspension org %s: %w", orgID, err)
+	}
+	return nil
 }
 
 // ResumeForProvider makes the wallets SuspendForProvider suspended active again,
-// in one tx, and returns those orgs. One revoked since then stays revoked.
+// each with a new unit in place of the one it revoked, in one tx, and returns
+// those orgs. One revoked since then stays revoked.
 func (s *Store) ResumeForProvider(ctx context.Context) ([]uuid.UUID, error) {
 	var ids []uuid.UUID
 	err := database.InTx(ctx, s.db, func(q database.Querier) error {
@@ -301,6 +328,9 @@ func (s *Store) ResumeForProvider(ctx context.Context) ([]uuid.UUID, error) {
 			if _, err := s.setStatusIn(ctx, q, id, organization.StatusActive); err != nil {
 				return err
 			}
+			if err := s.replaceDelistedUnit(ctx, q, id); err != nil {
+				return err
+			}
 		}
 		if _, err := q.Exec(ctx, `DELETE FROM provider_suspended_wallets`); err != nil {
 			return fmt.Errorf("wallet: forget provider suspensions: %w", err)
@@ -308,6 +338,23 @@ func (s *Store) ResumeForProvider(ctx context.Context) ([]uuid.UUID, error) {
 		return nil
 	})
 	return ids, err
+}
+
+// replaceDelistedUnit gives the org a new unit when its latest was revoked for
+// ReasonProviderDelisted; an org that never had a unit gets its first on issue.
+func (s *Store) replaceDelistedUnit(ctx context.Context, q database.Querier, orgID uuid.UUID) error {
+	var delisted bool
+	err := q.QueryRow(ctx, `SELECT status = 'revoked' AND revoked_reason = $2 FROM wallet_units
+		WHERE organization_id = $1 ORDER BY (status = 'active') DESC, created_at DESC LIMIT 1`,
+		orgID, walletunit.ReasonProviderDelisted).Scan(&delisted)
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && !delisted) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("wallet: latest unit org %s: %w", orgID, err)
+	}
+	_, err = s.units.Provision(ctx, q, orgID)
+	return err
 }
 
 func orgIDs(ctx context.Context, q database.Querier, query string, args ...any) ([]uuid.UUID, error) {

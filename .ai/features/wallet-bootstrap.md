@@ -362,12 +362,13 @@ on `active` (single tx): create organization (identity from attestation)
 7. Provider off the trusted list (Art 6(2)(f), Art 12(5)): `internal/providerlisting` checks
    the list hourly (`TRUSTED_LIST_PROVIDER`; `stub` is our own list, off by default). Only a
    list that was read and does not name us counts. Once we are off it for
-   `TRUSTED_LIST_GRACE` (30m, so the next hourly check confirms), every active wallet is
-   suspended
-   (`wallet.Store.SuspendForProvider`): read-only, and its units show as suspended on the
-   status list. Nothing is revoked. Back on the list, exactly those wallets are active
-   again (`provider_suspended_wallets`); one an admin suspended stays suspended, one revoked
-   in between stays revoked. Admins get a mail each way through the org's own SMTP.
+   `TRUSTED_LIST_GRACE` (30m, so the next hourly check confirms), the validity of every
+   wallet is revoked (`wallet.Store.SuspendForProvider`): its wallet unit is revoked for
+   `provider_delisted`, and an active wallet is suspended, so read-only with its data kept.
+   Back on the list, exactly those wallets are active again with a new unit
+   (`provider_suspended_wallets`); nobody registers again. One an admin suspended stays
+   suspended, one revoked in between stays revoked. Admins get a mail each way through the
+   org's own SMTP.
 
 ---
 

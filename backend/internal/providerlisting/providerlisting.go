@@ -1,8 +1,8 @@
-// Package providerlisting suspends every org's wallet while we as Business Wallet
-// Provider are not on the trusted list of wallet providers (Art 12(5)), as Art
-// 6(2)(f) takes away the validity of every wallet we provide, and resumes them
-// once we are back on it. Suspended, a wallet is read-only and its units show as
-// suspended on the status list.
+// Package providerlisting revokes the validity of every wallet we provide while
+// we as Business Wallet Provider are not on the trusted list of wallet providers
+// (Art 12(5), Art 6(2)(f)): each wallet unit is revoked, and the wallet is
+// suspended, so read-only with its data kept. Back on the list, those wallets
+// are active again with a new unit; nobody registers again.
 //
 // Only a list that was read and does not name us counts: a list that cannot be
 // read changes nothing, and the wallets stop only once we have been off the list
@@ -36,14 +36,14 @@ type Wallets interface {
 	ProviderRelisted(ctx context.Context) ([]uuid.UUID, error)
 }
 
-// Notifier tells an org's admins its wallet was suspended or resumed, and why.
+// Notifier tells an org's admins its wallet was stopped or is back, and why.
 type Notifier interface {
 	ProviderDelisted(ctx context.Context, orgID uuid.UUID) error
 	ProviderRelisted(ctx context.Context, orgID uuid.UUID) error
 }
 
-// Watcher checks the list, suspends the wallets once we are off it for grace and
-// resumes them when we are back.
+// Watcher checks the list, stops the wallets once we are off it for grace and
+// brings them back when we are on it again.
 type Watcher struct {
 	db      database.DB
 	list    List
@@ -83,7 +83,7 @@ func (w *Watcher) Check(ctx context.Context) (int64, error) {
 		return 0, fmt.Errorf("providerlisting: suspend wallets: %w", err)
 	}
 	if len(orgs) > 0 {
-		slog.ErrorContext(ctx, "providerlisting: suspended wallets because we are off the trusted list", slog.Int("count", len(orgs)))
+		slog.ErrorContext(ctx, "providerlisting: revoked the wallet units and suspended the wallets because we are off the trusted list", slog.Int("count", len(orgs)))
 	}
 	return int64(len(orgs)), w.tell(ctx, orgs, w.notify.ProviderDelisted)
 }

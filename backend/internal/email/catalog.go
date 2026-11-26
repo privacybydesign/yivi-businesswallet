@@ -65,8 +65,9 @@ const (
 	// KindVogExpired is sent once a member's VOG has expired, on the org's
 	// overdue reminder cadence.
 	KindVogExpired Kind = "vog_expired"
-	// KindProviderDelisted tells an org's admins their wallet was suspended because
-	// we as provider are off the trusted list (Annex (2): within 24 hours).
+	// KindProviderDelisted tells an org's admins their wallet unit was revoked
+	// because we as provider are off the trusted list (Annex 6(2): within 24 hours,
+	// with the reason and the consequences).
 	KindProviderDelisted Kind = "provider_delisted"
 	// KindProviderRelisted tells them it is active again: we are back on the list.
 	KindProviderRelisted Kind = "provider_relisted"
