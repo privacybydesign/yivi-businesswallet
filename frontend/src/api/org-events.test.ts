@@ -219,6 +219,37 @@ describe("followOrgEvents", () => {
     release();
   });
 
+  // Without queuing again, a tab whose lock was taken waits out its silence
+  // timer once the other tab closes, with no stream meanwhile.
+  it("leads again at once when the tab that took the lock over lets go", async () => {
+    const streams: FakeStream[] = [];
+    const stop = followOrgEvents(
+      "returned",
+      () => {
+        const stream = new FakeStream();
+        streams.push(stream);
+        return stream;
+      },
+      () => undefined,
+    );
+    await settle();
+    let release = (): void => undefined;
+    void navigator.locks.request(
+      "org-events:returned",
+      { steal: true },
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    );
+    await settle();
+    expect(streams.filter((stream) => !stream.closed)).toHaveLength(0);
+    release();
+    await settle();
+    expect(streams.filter((stream) => !stream.closed)).toHaveLength(1);
+    stop();
+  });
+
   it("gives another org a stream of its own", async () => {
     let opened = 0;
     const open = (): FakeStream => {

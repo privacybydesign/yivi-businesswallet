@@ -106,10 +106,14 @@ export function followOrgEvents(
     }
     // A stolen lock does not stop leadWhileHeld, so close the stream here and
     // follow again, or this tab and the one that took over each keep one.
+    // Queue for the lock again, so this tab leads as soon as the other lets go.
     if (leading) {
       resign?.();
       leading = false;
       listen();
+      void navigator.locks
+        .request(shareName(slug), { signal: stop.signal }, leadWhileHeld)
+        .catch(ignoreAbort);
     }
   };
   // A leader that says nothing for this long sits in a tab the browser froze,
