@@ -205,20 +205,18 @@ func attestKeys(ctx context.Context, q database.Querier, orgID, unit uuid.UUID) 
 	return nil
 }
 
-// listStatuses returns the non-valid entries of status list `list`, keyed by
-// their index within it. An entry is invalid when its unit is revoked or its org
-// is revoked or deleted, and suspended while its org is suspended.
+// listStatuses returns the invalid entries of status list `list`, keyed by their
+// index within it: those whose unit is revoked or whose org is not active
+// (suspended, revoked or deleted).
 func (s *Store) listStatuses(ctx context.Context, list int64) (map[int64]byte, error) {
-	const query = `SELECT a.status_index - $1,
-			CASE WHEN u.status = 'revoked' OR o.id IS NULL OR o.status = 'revoked' THEN $3::smallint
-			     ELSE $4::smallint END
+	const query = `SELECT a.status_index - $1, $3::smallint
 		FROM wallet_unit_attestations a
 		JOIN wallet_units u ON u.id = a.wallet_unit_id
 		LEFT JOIN organizations o ON o.id = u.organization_id
 		WHERE a.status_index >= $1 AND a.status_index < $2
 		  AND (u.status = 'revoked' OR o.id IS NULL OR o.status <> 'active')`
 	start := list * statusListSize
-	rows, err := s.db.Query(ctx, query, start, start+statusListSize, int16(statusInvalid), int16(statusSuspended))
+	rows, err := s.db.Query(ctx, query, start, start+statusListSize, int16(statusInvalid))
 	if err != nil {
 		return nil, fmt.Errorf("walletunit: status list %d: %w", list, err)
 	}
