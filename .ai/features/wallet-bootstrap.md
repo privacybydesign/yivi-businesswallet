@@ -359,6 +359,12 @@ on `active` (single tx): create organization (identity from attestation)
    representations soft-revoked (`revoked_at`); dependent memberships handled by the existing
    last-admin guard (`organization.ErrLastAdmin`). External-validator propagation is out of
    scope for v1 (§11).
+7. Provider off the trusted list (Art 6(2)(f), Art 12(5)): `internal/providerlisting` checks
+   the list hourly (`TRUSTED_LIST_PROVIDER`; `stub` is our own list, off by default). Only a
+   list that was read and does not name us counts. Once we are off it for
+   `TRUSTED_LIST_GRACE` (30m, so the next hourly check confirms), every live org is revoked
+   through `wallet.Store.Cease` with reason `provider_delisted`, and its admins are mailed through the org's own SMTP (an org
+   without it sees the reason only in the app). Back on the list, revoked wallets stay revoked.
 
 ---
 

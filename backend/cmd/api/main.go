@@ -55,6 +55,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/regulasweep"
 	proofingsession "github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/session"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingprovider"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/providerlisting"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/provisioner"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/provisioning"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/qerds"
@@ -109,6 +110,8 @@ const (
 	// re-read: issuers publish revocations on the scale of hours, not seconds.
 	heldStatusRecheckEvery = 6 * time.Hour
 	heldStatusBootDelay    = 2 * time.Minute
+	// trustedListCheckEvery is well under the grace before wallets are revoked.
+	trustedListCheckEvery = time.Hour
 
 	issuerProbeTimeout = 10 * time.Second
 	issuerHTTPTimeout  = 15 * time.Second
@@ -151,6 +154,19 @@ type qerdsProvider interface {
 type registryProvider interface {
 	Ping(context.Context) error
 	Consult(context.Context, registryprovider.ConsultRequest) (registryprovider.RegistrationAttestation, error)
+}
+
+// newTrustedList returns the trusted list of wallet providers to watch, or nil
+// to watch none.
+func newTrustedList(cfg config.Config, db database.DB) (providerlisting.List, error) {
+	switch cfg.TrustedListProvider {
+	case "":
+		return nil, nil
+	case config.ProviderStub:
+		return providerlisting.NewStubList(db), nil
+	default:
+		return nil, fmt.Errorf("trusted list provider %q is not implemented", cfg.TrustedListProvider)
+	}
 }
 
 func newRegistryProvider(cfg config.Config, db database.DB, recorder audit.Recorder) (registryProvider, error) {
@@ -1149,6 +1165,9 @@ func (w *wiring) buildAttestations(ctx context.Context) error {
 	startQerdsInboundPoller(ctx, w.qerdsService, cfg.QerdsInboundPollInterval)
 	// A revoked EBWOID means the company ended: its wallet is revoked (Art 6(2)).
 	attestationService.SetOwnerIDRevoker(walletService)
+	if err := startProviderListing(ctx, cfg, w.pool, walletService, providerlisting.NewMailNotifier(w.emailService, w.orgStore)); err != nil {
+		return err
+	}
 	attestationService.SetLocalIssuers(w.qerdsStore, attestationStore)
 	attestationService.SetStatusListPolicy(attestation.StatusListPolicy{
 		Enforce:        !cfg.DevMode,
@@ -1669,4 +1688,19 @@ func (n postguardNotifier) SendPostguardNotification(ctx context.Context, orgID 
 		return postguard.ErrSMTPNotConfigured
 	}
 	return err
+}
+
+// startProviderListing revokes every org's wallet once we are off the trusted
+// list of wallet providers for the grace period (Art 6(2)(f)).
+func startProviderListing(ctx context.Context, cfg config.Config, db database.DB, wallets providerlisting.Wallets, notify providerlisting.Notifier) error {
+	list, err := newTrustedList(cfg, db)
+	if err != nil || list == nil {
+		return err
+	}
+	if err := probe(ctx, qerdsProbeTimeout, list); err != nil {
+		return fmt.Errorf("trusted list ping: %w", err)
+	}
+	watcher := providerlisting.NewWatcher(db, list, wallets, notify, cfg.TrustedListGrace)
+	startPruner(ctx, "provider_listing", trustedListCheckEvery, watcher.Check)
+	return nil
 }

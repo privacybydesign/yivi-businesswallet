@@ -76,6 +76,8 @@ func sampleVars(kind Kind) map[string]string {
 			varVogURL:  "https://wallet.example.org/vog/abc",
 			varDueDate: "2026-08-01",
 		}
+	case KindProviderDelisted:
+		return map[string]string{varOrgName: "Acme BV"}
 	case KindVogRequested:
 		return map[string]string{
 			varOrgName: "Acme BV",

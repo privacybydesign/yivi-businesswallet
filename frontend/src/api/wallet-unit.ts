@@ -11,12 +11,19 @@ export const WALLET_UNIT_REVOKE_REASONS = [
 export type WalletUnitRevokeReason =
   (typeof WALLET_UNIT_REVOKE_REASONS)[number];
 
-// "cessation" is set by the backend when the owner's EBWOID is revoked; an admin
-// cannot choose it, and a unit revoked for it cannot be replaced.
+// "cessation" (the owner's EBWOID is revoked) and "provider_delisted" (we are off
+// the trusted list) are set by the backend; an admin cannot choose them, and a
+// unit revoked for them cannot be replaced.
 export const WALLET_UNIT_REVOKED_REASONS = [
   ...WALLET_UNIT_REVOKE_REASONS,
   "cessation",
+  "provider_delisted",
 ] as const;
+
+export const WALLET_UNIT_FINAL_REASONS: readonly string[] = [
+  "cessation",
+  "provider_delisted",
+];
 
 export const walletUnitSchema = z.object({
   id: z.string(),

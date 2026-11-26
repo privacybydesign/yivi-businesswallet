@@ -6,7 +6,10 @@ import {
   useRevokeWalletUnitMutation,
   useWalletUnitQuery,
 } from "../api/wallet-unit.queries";
-import { WALLET_UNIT_REVOKE_REASONS } from "../api/wallet-unit";
+import {
+  WALLET_UNIT_FINAL_REASONS,
+  WALLET_UNIT_REVOKE_REASONS,
+} from "../api/wallet-unit";
 import type { WalletUnitRevokeReason } from "../api/wallet-unit";
 import { useWhenFormatter } from "../lib/format-when";
 import { WALLET_UNIT_TONE, walletUnitState } from "../lib/wallet-unit";
@@ -122,20 +125,29 @@ export function WalletUnitPanel({
           {t("walletUnit.ceasedHint")}
         </p>
       )}
-      {state === "revoked" && summary?.unit.revokedReason !== "cessation" && (
-        <div className="mt-5">
-          <p className="text-ink-soft mb-3 text-[13px]">
-            {t("walletUnit.activateHint")}
+      {state === "revoked" &&
+        summary?.unit.revokedReason === "provider_delisted" && (
+          <p className="text-ink-soft mt-5 text-[13px]">
+            {t("walletUnit.delistedHint")}
           </p>
-          <Button
-            size="sm"
-            disabled={activate.isPending}
-            onClick={() => activate.mutate()}
-          >
-            {t("walletUnit.activate")}
-          </Button>
-        </div>
-      )}
+        )}
+      {state === "revoked" &&
+        !WALLET_UNIT_FINAL_REASONS.includes(
+          summary?.unit.revokedReason ?? "",
+        ) && (
+          <div className="mt-5">
+            <p className="text-ink-soft mb-3 text-[13px]">
+              {t("walletUnit.activateHint")}
+            </p>
+            <Button
+              size="sm"
+              disabled={activate.isPending}
+              onClick={() => activate.mutate()}
+            >
+              {t("walletUnit.activate")}
+            </Button>
+          </div>
+        )}
       {actionError && (
         <p role="alert" className="text-error mt-3 text-[13px]">
           {t("walletUnit.actionError", { message: actionError.message })}

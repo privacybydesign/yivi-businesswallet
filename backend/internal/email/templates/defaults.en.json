@@ -235,6 +235,16 @@
         { "type": "footer" }
       ]
     },
+    "provider_delisted": {
+      "subject": "The business wallet of {{orgName}} has been stopped",
+      "blocks": [
+        { "type": "logo" },
+        { "type": "heading", "text": "Your business wallet has been stopped" },
+        { "type": "paragraph", "text": "The provider of the Yivi Business Wallet is no longer on the trusted list of business wallet providers. Under the European Business Wallet regulation, the wallet of {{orgName}} has therefore been revoked." },
+        { "type": "paragraph", "text": "You can still sign in, view your data and export it. You can no longer receive, share or sign anything with this wallet, and attestations issued to its wallet unit are no longer valid." },
+        { "type": "footer" }
+      ]
+    },
     "identity_proofing_requested": {
       "subject": "{{orgName}} asks you to verify your identity",
       "blocks": [

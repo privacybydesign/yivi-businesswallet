@@ -242,19 +242,33 @@ func (s *Store) setStatusIn(ctx context.Context, q database.Querier, orgID uuid.
 		audit.Updated(map[string]any{"status": before}, map[string]any{"status": status}))
 }
 
-// Cease revokes the wallet of an org whose activity ended, and its wallet unit with
-// ReasonCessation, in one tx. What is already revoked is left as it is, so it can
-// be called again.
-func (s *Store) Cease(ctx context.Context, orgID uuid.UUID) error {
+// Cease revokes the wallet of an org whose activity ended, and its wallet unit for
+// reason, in one tx. What is already revoked is left as it is, so it can be
+// called again.
+func (s *Store) Cease(ctx context.Context, orgID uuid.UUID, reason string) error {
 	return database.InTx(ctx, s.db, func(q database.Querier) error {
 		if _, err := s.setStatusIn(ctx, q, orgID, organization.StatusRevoked); err != nil && !errors.Is(err, lifecycle.ErrTransition) {
 			return err
 		}
-		if _, err := s.units.RevokeIn(ctx, q, orgID, walletunit.ReasonCessation); err != nil && !errors.Is(err, walletunit.ErrNoActiveUnit) {
+		if _, err := s.units.RevokeIn(ctx, q, orgID, reason); err != nil && !errors.Is(err, walletunit.ErrNoActiveUnit) {
 			return err
 		}
 		return nil
 	})
+}
+
+// LiveOrganizations returns the orgs whose wallet is active or suspended.
+func (s *Store) LiveOrganizations(ctx context.Context) ([]uuid.UUID, error) {
+	rows, err := s.db.Query(ctx, `SELECT id FROM organizations WHERE status IN ($1, $2) ORDER BY created_at`,
+		organization.StatusActive, organization.StatusSuspended)
+	if err != nil {
+		return nil, fmt.Errorf("wallet: live organizations: %w", err)
+	}
+	ids, err := pgx.CollectRows(rows, pgx.RowTo[uuid.UUID])
+	if err != nil {
+		return nil, fmt.Errorf("wallet: live organizations rows: %w", err)
+	}
+	return ids, nil
 }
 
 // ListRepresentations returns the (non-revoked) mandate list for an org.

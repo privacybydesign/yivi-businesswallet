@@ -386,6 +386,15 @@ func (s *Service) SendVogExpired(ctx context.Context, orgID uuid.UUID, to, orgNa
 	})
 }
 
+// SendProviderDelisted tells an org's admins its wallet was revoked because we as
+// provider are off the trusted list. One failing mailbox does not cost the rest.
+// Returns ErrNotConfigured when the org has no usable SMTP settings.
+func (s *Service) SendProviderDelisted(ctx context.Context, orgID uuid.UUID, recipients []string, orgName string) error {
+	return s.sendToEach(ctx, orgID, KindProviderDelisted, s.locale(""), recipients, map[string]string{
+		varOrgName: orgName,
+	})
+}
+
 // SendSpecimen sends a sample of one kind to a single address, rendered from the
 // org's own template (or the shipped default) with the kind's sample variables, so
 // an admin can check a real, fully branded message of that cause against their own

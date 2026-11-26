@@ -18,6 +18,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/qerdsprovider"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/registryprovider"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/walletunit"
 )
 
 // kvkSenderAddress is the QERDS "from" shown on the deposited attestation message.
@@ -30,7 +31,8 @@ const discardTimeout = 10 * time.Second
 type walletStore interface {
 	RegisterOrganization(ctx context.Context, reg Registration) (organization.Organization, error)
 	SetStatus(ctx context.Context, orgID uuid.UUID, status string) (organization.Organization, error)
-	Cease(ctx context.Context, orgID uuid.UUID) error
+	Cease(ctx context.Context, orgID uuid.UUID, reason string) error
+	LiveOrganizations(ctx context.Context) ([]uuid.UUID, error)
 	ListRepresentations(ctx context.Context, orgID uuid.UUID) ([]Representation, error)
 	ClaimRepresentation(ctx context.Context, orgID, repID, userID uuid.UUID) error
 }
@@ -381,5 +383,16 @@ func (s *Service) Revoke(ctx context.Context, orgID uuid.UUID) (organization.Org
 // OwnerIDRevoked revokes the wallet and wallet unit of an org whose EBWOID its
 // issuer revoked: KVK revokes it when the company ends (Art 6(2)(f)).
 func (s *Service) OwnerIDRevoked(ctx context.Context, orgID uuid.UUID) error {
-	return s.store.Cease(ctx, orgID)
+	return s.store.Cease(ctx, orgID, walletunit.ReasonCessation)
+}
+
+// LiveOrganizations returns the orgs whose wallet is not revoked.
+func (s *Service) LiveOrganizations(ctx context.Context) ([]uuid.UUID, error) {
+	return s.store.LiveOrganizations(ctx)
+}
+
+// ProviderDelisted revokes the wallet and wallet unit of an org because we as
+// provider are no longer on the trusted list (Art 6(2)(f)).
+func (s *Service) ProviderDelisted(ctx context.Context, orgID uuid.UUID) error {
+	return s.store.Cease(ctx, orgID, walletunit.ReasonProviderDelisted)
 }

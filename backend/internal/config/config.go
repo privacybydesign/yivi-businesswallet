@@ -98,6 +98,11 @@ const (
 
 	envWalletRegistryProvider = "WALLET_REGISTRY_PROVIDER"
 
+	// The trusted list of wallet providers we must be on (Art 12(5)); off the
+	// list for the grace period, every org's wallet is revoked (Art 6(2)(f)).
+	envTrustedListProvider = "TRUSTED_LIST_PROVIDER"
+	envTrustedListGrace    = "TRUSTED_LIST_GRACE"
+
 	// VOG screening (#242): validatie.nl real-time document check. The URL
 	// defaults to the production GAAV endpoint - there is no staging instance to
 	// point at instead.
@@ -375,6 +380,10 @@ const (
 	// register: for a deployment real companies register on, until KVK is connected.
 	ProviderDeclared = "declared"
 
+	// Empty checks no trusted list: no wallet is ever stopped for it.
+	defaultTrustedListProvider = ""
+	defaultTrustedListGrace    = "30m"
+
 	// ProviderValidatieNL checks a VOG for real with validatie.nl, and is the
 	// default; ProviderStub accepts every VOG and runs only when set explicitly
 	// (the dev stack sets it, as for diplomas).
@@ -530,6 +539,9 @@ type Config struct {
 	QerdsDomibusAction      string
 
 	WalletRegistryProvider string
+
+	TrustedListProvider string
+	TrustedListGrace    time.Duration
 
 	VogValidatorProvider string
 	VogValidatorURL      string
@@ -710,6 +722,7 @@ func Load() (Config, error) {
 		QerdsDomibusAction:      envOrDefault(envQerdsDomibusAction, defaultQerdsDomibusAction),
 
 		WalletRegistryProvider: envOrDefault(envWalletRegistryProvider, defaultWalletRegistryProvider),
+		TrustedListProvider:    envOrDefault(envTrustedListProvider, defaultTrustedListProvider),
 
 		VogReferenceHashKey: os.Getenv(envVogReferenceHashKey),
 
@@ -813,6 +826,7 @@ func loadDurations(c *Config) error {
 		{&c.OpenID4VPTransactionTTL, envOpenID4VPTransactionTTL, defaultOpenID4VPTransactionTTL},
 		{&c.OpenID4VPOrgRequestTTL, envOpenID4VPOrgRequestTTL, defaultOpenID4VPOrgRequestTTL},
 		{&c.AttestationStubClaimDelay, envAttestationStubClaimDelay, defaultAttestationStubClaimDelay},
+		{&c.TrustedListGrace, envTrustedListGrace, defaultTrustedListGrace},
 	} {
 		v, err := parseDuration(d.key, d.fallback)
 		if err != nil {

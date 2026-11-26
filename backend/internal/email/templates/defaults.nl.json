@@ -235,6 +235,16 @@
         { "type": "footer" }
       ]
     },
+    "provider_delisted": {
+      "subject": "De business wallet van {{orgName}} is stopgezet",
+      "blocks": [
+        { "type": "logo" },
+        { "type": "heading", "text": "Je business wallet is stopgezet" },
+        { "type": "paragraph", "text": "De aanbieder van de Yivi Business Wallet staat niet meer op de vertrouwde lijst van aanbieders van business wallets. Volgens de Europese verordening over de business wallet is de wallet van {{orgName}} daarom ingetrokken." },
+        { "type": "paragraph", "text": "Je kunt nog inloggen, je gegevens bekijken en exporteren. Je kunt met deze wallet niets meer ontvangen, delen of ondertekenen, en attestaties die aan de wallet unit zijn uitgegeven zijn niet meer geldig." },
+        { "type": "footer" }
+      ]
+    },
     "identity_proofing_requested": {
       "subject": "{{orgName}} vraagt je je identiteit te verifiëren",
       "blocks": [
