@@ -236,7 +236,7 @@ func TestStatusLifecycle(t *testing.T) {
 
 	ref, otherRef := issue(org), issue(other)
 	setOrgStatus(t, e.pool, org, organization.StatusSuspended)
-	expect(ref, statuslist.StatusSuspended)
+	expect(ref, statuslist.StatusInvalid)
 	setOrgStatus(t, e.pool, org, organization.StatusRevoked)
 	expect(ref, statuslist.StatusInvalid)
 	setOrgStatus(t, e.pool, org, organization.StatusActive)

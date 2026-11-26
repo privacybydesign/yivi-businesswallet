@@ -30,15 +30,17 @@ holder needs irmago support first (part 2, below).
   |---|---|---|
   | revoked | any | invalid |
   | active | deleted or revoked | invalid |
-  | active | suspended | suspended |
+  | active | suspended | invalid |
   | active | active | valid |
 
   So org cessation and suspension need no call into this package.
   `wallet_units.organization_id` is `ON DELETE SET NULL`, not cascade, so a deleted org's
   entries stay published as invalid until they expire.
-- **Random indices, never reused.** 16 lists of 2^17 entries share one index space, 2 bits
-  per entry (valid / invalid / suspended). A random index tells an issuer nothing about
-  how many units exist. Recycling after `status_expires_at` is not built.
+- **Only valid and invalid.** WE BUILD CS-10 (ISS-RV-13) leaves other status values out of
+  scope, so an entry is 1 bit and a suspended org's entries read invalid.
+- **Random indices, never reused.** 16 lists of 2^17 entries share one index space, 1 bit
+  per entry. A random index tells an issuer nothing about how many units exist.
+  Recycling after `status_expires_at` is not built.
 - **Revocation is per unit.** An admin revokes for `owner_request` or `key_compromise`.
   `Issue` then refuses (`ErrUnitRevoked`) until an admin activates a new unit, so a
   compromised unit is not silently replaced. The first unit is created by the first

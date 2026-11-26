@@ -46,7 +46,7 @@ func TestLoadSignerRoundTrip(t *testing.T) {
 
 func TestEncodeStatusList(t *testing.T) {
 	t.Parallel()
-	lst, err := encodeStatusList(map[int64]byte{0: statusInvalid, 5: statusSuspended, statusListSize - 1: statusInvalid})
+	lst, err := encodeStatusList(map[int64]byte{0: statusInvalid, 5: statusInvalid, statusListSize - 1: statusInvalid})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,9 +65,9 @@ func TestEncodeStatusList(t *testing.T) {
 	if len(bits) != statusListSize*statusBits/8 {
 		t.Fatalf("len = %d", len(bits))
 	}
-	// Two bits per entry, lowest bits first: entry 0 is bits 0-1 of byte 0, entry 5
-	// bits 2-3 of byte 1, the last entry the top two bits of the last byte.
-	if bits[0] != 0b01 || bits[1] != 0b1000 || bits[len(bits)-1] != 0b01000000 {
+	// One bit per entry, lowest bit first: entries 0 and 5 are bits 0 and 5 of
+	// byte 0, the last entry the top bit of the last byte.
+	if bits[0] != 0b100001 || bits[1] != 0 || bits[len(bits)-1] != 0b10000000 {
 		t.Errorf("bytes = %08b %08b … %08b", bits[0], bits[1], bits[len(bits)-1])
 	}
 	if _, err := encodeStatusList(map[int64]byte{statusListSize: statusInvalid}); err == nil {

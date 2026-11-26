@@ -9,9 +9,9 @@ import (
 
 // Token Status List (draft-ietf-oauth-status-list-20, the version CS-05 8.2 pins).
 const (
-	// statusBits is 2 so an entry can say suspended as well as invalid.
-	statusBits = 2
-	// statusListSize entries per list: 32 KiB uncompressed at 2 bits each, and
+	// statusBits is 1: WE BUILD CS-10 (ISS-RV-13) knows only valid and invalid.
+	statusBits = 1
+	// statusListSize entries per list: 16 KiB uncompressed at 1 bit each, and
 	// mostly zeros, so a few hundred bytes on the wire.
 	statusListSize = 1 << 17
 	// statusListCount lists share one index space; an index picks its list.
@@ -28,9 +28,8 @@ const (
 
 // Status values (draft-ietf-oauth-status-list-20 §7.1).
 const (
-	statusValid     byte = 0
-	statusInvalid   byte = 1
-	statusSuspended byte = 2
+	statusValid   byte = 0
+	statusInvalid byte = 1
 )
 
 // statusRef is the status_list reference a BWIA or SKA carries for global index idx.
