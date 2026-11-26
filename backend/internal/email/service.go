@@ -386,11 +386,19 @@ func (s *Service) SendVogExpired(ctx context.Context, orgID uuid.UUID, to, orgNa
 	})
 }
 
-// SendProviderDelisted tells an org's admins its wallet was revoked because we as
-// provider are off the trusted list. One failing mailbox does not cost the rest.
-// Returns ErrNotConfigured when the org has no usable SMTP settings.
+// SendProviderDelisted tells an org's admins its wallet was suspended because we
+// as provider are off the trusted list. One failing mailbox does not cost the
+// rest. Returns ErrNotConfigured when the org has no usable SMTP settings.
 func (s *Service) SendProviderDelisted(ctx context.Context, orgID uuid.UUID, recipients []string, orgName string) error {
 	return s.sendToEach(ctx, orgID, KindProviderDelisted, s.locale(""), recipients, map[string]string{
+		varOrgName: orgName,
+	})
+}
+
+// SendProviderRelisted tells an org's admins its wallet is active again because
+// we are back on the trusted list. Like SendProviderDelisted.
+func (s *Service) SendProviderRelisted(ctx context.Context, orgID uuid.UUID, recipients []string, orgName string) error {
+	return s.sendToEach(ctx, orgID, KindProviderRelisted, s.locale(""), recipients, map[string]string{
 		varOrgName: orgName,
 	})
 }

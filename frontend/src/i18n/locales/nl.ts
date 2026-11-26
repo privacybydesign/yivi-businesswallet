@@ -2780,6 +2780,7 @@ export const nl: Translation<typeof en> = {
       walletOpened: "Wallet geopend",
       walletBootstrapped: "Wallet geïnitialiseerd",
       walletSuspended: "Wallet opgeschort",
+      walletResumed: "Wallet hervat",
       walletRevoked: "Wallet ingetrokken",
       representationClaimed: "Vertegenwoordiging geclaimd",
       representationRevoked: "Vertegenwoordiging ingetrokken",
@@ -3674,10 +3675,7 @@ export const nl: Translation<typeof en> = {
       owner_request: "Verzoek van de organisatie",
       key_compromise: "Sleutel gecompromitteerd",
       cessation: "Bedrijf beëindigd (eigenaar-identificatie ingetrokken)",
-      provider_delisted: "Aanbieder staat niet meer op de vertrouwde lijst",
     },
-    delistedHint:
-      "De aanbieder van deze business wallet staat niet meer op de vertrouwde lijst van wallet-aanbieders, dus elke wallet van deze aanbieder is ingetrokken. Je kunt je gegevens nog bekijken en exporteren, maar er kan geen nieuwe wallet-unit worden geactiveerd.",
     ceasedHint:
       "De uitgever heeft de eigenaar-identificatie van deze organisatie ingetrokken omdat het bedrijf is beëindigd. De wallet is ingetrokken en er kan geen nieuwe wallet-unit worden geactiveerd.",
     loadError: "De wallet-unit kon niet worden geladen: {{message}}",
@@ -3812,7 +3810,8 @@ export const nl: Translation<typeof en> = {
       identity_requested: "Identificatie aangevraagd",
       invitation: "Uitnodiging voor lidmaatschap",
       postguard_file: "Versleuteld bestand",
-      provider_delisted: "Wallet stopgezet",
+      provider_delisted: "Wallet opgeschort door aanbieder",
+      provider_relisted: "Wallet weer actief",
       signature_declined: "Ondertekening geweigerd",
       signature_requested: "Ondertekenverzoek",
       signed_document: "Ondertekend document",
@@ -3841,7 +3840,9 @@ export const nl: Translation<typeof en> = {
       postguard_file:
         "Gaat naar de ontvanger van een versleuteld bestand, als deze organisatie via de eigen SMTP-server mailt.",
       provider_delisted:
-        "Gaat naar de beheerders als de wallet van deze organisatie is ingetrokken omdat de aanbieder niet meer op de vertrouwde lijst staat.",
+        "Gaat naar de beheerders als de wallet van deze organisatie is opgeschort omdat de aanbieder niet meer op de vertrouwde lijst staat.",
+      provider_relisted:
+        "Gaat naar de beheerders als die wallet weer actief is omdat de aanbieder weer op de vertrouwde lijst staat.",
       signature_declined:
         "Gaat naar de aanvrager van een verzoek als een geselecteerde ondertekenaar weigert te tekenen.",
       signature_requested:

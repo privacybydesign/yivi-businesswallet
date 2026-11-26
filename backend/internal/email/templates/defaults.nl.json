@@ -48,6 +48,7 @@
 
     "wallet.bootstrapped": "Wallet geïnitialiseerd",
     "wallet.suspended": "Wallet opgeschort",
+    "wallet.resumed": "Wallet hervat",
     "wallet.revoked": "Wallet ingetrokken",
     "wallet.representation_claimed": "Vertegenwoordiging geclaimd",
     "wallet.representation_revoked": "Vertegenwoordiging ingetrokken",
@@ -236,12 +237,22 @@
       ]
     },
     "provider_delisted": {
-      "subject": "De business wallet van {{orgName}} is stopgezet",
+      "subject": "De business wallet van {{orgName}} is opgeschort",
       "blocks": [
         { "type": "logo" },
-        { "type": "heading", "text": "Je business wallet is stopgezet" },
-        { "type": "paragraph", "text": "De aanbieder van de Yivi Business Wallet staat niet meer op de vertrouwde lijst van aanbieders van business wallets. Volgens de Europese verordening over de business wallet is de wallet van {{orgName}} daarom ingetrokken." },
-        { "type": "paragraph", "text": "Je kunt nog inloggen, je gegevens bekijken en exporteren. Je kunt met deze wallet niets meer ontvangen, delen of ondertekenen, en attestaties die aan de wallet unit zijn uitgegeven zijn niet meer geldig." },
+        { "type": "heading", "text": "Je business wallet is opgeschort" },
+        { "type": "paragraph", "text": "De aanbieder van de Yivi Business Wallet staat niet meer op de vertrouwde lijst van aanbieders van business wallets. Volgens de Europese verordening over de business wallet is de wallet van {{orgName}} daarom niet meer geldig, en is hij opgeschort." },
+        { "type": "paragraph", "text": "Je kunt nog inloggen, je gegevens bekijken en exporteren. Je kunt met deze wallet niets delen of ondertekenen tot hij weer actief is. Zodra de aanbieder weer op de lijst staat, wordt je wallet vanzelf weer actief, met alles erin, en laten we het je weten." },
+        { "type": "footer" }
+      ]
+    },
+    "provider_relisted": {
+      "subject": "De business wallet van {{orgName}} is weer actief",
+      "blocks": [
+        { "type": "logo" },
+        { "type": "heading", "text": "Je business wallet is weer actief" },
+        { "type": "paragraph", "text": "De aanbieder van de Yivi Business Wallet staat weer op de vertrouwde lijst van aanbieders van business wallets, dus de wallet van {{orgName}} is weer geldig en actief." },
+        { "type": "paragraph", "text": "Alles werkt weer zoals voor de opschorting. Je hoeft niets te doen." },
         { "type": "footer" }
       ]
     },

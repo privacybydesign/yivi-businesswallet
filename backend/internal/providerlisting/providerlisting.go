@@ -1,10 +1,12 @@
-// Package providerlisting stops every org's wallet when we as Business Wallet
-// Provider are no longer on the trusted list of wallet providers (Art 12(5)):
-// Art 6(2)(f) then revokes the validity of every wallet we provide.
+// Package providerlisting suspends every org's wallet while we as Business Wallet
+// Provider are not on the trusted list of wallet providers (Art 12(5)), as Art
+// 6(2)(f) takes away the validity of every wallet we provide, and resumes them
+// once we are back on it. Suspended, a wallet is read-only and its units show as
+// suspended on the status list.
 //
-// Revoking is final, so only a list that was read and does not name us counts.
-// A list that cannot be read changes nothing, and the wallets stop only once we
-// have been off the list for the whole grace period.
+// Only a list that was read and does not name us counts: a list that cannot be
+// read changes nothing, and the wallets stop only once we have been off the list
+// for the whole grace period.
 package providerlisting
 
 import (
@@ -27,18 +29,21 @@ type List interface {
 	ProviderListed(ctx context.Context) (bool, error)
 }
 
-// Wallets revokes the wallets we provide.
+// Wallets suspends and resumes the wallets we provide. Each returns the orgs it
+// changed.
 type Wallets interface {
-	LiveOrganizations(ctx context.Context) ([]uuid.UUID, error)
-	ProviderDelisted(ctx context.Context, orgID uuid.UUID) error
+	ProviderDelisted(ctx context.Context) ([]uuid.UUID, error)
+	ProviderRelisted(ctx context.Context) ([]uuid.UUID, error)
 }
 
-// Notifier tells an org's admins its wallet was revoked, with the reason.
+// Notifier tells an org's admins its wallet was suspended or resumed, and why.
 type Notifier interface {
 	ProviderDelisted(ctx context.Context, orgID uuid.UUID) error
+	ProviderRelisted(ctx context.Context, orgID uuid.UUID) error
 }
 
-// Watcher checks the list and stops the wallets once we are off it for grace.
+// Watcher checks the list, suspends the wallets once we are off it for grace and
+// resumes them when we are back.
 type Watcher struct {
 	db      database.DB
 	list    List
@@ -52,15 +57,16 @@ func NewWatcher(db database.DB, list List, wallets Wallets, notify Notifier, gra
 	return &Watcher{db: db, list: list, wallets: wallets, notify: notify, grace: grace, now: time.Now}
 }
 
-// Check reads the list once and reports how many wallets it revoked. While we
-// stay off the list every run revokes what an earlier run did not get to.
+// Check reads the list once and reports how many wallets it suspended or
+// resumed. While we stay off the list every run also suspends a wallet that
+// became active since.
 func (w *Watcher) Check(ctx context.Context) (int64, error) {
 	listed, err := w.list.ProviderListed(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("providerlisting: read trusted list: %w", err)
 	}
 	if listed {
-		return 0, w.listed(ctx)
+		return w.listed(ctx)
 	}
 	missingSince, err := w.missing(ctx)
 	if err != nil {
@@ -69,25 +75,40 @@ func (w *Watcher) Check(ctx context.Context) (int64, error) {
 	if w.now().Sub(missingSince) < w.grace {
 		return 0, nil
 	}
-	if err := w.markDelisted(ctx); err != nil {
+	if err := w.setDelisted(ctx, true); err != nil {
 		return 0, err
 	}
-	return w.stopAll(ctx)
+	orgs, err := w.wallets.ProviderDelisted(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("providerlisting: suspend wallets: %w", err)
+	}
+	if len(orgs) > 0 {
+		slog.ErrorContext(ctx, "providerlisting: suspended wallets because we are off the trusted list", slog.Int("count", len(orgs)))
+	}
+	return int64(len(orgs)), w.tell(ctx, orgs, w.notify.ProviderDelisted)
 }
 
-func (w *Watcher) listed(ctx context.Context) error {
+func (w *Watcher) listed(ctx context.Context) (int64, error) {
 	const update = `INSERT INTO provider_listing_state (missing_since, checked_at) VALUES (NULL, now())
 		ON CONFLICT (id) DO UPDATE SET missing_since = NULL, checked_at = now()
-		RETURNING delisted_at`
-	var delistedAt *time.Time
-	if err := w.db.QueryRow(ctx, update).Scan(&delistedAt); err != nil {
-		return fmt.Errorf("providerlisting: record listed: %w", err)
+		RETURNING delisted_at IS NOT NULL`
+	var wasDelisted bool
+	if err := w.db.QueryRow(ctx, update).Scan(&wasDelisted); err != nil {
+		return 0, fmt.Errorf("providerlisting: record listed: %w", err)
 	}
-	if delistedAt != nil {
-		slog.WarnContext(ctx, "providerlisting: back on the trusted list; the wallets revoked when we were off it stay revoked",
-			slog.Time("delisted_at", *delistedAt))
+	if !wasDelisted {
+		return 0, nil
 	}
-	return nil
+	orgs, err := w.wallets.ProviderRelisted(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("providerlisting: resume wallets: %w", err)
+	}
+	slog.WarnContext(ctx, "providerlisting: back on the trusted list; resumed the wallets suspended while we were off it",
+		slog.Int("count", len(orgs)))
+	if err := w.setDelisted(ctx, false); err != nil {
+		return int64(len(orgs)), err
+	}
+	return int64(len(orgs)), w.tell(ctx, orgs, w.notify.ProviderRelisted)
 }
 
 // missing records that we are off the list and returns since when.
@@ -104,41 +125,27 @@ func (w *Watcher) missing(ctx context.Context) (time.Time, error) {
 	}
 	if first {
 		// Logged as an error so we hear of it while the grace still runs.
-		slog.ErrorContext(ctx, "providerlisting: we are not on the trusted list of wallet providers; every wallet is revoked if we stay off it",
-			slog.Time("revoke_at", since.Add(w.grace)))
+		slog.ErrorContext(ctx, "providerlisting: we are not on the trusted list of wallet providers; every wallet is suspended if we stay off it",
+			slog.Time("suspend_at", since.Add(w.grace)))
 	}
 	return since, nil
 }
 
-func (w *Watcher) markDelisted(ctx context.Context) error {
-	const update = `UPDATE provider_listing_state SET delisted_at = COALESCE(delisted_at, $1)`
-	if _, err := w.db.Exec(ctx, update, w.now()); err != nil {
-		return fmt.Errorf("providerlisting: record delisted: %w", err)
+func (w *Watcher) setDelisted(ctx context.Context, delisted bool) error {
+	const update = `UPDATE provider_listing_state
+		SET delisted_at = CASE WHEN $1 THEN COALESCE(delisted_at, $2) END`
+	if _, err := w.db.Exec(ctx, update, delisted, w.now()); err != nil {
+		return fmt.Errorf("providerlisting: record delisted %v: %w", delisted, err)
 	}
 	return nil
 }
 
-func (w *Watcher) stopAll(ctx context.Context) (int64, error) {
-	orgs, err := w.wallets.LiveOrganizations(ctx)
-	if err != nil {
-		return 0, fmt.Errorf("providerlisting: list wallets: %w", err)
-	}
-	var (
-		stopped int64
-		errs    []error
-	)
+func (w *Watcher) tell(ctx context.Context, orgs []uuid.UUID, notify func(context.Context, uuid.UUID) error) error {
+	var errs []error
 	for _, orgID := range orgs {
-		if err := w.wallets.ProviderDelisted(ctx, orgID); err != nil {
-			errs = append(errs, fmt.Errorf("providerlisting: revoke org %s: %w", orgID, err))
-			continue
-		}
-		stopped++
-		if err := w.notify.ProviderDelisted(ctx, orgID); err != nil {
+		if err := notify(ctx, orgID); err != nil {
 			errs = append(errs, fmt.Errorf("providerlisting: tell admins of org %s: %w", orgID, err))
 		}
 	}
-	if stopped > 0 {
-		slog.ErrorContext(ctx, "providerlisting: revoked wallets because we are off the trusted list", slog.Int64("count", stopped))
-	}
-	return stopped, errors.Join(errs...)
+	return errors.Join(errs...)
 }

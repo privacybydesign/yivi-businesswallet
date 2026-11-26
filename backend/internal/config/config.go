@@ -99,7 +99,7 @@ const (
 	envWalletRegistryProvider = "WALLET_REGISTRY_PROVIDER"
 
 	// The trusted list of wallet providers we must be on (Art 12(5)); off the
-	// list for the grace period, every org's wallet is revoked (Art 6(2)(f)).
+	// list for the grace period, every org's wallet is suspended (Art 6(2)(f)).
 	envTrustedListProvider = "TRUSTED_LIST_PROVIDER"
 	envTrustedListGrace    = "TRUSTED_LIST_GRACE"
 

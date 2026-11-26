@@ -65,9 +65,11 @@ const (
 	// KindVogExpired is sent once a member's VOG has expired, on the org's
 	// overdue reminder cadence.
 	KindVogExpired Kind = "vog_expired"
-	// KindProviderDelisted tells an org's admins their wallet was revoked because
+	// KindProviderDelisted tells an org's admins their wallet was suspended because
 	// we as provider are off the trusted list (Annex (2): within 24 hours).
 	KindProviderDelisted Kind = "provider_delisted"
+	// KindProviderRelisted tells them it is active again: we are back on the list.
+	KindProviderRelisted Kind = "provider_relisted"
 	// KindIdentityProofingRequested asks a person to prove their identity with
 	// their identity document and face: a QR code and a button carrying the
 	// vcmrtd deep link of an IPS session created at send.
@@ -199,6 +201,9 @@ var kindVariables = map[Kind][]Variable{
 		{Name: varDueDate},
 	},
 	KindProviderDelisted: {
+		{Name: varOrgName},
+	},
+	KindProviderRelisted: {
 		{Name: varOrgName},
 	},
 	KindIdentityProofingRequested: {

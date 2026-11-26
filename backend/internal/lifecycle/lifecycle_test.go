@@ -9,6 +9,7 @@ func TestTransitions(t *testing.T) {
 	allowed := map[[2]string]bool{
 		{Active, Suspended}:  true,
 		{Active, Revoked}:    true,
+		{Suspended, Active}:  true,
 		{Suspended, Revoked}: true,
 	}
 	for _, from := range []string{Active, Suspended, Revoked, "unknown"} {

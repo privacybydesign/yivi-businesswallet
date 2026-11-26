@@ -40,6 +40,7 @@ const orgColumns = `id, name, slug, kvk_number, euid, digital_address, status, b
 // statusAudit maps an org status change to its audit action.
 var statusAudit = map[string]string{
 	organization.StatusSuspended: audit.WalletSuspended,
+	organization.StatusActive:    audit.WalletResumed,
 	organization.StatusRevoked:   audit.WalletRevoked,
 }
 
@@ -242,31 +243,81 @@ func (s *Store) setStatusIn(ctx context.Context, q database.Querier, orgID uuid.
 		audit.Updated(map[string]any{"status": before}, map[string]any{"status": status}))
 }
 
-// Cease revokes the wallet of an org whose activity ended, and its wallet unit for
-// reason, in one tx. What is already revoked is left as it is, so it can be
-// called again.
-func (s *Store) Cease(ctx context.Context, orgID uuid.UUID, reason string) error {
+// Cease revokes the wallet of an org whose activity ended, and its wallet unit with
+// ReasonCessation, in one tx. What is already revoked is left as it is, so it can
+// be called again.
+func (s *Store) Cease(ctx context.Context, orgID uuid.UUID) error {
 	return database.InTx(ctx, s.db, func(q database.Querier) error {
 		if _, err := s.setStatusIn(ctx, q, orgID, organization.StatusRevoked); err != nil && !errors.Is(err, lifecycle.ErrTransition) {
 			return err
 		}
-		if _, err := s.units.RevokeIn(ctx, q, orgID, reason); err != nil && !errors.Is(err, walletunit.ErrNoActiveUnit) {
+		if _, err := s.units.RevokeIn(ctx, q, orgID, walletunit.ReasonCessation); err != nil && !errors.Is(err, walletunit.ErrNoActiveUnit) {
 			return err
 		}
 		return nil
 	})
 }
 
-// LiveOrganizations returns the orgs whose wallet is active or suspended.
-func (s *Store) LiveOrganizations(ctx context.Context) ([]uuid.UUID, error) {
-	rows, err := s.db.Query(ctx, `SELECT id FROM organizations WHERE status IN ($1, $2) ORDER BY created_at`,
-		organization.StatusActive, organization.StatusSuspended)
+// SuspendForProvider suspends every active wallet, in one tx, because we as
+// provider are off the trusted list, and returns the orgs it suspended. Each is
+// remembered, so ResumeForProvider brings back exactly these and not a wallet an
+// admin suspended.
+func (s *Store) SuspendForProvider(ctx context.Context) ([]uuid.UUID, error) {
+	var ids []uuid.UUID
+	err := database.InTx(ctx, s.db, func(q database.Querier) error {
+		var err error
+		ids, err = orgIDs(ctx, q, `SELECT id FROM organizations WHERE status = $1 ORDER BY created_at FOR UPDATE`,
+			organization.StatusActive)
+		if err != nil {
+			return err
+		}
+		for _, id := range ids {
+			if _, err := s.setStatusIn(ctx, q, id, organization.StatusSuspended); err != nil {
+				return err
+			}
+			if _, err := q.Exec(ctx, `INSERT INTO provider_suspended_wallets (organization_id) VALUES ($1)
+				ON CONFLICT DO NOTHING`, id); err != nil {
+				return fmt.Errorf("wallet: remember provider suspension org %s: %w", id, err)
+			}
+		}
+		return nil
+	})
+	return ids, err
+}
+
+// ResumeForProvider makes the wallets SuspendForProvider suspended active again,
+// in one tx, and returns those orgs. One revoked since then stays revoked.
+func (s *Store) ResumeForProvider(ctx context.Context) ([]uuid.UUID, error) {
+	var ids []uuid.UUID
+	err := database.InTx(ctx, s.db, func(q database.Querier) error {
+		var err error
+		ids, err = orgIDs(ctx, q, `SELECT o.id FROM provider_suspended_wallets p
+			JOIN organizations o ON o.id = p.organization_id
+			WHERE o.status = $1 ORDER BY o.created_at FOR UPDATE OF o`, organization.StatusSuspended)
+		if err != nil {
+			return err
+		}
+		for _, id := range ids {
+			if _, err := s.setStatusIn(ctx, q, id, organization.StatusActive); err != nil {
+				return err
+			}
+		}
+		if _, err := q.Exec(ctx, `DELETE FROM provider_suspended_wallets`); err != nil {
+			return fmt.Errorf("wallet: forget provider suspensions: %w", err)
+		}
+		return nil
+	})
+	return ids, err
+}
+
+func orgIDs(ctx context.Context, q database.Querier, query string, args ...any) ([]uuid.UUID, error) {
+	rows, err := q.Query(ctx, query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("wallet: live organizations: %w", err)
+		return nil, fmt.Errorf("wallet: list orgs: %w", err)
 	}
 	ids, err := pgx.CollectRows(rows, pgx.RowTo[uuid.UUID])
 	if err != nil {
-		return nil, fmt.Errorf("wallet: live organizations rows: %w", err)
+		return nil, fmt.Errorf("wallet: list orgs rows: %w", err)
 	}
 	return ids, nil
 }

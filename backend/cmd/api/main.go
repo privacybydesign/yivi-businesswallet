@@ -110,7 +110,7 @@ const (
 	// re-read: issuers publish revocations on the scale of hours, not seconds.
 	heldStatusRecheckEvery = 6 * time.Hour
 	heldStatusBootDelay    = 2 * time.Minute
-	// trustedListCheckEvery is well under the grace before wallets are revoked.
+	// trustedListCheckEvery is well over the grace, so the next check confirms we are off the list.
 	trustedListCheckEvery = time.Hour
 
 	issuerProbeTimeout = 10 * time.Second

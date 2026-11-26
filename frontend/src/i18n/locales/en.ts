@@ -2729,6 +2729,7 @@ export const en = {
       walletOpened: "Opened wallet",
       walletBootstrapped: "Bootstrapped wallet",
       walletSuspended: "Suspended wallet",
+      walletResumed: "Resumed wallet",
       walletRevoked: "Revoked wallet",
       representationClaimed: "Claimed representation",
       representationRevoked: "Revoked representation",
@@ -3590,10 +3591,7 @@ export const en = {
       owner_request: "Organization request",
       key_compromise: "Key compromise",
       cessation: "Company ended (owner identification revoked)",
-      provider_delisted: "Provider no longer on the trusted list",
     },
-    delistedHint:
-      "The provider of this business wallet is no longer on the trusted list of wallet providers, so every wallet it provides is revoked. You can still view and export your data, but no new wallet unit can be activated.",
     ceasedHint:
       "The issuer revoked this organization's owner identification data because the company ended. The wallet is revoked and no new wallet unit can be activated.",
     loadError: "Could not load the wallet unit: {{message}}",
@@ -3727,7 +3725,8 @@ export const en = {
       identity_requested: "Identification requested",
       invitation: "Member invitation",
       postguard_file: "Encrypted file",
-      provider_delisted: "Wallet stopped",
+      provider_delisted: "Wallet suspended by provider",
+      provider_relisted: "Wallet active again",
       signature_declined: "Signature declined",
       signature_requested: "Signature request",
       signed_document: "Signed document",
@@ -3755,7 +3754,9 @@ export const en = {
       postguard_file:
         "Sent to a recipient of an encrypted file, when this organization mails through its own SMTP server.",
       provider_delisted:
-        "Sent to the admins when this organization's wallet is revoked because its provider is no longer on the trusted list.",
+        "Sent to the admins when this organization's wallet is suspended because its provider is no longer on the trusted list.",
+      provider_relisted:
+        "Sent to the admins when that wallet is active again because its provider is back on the trusted list.",
       signature_declined:
         "Sent to a request's creator when a selected signer declines to sign.",
       signature_requested:

@@ -18,7 +18,6 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/qerdsprovider"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/registryprovider"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
-	"github.com/privacybydesign/yivi-businesswallet/backend/internal/walletunit"
 )
 
 // kvkSenderAddress is the QERDS "from" shown on the deposited attestation message.
@@ -31,8 +30,9 @@ const discardTimeout = 10 * time.Second
 type walletStore interface {
 	RegisterOrganization(ctx context.Context, reg Registration) (organization.Organization, error)
 	SetStatus(ctx context.Context, orgID uuid.UUID, status string) (organization.Organization, error)
-	Cease(ctx context.Context, orgID uuid.UUID, reason string) error
-	LiveOrganizations(ctx context.Context) ([]uuid.UUID, error)
+	Cease(ctx context.Context, orgID uuid.UUID) error
+	SuspendForProvider(ctx context.Context) ([]uuid.UUID, error)
+	ResumeForProvider(ctx context.Context) ([]uuid.UUID, error)
 	ListRepresentations(ctx context.Context, orgID uuid.UUID) ([]Representation, error)
 	ClaimRepresentation(ctx context.Context, orgID, repID, userID uuid.UUID) error
 }
@@ -383,16 +383,17 @@ func (s *Service) Revoke(ctx context.Context, orgID uuid.UUID) (organization.Org
 // OwnerIDRevoked revokes the wallet and wallet unit of an org whose EBWOID its
 // issuer revoked: KVK revokes it when the company ends (Art 6(2)(f)).
 func (s *Service) OwnerIDRevoked(ctx context.Context, orgID uuid.UUID) error {
-	return s.store.Cease(ctx, orgID, walletunit.ReasonCessation)
+	return s.store.Cease(ctx, orgID)
 }
 
-// LiveOrganizations returns the orgs whose wallet is not revoked.
-func (s *Service) LiveOrganizations(ctx context.Context) ([]uuid.UUID, error) {
-	return s.store.LiveOrganizations(ctx)
+// ProviderDelisted suspends every active wallet because we as provider are off
+// the trusted list (Art 6(2)(f)): read-only, and its units show as suspended on
+// the status list. It returns the orgs it suspended.
+func (s *Service) ProviderDelisted(ctx context.Context) ([]uuid.UUID, error) {
+	return s.store.SuspendForProvider(ctx)
 }
 
-// ProviderDelisted revokes the wallet and wallet unit of an org because we as
-// provider are no longer on the trusted list (Art 6(2)(f)).
-func (s *Service) ProviderDelisted(ctx context.Context, orgID uuid.UUID) error {
-	return s.store.Cease(ctx, orgID, walletunit.ReasonProviderDelisted)
+// ProviderRelisted makes the wallets ProviderDelisted suspended active again.
+func (s *Service) ProviderRelisted(ctx context.Context) ([]uuid.UUID, error) {
+	return s.store.ResumeForProvider(ctx)
 }

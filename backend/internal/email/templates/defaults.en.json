@@ -48,6 +48,7 @@
 
     "wallet.bootstrapped": "Bootstrapped wallet",
     "wallet.suspended": "Suspended wallet",
+    "wallet.resumed": "Resumed wallet",
     "wallet.revoked": "Revoked wallet",
     "wallet.representation_claimed": "Claimed representation",
     "wallet.representation_revoked": "Revoked representation",
@@ -236,12 +237,22 @@
       ]
     },
     "provider_delisted": {
-      "subject": "The business wallet of {{orgName}} has been stopped",
+      "subject": "The business wallet of {{orgName}} has been suspended",
       "blocks": [
         { "type": "logo" },
-        { "type": "heading", "text": "Your business wallet has been stopped" },
-        { "type": "paragraph", "text": "The provider of the Yivi Business Wallet is no longer on the trusted list of business wallet providers. Under the European Business Wallet regulation, the wallet of {{orgName}} has therefore been revoked." },
-        { "type": "paragraph", "text": "You can still sign in, view your data and export it. You can no longer receive, share or sign anything with this wallet, and attestations issued to its wallet unit are no longer valid." },
+        { "type": "heading", "text": "Your business wallet has been suspended" },
+        { "type": "paragraph", "text": "The provider of the Yivi Business Wallet is no longer on the trusted list of business wallet providers. Under the European Business Wallet regulation, the wallet of {{orgName}} is therefore no longer valid, and it has been suspended." },
+        { "type": "paragraph", "text": "You can still sign in, view your data and export it. You cannot share or sign anything with this wallet until it is active again. Once the provider is back on the list, your wallet becomes active again by itself, with everything in it, and we will let you know." },
+        { "type": "footer" }
+      ]
+    },
+    "provider_relisted": {
+      "subject": "The business wallet of {{orgName}} is active again",
+      "blocks": [
+        { "type": "logo" },
+        { "type": "heading", "text": "Your business wallet is active again" },
+        { "type": "paragraph", "text": "The provider of the Yivi Business Wallet is back on the trusted list of business wallet providers, so the wallet of {{orgName}} is valid and active again." },
+        { "type": "paragraph", "text": "Everything works as before the suspension. You do not need to do anything." },
         { "type": "footer" }
       ]
     },

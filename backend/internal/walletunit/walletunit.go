@@ -30,10 +30,6 @@ const (
 // seen as its EBWOID being revoked (Art 6(2)(f)). Only the system sets it.
 const ReasonCessation = "cessation"
 
-// ReasonProviderDelisted is the wallet unit's revocation when we as provider are
-// no longer on the trusted list (Art 6(2)(f)). Only the system sets it.
-const ReasonProviderDelisted = "provider_delisted"
-
 // Attestation kinds as stored.
 const (
 	KindBWIA = "bwia"
