@@ -1767,6 +1767,10 @@ const hostedProofingSchema = hostedProgressSchema.extend({
     idemAvailable: z.boolean(),
     // The Yivi app shares the registered personal data, not a document.
     yiviPersonalData: z.boolean(),
+    documentPhoto: z.boolean(),
+    // The flow keeps the BSN, which the personal data shares under that
+    // policy alone.
+    bsn: z.boolean(),
     // The documents the document photo takes; empty is any.
     scanDocuments: z.array(z.string()).optional(),
     // The page runs every step itself: no app is chosen.

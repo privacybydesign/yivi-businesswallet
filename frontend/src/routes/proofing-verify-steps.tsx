@@ -47,8 +47,6 @@ import type {
 import { EMPLOYMENT_KIND } from "../api/identity-proofing";
 import {
   scanDocumentKinds,
-  ATTRIBUTE_AGE_OVER,
-  ATTRIBUTE_DOCUMENT,
   addressLookup,
   documentRejectionReason,
   documentScanMessage,
@@ -71,6 +69,7 @@ import {
   verifyErrorMessage,
 } from "../lib/identity-proofing";
 import type {
+  DocumentKind,
   RequestedAttribute,
   SessionStage,
 } from "../lib/identity-proofing";
@@ -97,6 +96,15 @@ import {
   StatusText,
 } from "../ui";
 import type { DataDisclosureItem, IconName } from "../ui";
+import {
+  consentDetailKey,
+  consentDocuments,
+  consentItems,
+  consentLabelKey,
+  consentWording,
+  joinSources,
+} from "../lib/consent";
+import type { ConsentBasis, ConsentWording } from "../lib/consent";
 
 // The steps an external person goes through to be verified, shared by the
 // on-screen page a member shows (proofing-verify) and the hosted page a link
@@ -110,6 +118,12 @@ const LINK_BUTTON =
 const STEP_HEADING = "text-ink text-[22px] leading-[30px] font-bold";
 
 const QR_SIZE = 240;
+// An app link leaves a frame the page is embedded in: inside one, the app
+// never opens.
+const APP_LINK_TARGET = "_top";
+// On a phone the QR, which that phone cannot scan, goes below the app button.
+const QR_ON_PHONE =
+  "flex flex-col items-center gap-4 pointer-coarse:order-last";
 
 // Who asks: the org as the steps show it, with its branding.
 export interface VerifyOrg {
@@ -187,6 +201,44 @@ function StepHeading({
   );
 }
 
+// What the consent screen says of a requested item, in the words of the
+// sources the flow accepts (lib/consent.ts).
+function consentText(
+  t: TFunction,
+  value: RequestedAttribute,
+  requested: readonly string[],
+  consent: ConsentNames,
+): { label: string; detail: string } {
+  const { wording, documents } = consent;
+  const labelKey = consentLabelKey(value, requested, wording);
+  const detailKey = consentDetailKey(value, requested, wording, documents);
+  const names = { documents: consent.documentNames };
+  return {
+    label: labelKey
+      ? t(`identityProofing.onScreen.consent.${labelKey}`)
+      : t(`identityProofingFlows.attributes.${value}`),
+    detail: detailKey
+      ? t(`identityProofing.onScreen.consent.${detailKey}`, names)
+      : t(
+          `identityProofing.onScreen.attributeDetails.${value as SourceFreeAttribute}`,
+          names,
+        ),
+  };
+}
+
+// The items that say the same whatever the source.
+type SourceFreeAttribute = Exclude<
+  RequestedAttribute,
+  "dg1" | "dg11" | "age_over" | "document_image"
+>;
+
+// The consent screen's wording, and the documents it names in words.
+interface ConsentNames {
+  wording: ConsentWording;
+  documents: DocumentKind[];
+  documentNames: string;
+}
+
 // What is collected. Continue starts the session, starting while it is
 // created; the app is chosen inside it.
 export function Overview({
@@ -197,6 +249,8 @@ export function Overview({
   cancel,
   starting = false,
   error,
+  embedded = false,
+  consent,
 }: Readonly<{
   org: VerifyOrg;
   flow: VerifyFlowInfo;
@@ -208,33 +262,47 @@ export function Overview({
   cancel?: React.ReactNode;
   starting?: boolean;
   error?: string;
+  // Framed in the org's own page, which already names the org.
+  embedded?: boolean;
+  // What the flow accepts, which the texts follow.
+  consent: ConsentBasis;
 }>): React.JSX.Element {
   const { t, i18n } = useTranslation();
   const name = org.branding.displayName || org.name;
-  const items: DataDisclosureItem[] = (flow.requestedAttributes ?? [])
+  const requested = flow.requestedAttributes ?? [];
+  // The "Why" line of an item, when the flow gives a reason in this language.
+  const why = (key: string): DataDisclosureItem["reason"] => {
+    const text = reasonIn(flow.attributeReasons?.[key], i18n.language);
+    return text === undefined
+      ? undefined
+      : { label: t("identityProofing.onScreen.overview.why"), text };
+  };
+  const sources = joinSources(
+    consent.sources.map((source) =>
+      t(`identityProofing.onScreen.consent.sources.${source}`),
+    ),
+    i18n.language,
+  );
+  const documents = consentDocuments(consent.sources);
+  const documentWords = (kinds: readonly DocumentKind[]): string =>
+    joinSources(
+      kinds.map((kind) =>
+        t(`identityProofing.onScreen.consent.documents.${kind}`),
+      ),
+      i18n.language,
+    );
+  const names: ConsentNames = {
+    wording: consentWording(consent.sources),
+    documents,
+    documentNames: documentWords(documents),
+  };
+  const items: DataDisclosureItem[] = consentItems(requested, consent)
     .filter(isRequestedAttribute)
-    .map((value) => {
-      const reason = reasonIn(flow.attributeReasons?.[value], i18n.language);
-      return {
-        icon: ATTRIBUTE_ICONS[value],
-        label: t(`identityProofingFlows.attributes.${value}`),
-        // The age check withholds the date of birth from the document data.
-        detail:
-          value === ATTRIBUTE_DOCUMENT &&
-          flow.requestedAttributes?.includes(ATTRIBUTE_AGE_OVER)
-            ? t(
-                "identityProofing.onScreen.attributeDetails.dg1WithoutBirthDate",
-              )
-            : t(`identityProofing.onScreen.attributeDetails.${value}`),
-        reason:
-          reason === undefined
-            ? undefined
-            : {
-                label: t("identityProofing.onScreen.overview.why"),
-                text: reason,
-              },
-      };
-    });
+    .map((value) => ({
+      icon: ATTRIBUTE_ICONS[value],
+      ...consentText(t, value, requested, names),
+      reason: why(value),
+    }));
   if (flow.addressMode !== undefined && flow.addressMode !== "off") {
     items.push({
       icon: "personal",
@@ -244,6 +312,7 @@ export function Overview({
         onlyApp === "yivi_app"
           ? t("identityProofing.address.overview.detailYivi")
           : t("identityProofing.address.overview.detail"),
+      reason: why("address"),
     });
   }
   if (flow.diplomaMode !== undefined && flow.diplomaMode !== "off") {
@@ -251,6 +320,7 @@ export function Overview({
       icon: "flag",
       label: t("identityProofing.diplomas.overview.label"),
       detail: t("identityProofing.diplomas.overview.detail"),
+      reason: why("diplomas"),
     });
   }
   if (flow.employmentMode !== undefined && flow.employmentMode !== "off") {
@@ -258,6 +328,7 @@ export function Overview({
       icon: "personal",
       label: t("identityProofing.employment.overview.label"),
       detail: t("identityProofing.employment.overview.detail"),
+      reason: why("employment"),
     });
   }
   const { supportContact, privacyUrl } = org.branding;
@@ -266,10 +337,12 @@ export function Overview({
     <div className="flex flex-col gap-5">
       <div className="flex flex-col gap-1">
         <StepHeading>
-          {t("identityProofing.onScreen.overview.heading", { name })}
+          {embedded
+            ? t("identityProofing.onScreen.overview.headingEmbedded")
+            : t("identityProofing.onScreen.overview.heading", { name })}
         </StepHeading>
         <p className={HINT}>
-          {t("identityProofing.onScreen.overview.intro", { name })}
+          {t("identityProofing.onScreen.overview.intro", { name, sources })}
         </p>
         {onlyApp && (
           <p className={HINT}>
@@ -771,11 +844,13 @@ export function Session({
       <StepHeading>
         {t("identityProofing.onScreen.scan.idemHeading")}
       </StepHeading>
-      <QrCode value={link} />
-      <p className={`${HINT} text-center`}>
-        {t("identityProofing.onScreen.scan.idemHint")}
-      </p>
-      <a href={link} className={LINK_BUTTON}>
+      <div className={QR_ON_PHONE}>
+        <QrCode value={link} />
+        <p className={`${HINT} text-center`}>
+          {t("identityProofing.onScreen.scan.idemHint")}
+        </p>
+      </div>
+      <a href={link} target={APP_LINK_TARGET} className={LINK_BUTTON}>
         {t("identityProofing.onScreen.scan.openIdem")}
       </a>
       <Countdown seconds={secondsLeft} />
@@ -1772,9 +1847,11 @@ function IdemQr({
   return (
     <div className="flex flex-col items-center gap-4">
       <StepHeading>{heading}</StepHeading>
-      <QrCode value={code.deepLink} />
-      <p className={`${HINT} text-center`}>{hint}</p>
-      <a href={code.deepLink} className={LINK_BUTTON}>
+      <div className={QR_ON_PHONE}>
+        <QrCode value={code.deepLink} />
+        <p className={`${HINT} text-center`}>{hint}</p>
+      </div>
+      <a href={code.deepLink} target={APP_LINK_TARGET} className={LINK_BUTTON}>
         {t("identityProofing.onScreen.scan.openIdem")}
       </a>
       <Countdown seconds={seconds} />
@@ -1882,16 +1959,18 @@ function YiviSession({
       <StepHeading>
         {t("identityProofing.onScreen.scan.yiviHeading")}
       </StepHeading>
-      {link === undefined ? (
-        <QrPlaceholder label={t("identityProofing.onScreen.scan.starting")} />
-      ) : (
-        <QrCode value={link} />
-      )}
-      <p className={`${HINT} text-center`}>
-        {t("identityProofing.onScreen.scan.yiviHint")}
-      </p>
+      <div className={QR_ON_PHONE}>
+        {link === undefined ? (
+          <QrPlaceholder label={t("identityProofing.onScreen.scan.starting")} />
+        ) : (
+          <QrCode value={link} />
+        )}
+        <p className={`${HINT} text-center`}>
+          {t("identityProofing.onScreen.scan.yiviHint")}
+        </p>
+      </div>
       {link !== undefined && (
-        <a href={link} className={LINK_BUTTON}>
+        <a href={link} target={APP_LINK_TARGET} className={LINK_BUTTON}>
           {t("identityProofing.onScreen.scan.openYivi")}
         </a>
       )}

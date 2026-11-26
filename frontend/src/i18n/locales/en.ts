@@ -856,8 +856,8 @@ export const en = {
       },
       overview: {
         heading: "{{name}} wants to verify your identity",
-        intro:
-          "You check your identity with your passport or ID card. {{name}} receives:",
+        headingEmbedded: "Confirm your identity",
+        intro: "You check your identity with {{sources}}. {{name}} receives:",
         noData: "Only the outcome: whether your identity was verified.",
         why: "Why:",
         retention_one:
@@ -869,19 +869,76 @@ export const en = {
         cancel: "Cancel",
         continue: "Continue",
       },
+      // The texts that follow from what the flow accepts (lib/consent.ts):
+      // the BRP's personal data, which the Yivi app shares, documents, or
+      // either.
+      consent: {
+        sources: {
+          personal_data: "your personal data from the BRP",
+          passport: "your passport",
+          identity_card: "your identity card",
+          residence_permit: "your residence permit",
+          drivers_license: "your driving licence",
+        },
+        documents: {
+          passport: "passport",
+          identity_card: "identity card",
+          residence_permit: "residence permit",
+          drivers_license: "driving licence",
+        },
+        labels: {
+          registeredData: "Name and personal data",
+          bsn: "Citizen service number (BSN)",
+        },
+        dg1: {
+          registered:
+            "Your name and date of birth from the BRP, and whether you have Dutch nationality.",
+          document:
+            "Your name, date of birth and nationality, and the number and expiry date of your {{documents}}.",
+          licence:
+            "Your name and date of birth, and your driving licence's number and expiry date.",
+          mixed:
+            "Your name, date of birth and nationality. With your {{documents}}, also its number and expiry date.",
+        },
+        dg1WithoutBirthDate: {
+          registered:
+            "Your name from the BRP, and whether you have Dutch nationality.",
+          document:
+            "Your name and nationality, and the number and expiry date of your {{documents}}.",
+          licence:
+            "Your name, and your driving licence's number and expiry date.",
+          mixed:
+            "Your name and nationality. With your {{documents}}, also its number and expiry date.",
+        },
+        dg11: {
+          registered: "Your citizen service number (BSN) from the BRP.",
+          document:
+            "Your place of birth and personal number (BSN), if your {{documents}} stores them on its chip.",
+          mixed:
+            "Your BSN from the BRP. With your {{documents}}, your place of birth and BSN if its chip stores them.",
+          mixedBsnOnly:
+            "Your BSN, if you share your personal data from the BRP.",
+        },
+        ageOver: {
+          registered:
+            "Only whether you are old enough, worked out from the BRP: not your date of birth.",
+          document:
+            "Only whether you are old enough, worked out from your {{documents}}: not your date of birth.",
+          mixed:
+            "Only whether you are old enough, worked out from the BRP or your {{documents}}: not your date of birth.",
+        },
+        photos: {
+          sides: "Photos of the front and back of your {{documents}}.",
+          sidesWithPassport:
+            "Photos of the front and back of your {{documents}}. A passport's back is the page with your BSN.",
+        },
+      },
       attributeDetails: {
-        dg1: "Your name, date of birth and nationality, and the document's number and expiry date.",
-        dg1WithoutBirthDate:
-          "Your name and nationality, and the document's number and expiry date.",
-        age_over:
-          "Only whether you are old enough, worked out from your document: not your date of birth.",
-        dg11: "Your place of birth and personal number (BSN), if your document stores them on its chip.",
-        dg2: "Your passport photo stored on the document's chip.",
+        dg2: "Your passport photo stored on the chip of your {{documents}}.",
         chip_checks: "Whether the chip is genuine and unaltered.",
-        document_image:
-          "Photos of the front and back of your document (only the photo page of a passport).",
         selfie: "A photo of your face taken during the check.",
-        biometrics: "How well your face matches the document photo.",
+        biometrics:
+          "How well your face matches the photo on your {{documents}}.",
       },
       method: {
         heading: "How do you want to verify?",
@@ -908,19 +965,18 @@ export const en = {
           residence_permit: "Photograph your residence permit",
           drivers_license: "Photograph your driving licence",
         },
-        hint: "Take a photo of {{documents}} in CM.com's secure scan below.",
+        hint: "Take a photo of {{documents}} in the secure scan below.",
         sides: {
-          passport: "the photo page of your passport",
+          passport: "the front and back of your passport",
           identity_card: "the front and back of your ID card",
           residence_permit: "the front and back of your residence permit",
           drivers_license: "the front and back of your driving licence",
         },
-        passportHint:
-          "For a passport, open it like a book and turn it sideways, so the open passport fits the frame.",
-        frameTitle: "CM.com ID scan",
+        passportHint: "A passport's back is the page with your BSN.",
+        frameTitle: "ID scan",
         start: "Photograph the document",
         finishing: "Adding the photos…",
-        loading: "Loading the secure scan from CM.com…",
+        loading: "Loading the secure scan…",
         cancelled: "The photos were not taken. Try again.",
         retry: "Try again",
       },
@@ -1908,7 +1964,7 @@ export const en = {
       dg2: "The holder's passport photo stored on the chip, shown next to the selfie.",
       chip_checks: "Whether the chip proved genuine and not copied.",
       document_image:
-        "The front and back of an ID card or driving licence, or the photo page of a passport.",
+        "The front and back of an ID card or driving licence, or of a passport, whose back is the page with the BSN.",
       selfie: "The photo of the person's face taken during the face check.",
       biometrics:
         "How closely the face matched the document photo, and whether it was a live person.",
@@ -1996,7 +2052,7 @@ export const en = {
         addressHint:
           "After the identity check, in the browser rather than the Idem app: the person enters their postal address. A Dutch address is checked against the Dutch address register (BAG); any other is kept as they declare it. Such a flow is shown on screen or sent as a hosted link, never mailed.",
         photoHint:
-          "The front and back of an ID card or driving licence, or the photo page of a passport, taken in the browser with the ID scan. Shown on screen or sent as a hosted link, never by mail.",
+          "The front and back of an ID card or driving licence, or of a passport, whose back is the page with the BSN, taken in the browser with the ID scan. Shown on screen or sent as a hosted link, never by mail.",
         faceHint:
           "A selfie, checked to be a live person and compared with the photo on the chip.",
         faceInScan: "Check the face in the ID scan",
@@ -2063,6 +2119,8 @@ export const en = {
         identityLocked:
           "Name and document details stays on: a data request finds the person's sessions by their name and date of birth, and a diploma or Verzekeringsbericht is checked against them.",
         ageOver: "Minimum age",
+        stepHint:
+          "Asked under What the person does. A reason here is optional.",
         ageOverOption: "{{age}} or older",
         ageOverHint:
           "Age check only answers whether the person is this age or older on the day of the check.",

@@ -38,6 +38,7 @@ import type {
   FlowDraftError,
   LevelRequirement,
   ProofingFlowDraft,
+  StepReason,
 } from "../lib/identity-proofing";
 import {
   issuingCountryChoices,
@@ -102,6 +103,9 @@ export function AdvancedSettings(
       <ReceiveSection
         draft={draft}
         update={update}
+        addressMode={props.addressMode}
+        diplomaMode={props.diplomaMode}
+        employmentMode={props.employmentMode}
         requiresIdentity={props.requiresIdentity}
         locales={locales}
         error={error}
@@ -212,6 +216,56 @@ function DocumentsOption({
         </p>
       )}
     </>
+  );
+}
+
+// A step after the identity check, as a row of what the flow receives: on
+// under What the person does, with its optional reason in every language.
+function StepReasonRow({
+  draft,
+  update,
+  step,
+  label,
+}: Readonly<{
+  draft: ProofingFlowDraft;
+  update: (patch: Partial<ProofingFlowDraft>) => void;
+  step: StepReason;
+  label: string;
+}>): React.JSX.Element {
+  const { t } = useTranslation();
+  return (
+    <div className="border-line flex flex-col gap-3 border-t py-3.5">
+      <OptionRow
+        id={`flow-step-${step}-received`}
+        checked
+        disabled
+        label={label}
+        hint={t("identityProofingFlows.editor.receive.stepHint")}
+      />
+      <fieldset
+        aria-label={label}
+        className={`grid min-w-0 grid-cols-[repeat(auto-fit,minmax(min(240px,100%),1fr))] gap-3 ${UNDER_OPTION}`}
+      >
+        {SUPPORTED_LANGUAGES.map((locale) => (
+          <ReasonField
+            key={locale}
+            id={`flow-step-${step}-reason-${locale}`}
+            locale={locale}
+            required={false}
+            text={draft.attributeReasons[step]?.[locale] ?? ""}
+            missing={false}
+            onChange={(text) =>
+              update({
+                attributeReasons: {
+                  ...draft.attributeReasons,
+                  [step]: { ...draft.attributeReasons[step], [locale]: text },
+                },
+              })
+            }
+          />
+        ))}
+      </fieldset>
+    </div>
   );
 }
 
@@ -532,12 +586,18 @@ function DocumentsSection({
 function ReceiveSection({
   draft,
   update,
+  addressMode,
+  diplomaMode,
+  employmentMode,
   requiresIdentity,
   locales,
   error,
 }: Readonly<{
   draft: ProofingFlowDraft;
   update: (patch: Partial<ProofingFlowDraft>) => void;
+  addressMode: AddressMode;
+  diplomaMode: DiplomaMode;
+  employmentMode: EmploymentMode;
   requiresIdentity: boolean;
   locales: readonly Language[];
   error: FlowDraftError | null;
@@ -631,6 +691,30 @@ function ReceiveSection({
             </div>
           );
         })}
+        {stepAsked(addressMode) && (
+          <StepReasonRow
+            draft={draft}
+            update={update}
+            step="address"
+            label={t("identityProofingFlows.steps.address")}
+          />
+        )}
+        {stepAsked(diplomaMode) && (
+          <StepReasonRow
+            draft={draft}
+            update={update}
+            step="diplomas"
+            label={t("identityProofingFlows.editor.steps.diploma")}
+          />
+        )}
+        {stepAsked(employmentMode) && (
+          <StepReasonRow
+            draft={draft}
+            update={update}
+            step="employment"
+            label={t("identityProofingFlows.editor.steps.employment")}
+          />
+        )}
       </div>
       {requiresIdentity && (
         <p className={HINT}>

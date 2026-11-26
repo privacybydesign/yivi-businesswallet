@@ -11481,6 +11481,8 @@ paths:
                       yiviAvailable: true
                       idemAvailable: true
                       yiviPersonalData: false
+                      documentPhoto: false
+                      bsn: false
                       browserOnly: false
                       diplomaMode: "off"
                       addressMode: "off"
@@ -16993,6 +16995,7 @@ components:
               type: string
             birthDate:
               type: string
+              format: date
             nationality:
               type: string
               nullable: true
@@ -17562,7 +17565,8 @@ components:
             Optional. Why each requested attribute is collected, by attribute and language
             (`en`, `nl`), shown to the person before they start. Give one for every attribute
             in `requestedAttributes`, in every language the flow's page offers, or the flow is
-            refused (400 `invalid_input`).
+            refused (400 `invalid_input`). The keys `address`, `diplomas` and `employment` give
+            the optional reason for those steps, shown when the flow asks them.
         selfieLocation:
           type: string
           description: Optional. Ignored.
@@ -17933,6 +17937,7 @@ components:
                     type: string
                   birthDate:
                     type: string
+                    format: date
                   nationality:
                     type: string
                   evidence:
@@ -19211,6 +19216,14 @@ components:
                     The flow accepts the registered personal data (`acceptedDocumentTypes`
                     `personal_data`), which the Yivi app may share: the page says so on its app
                     choice.
+                documentPhoto:
+                  type: boolean
+                  description: Whether the flow photographs the document (`document_photo`).
+                bsn:
+                  type: boolean
+                  description: >-
+                    Whether the flow keeps the BSN, in full or masked (`bsnPolicy`). The personal
+                    data shares it under that policy alone, so the page names it then.
                 browserOnly:
                   type: boolean
                   description: >-
@@ -19234,7 +19247,7 @@ components:
                     The most days the session's data is kept: the flow's retention when it set
                     one, else the organisation's `dataRetentionDays`, plus the day the proofing engine
                     keeps its copy longer, rounded up to whole days. What the page tells the subject.
-              required: [requestedAttributes, attributeReasons, yiviAvailable, idemAvailable, yiviPersonalData, browserOnly, diplomaMode, addressMode, retentionDays]
+              required: [requestedAttributes, attributeReasons, yiviAvailable, idemAvailable, yiviPersonalData, documentPhoto, bsn, browserOnly, diplomaMode, addressMode, retentionDays]
             diplomas:
               type: array
               description: The extracts the subject added, as the page lists them.

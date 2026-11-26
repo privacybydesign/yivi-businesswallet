@@ -22,7 +22,11 @@ import {
   hostedToSave,
   localesWithoutReasons,
   proofingErrorMessage,
+  idemAppAvailable,
+  methodChoices,
+  yiviAppAvailable,
 } from "../lib/identity-proofing";
+import { consentBasisOf } from "../lib/consent";
 import { Button, Card, Input } from "../ui";
 import { CAPTION } from "./proofing-branding-fields";
 import { BrandMark } from "./proofing-ui";
@@ -332,6 +336,9 @@ function HostedPreview({
     return <p className={HINT}>{t("common.loading")}</p>;
   }
   const branding = effectiveBranding(settings.data.branding, own.data);
+  const methods = methodChoices(yiviAppAvailable(flow), idemAppAvailable(flow));
+  const onlyApp =
+    !flow.browserOnly && methods.length === 1 ? methods[0] : undefined;
   return (
     <section className="flex flex-col gap-2">
       <h3 className={CAPTION}>{t("identityProofingFlows.hosted.preview")}</h3>
@@ -353,6 +360,8 @@ function HostedPreview({
             retentionDays:
               flow.retentionDays ?? settings.data.dataRetentionDays,
           }}
+          onlyApp={onlyApp}
+          consent={consentBasisOf(flow)}
           onContinue={() => undefined}
         />
       </Card>

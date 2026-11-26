@@ -63,6 +63,8 @@ const hostedPage = {
     yiviAvailable: true,
     idemAvailable: true,
     yiviPersonalData: false,
+    documentPhoto: false,
+    bsn: false,
     browserOnly: false,
     diplomaMode: "off",
     addressMode: "off",

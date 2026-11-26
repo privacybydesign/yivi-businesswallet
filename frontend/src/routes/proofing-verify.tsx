@@ -37,6 +37,7 @@ import {
   scanDocuments,
   stepAsked,
 } from "../lib/identity-proofing";
+import { consentBasisOf } from "../lib/consent";
 import { blockingError } from "../lib/query-state";
 import { Button, Card, Stepper, TopBar } from "../ui";
 import { BrandMark } from "./proofing-ui";
@@ -174,6 +175,7 @@ function VerifyFlow({
   const [step, setStep] = useState<Step>("overview");
   const methods = methodChoices(yiviAppAvailable(flow), idemAppAvailable(flow));
   const browserOnly = flow.browserOnly ?? false;
+  const onlyApp = !browserOnly && methods.length === 1 ? methods[0] : undefined;
   // The app Continue will start in, so the stepper is right before it.
   const [method, setMethod] = useState<ProofingMethod>(() =>
     firstMethod(browserOnly, methods),
@@ -246,9 +248,8 @@ function VerifyFlow({
             ...flow,
             retentionDays: flow.retentionDays ?? settings.dataRetentionDays,
           }}
-          onlyApp={
-            !browserOnly && methods.length === 1 ? methods[0] : undefined
-          }
+          onlyApp={onlyApp}
+          consent={consentBasisOf(flow)}
           // Continue starts the session; with a choice of apps, the app is
           // chosen in it.
           onContinue={() => {
