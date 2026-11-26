@@ -54,7 +54,7 @@ export function consentSources(
   );
   const named = new Set(
     acceptedDocumentTypes
-      .map(documentKindOf)
+      .map((type) => documentKindOf(type))
       .filter((kind) => kind !== undefined),
   );
   const anyDocument = named.size === 0 && (!registered || documentPhoto);
@@ -165,12 +165,7 @@ export function consentDetailKey(
       : `dg1.${wording}`;
   }
   if (value === ATTRIBUTE_BSN) {
-    if (wording === "mixed") {
-      return requested.includes(ATTRIBUTE_BSN)
-        ? "dg11.mixed"
-        : "dg11.mixedBsnOnly";
-    }
-    return wording === "registered" ? "dg11.registered" : "dg11.document";
+    return bsnDetailKey(requested, wording);
   }
   if (value === ATTRIBUTE_AGE_OVER) {
     return wording === "licence" ? "ageOver.document" : `ageOver.${wording}`;
@@ -181,6 +176,21 @@ export function consentDetailKey(
       : "photos.sides";
   }
   return undefined;
+}
+
+// The BSN item's text: from the BRP, a document, or either, where a mixed
+// flow that did not request the place of birth gets the BSN from the BRP
+// alone.
+function bsnDetailKey(
+  requested: readonly string[],
+  wording: ConsentWording,
+): ConsentTextKey {
+  if (wording === "mixed") {
+    return requested.includes(ATTRIBUTE_BSN)
+      ? "dg11.mixed"
+      : "dg11.mixedBsnOnly";
+  }
+  return wording === "registered" ? "dg11.registered" : "dg11.document";
 }
 
 // The item of the document photos.
