@@ -183,6 +183,9 @@ func (s *Store) RecordHeldStatusChange(ctx context.Context, orgID, id uuid.UUID,
 		}
 
 		recorded = true
+		if _, err := q.Exec(ctx, `UPDATE held_attestations SET updated_at = now() WHERE id = $1`, id); err != nil {
+			return fmt.Errorf("attestation: touch held %s: %w", id, err)
+		}
 		return s.audit.Record(ctx, q, audit.AttestationHeldStatusChanged,
 			audit.Target{Type: audit.TargetHeldAttestation, ID: id.String(), OrgID: &orgID},
 			audit.Updated(map[string]any{"vct": vct, "revoked": !revoked}, map[string]any{"vct": vct, "revoked": revoked}))

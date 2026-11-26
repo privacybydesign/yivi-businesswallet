@@ -153,10 +153,6 @@ func (stubQerdsNotifier) SendCredentialOffer(_ context.Context, _ uuid.UUID, _, 
 	return nil
 }
 
-func (stubQerdsNotifier) SendOfferDeclined(_ context.Context, _ uuid.UUID, _, _, _ string) error {
-	return nil
-}
-
 func (stubQerdsNotifier) SendCredentialRevoked(_ context.Context, _ uuid.UUID, _, _, _ string) error {
 	return nil
 }

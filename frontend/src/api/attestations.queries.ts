@@ -57,6 +57,7 @@ import type {
   OnboardingAttestation,
 } from "./attestations";
 import type { AuditEvent } from "./organization";
+import { useOrgStreamConnected } from "./org-events";
 import { errorCode } from "../lib/api-error";
 import { toast } from "../lib/toast";
 
@@ -277,15 +278,17 @@ export function useIssuedAttestationQuery(
   issuedId: string,
   enabled = true,
 ): UseQueryResult<IssuedAttestation, Error> {
+  const streaming = useOrgStreamConnected(slug);
   return useQuery({
     queryKey: issuedAttestationQueryKey(slug, issuedId),
     queryFn: ({ signal }) => getIssuedAttestation(slug, issuedId, signal),
     enabled: enabled && slug !== "" && issuedId !== "",
-    // Kept while the stream is up: the issuer cannot say an offer was
-    // claimed, so this read is what asks it. Its result reaches the other
-    // pages through the stream.
+    // Kept while the stream is up for an issuer that cannot say an offer was
+    // claimed (Veramo), so this read is what asks it. The EU issuer reports
+    // it, which arrives as an event.
     refetchInterval: (query) =>
-      query.state.data?.status === OFFERED_STATUS
+      query.state.data?.status === OFFERED_STATUS &&
+      (query.state.data.claimReported !== true || !streaming)
         ? OFFERED_POLL_INTERVAL_MS
         : false,
   });

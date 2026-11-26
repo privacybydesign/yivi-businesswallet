@@ -43,11 +43,6 @@ func (r *recQerds) SendCredentialOffer(_ context.Context, _ uuid.UUID, toAddress
 	return nil
 }
 
-func (r *recQerds) SendOfferDeclined(_ context.Context, _ uuid.UUID, toAddress, _, _ string) error {
-	r.to = append(r.to, toAddress)
-	return nil
-}
-
 func (r *recQerds) SendCredentialRevoked(_ context.Context, _ uuid.UUID, toAddress, credentialName, reason string) error {
 	r.revoked = append(r.revoked, toAddress+" "+credentialName+": "+reason)
 	return nil

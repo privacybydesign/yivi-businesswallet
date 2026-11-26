@@ -269,6 +269,8 @@ export const issuedAttestationSchema = z.object({
   // The delivery channel the offer was routed over: "email", "qerds", or "none"
   // (shown as a QR directly, no message sent).
   delivery: z.string(),
+  // The issuer reports the claim itself (the EU issuer), so it arrives as an event.
+  claimReported: z.boolean().optional(),
   issuedByUserId: z.string().optional(),
   claimedAt: z.string().optional(),
   expiresAt: z.string().optional(),

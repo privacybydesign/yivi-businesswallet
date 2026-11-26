@@ -2,9 +2,11 @@ package qerds
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -180,6 +182,8 @@ func (s *Service) Send(ctx context.Context, orgID uuid.UUID, from, recipient, su
 		return Message{}, err
 	}
 
+	s.fetchLocally(ctx, resolved)
+
 	// Reflect the receipt in the returned message without a re-read.
 	msg.ProviderRef = receipt.ProviderRef
 	msg.Status = StatusAccepted
@@ -191,6 +195,45 @@ func (s *Service) Send(ctx context.Context, orgID uuid.UUID, from, recipient, su
 		}
 	}
 	return msg, nil
+}
+
+// localFetchWaits are when a message sent to an organization in this wallet is
+// fetched from its inbox: at once, and again while it may still be crossing the
+// gateway. The background poller remains the fallback.
+var localFetchWaits = []time.Duration{0, time.Second, 3 * time.Second}
+
+const localFetchTimeout = 10 * time.Second
+
+// fetchLocally fetches the recipient's inbox right after a send when the
+// recipient is an organization in this wallet, so the message arrives without
+// waiting for the background poller. A recipient elsewhere is left to it.
+func (s *Service) fetchLocally(ctx context.Context, recipient qerdsprovider.Address) {
+	orgID, err := s.addresses.OrgByAddress(ctx, string(recipient))
+	if err != nil {
+		if !errors.Is(err, ErrAddressNotFound) {
+			slog.WarnContext(ctx, "qerds: look up recipient for local fetch", slog.String("error", err.Error()))
+		}
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), localFetchTimeout)
+		defer cancel()
+		for _, wait := range localFetchWaits {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(wait):
+			}
+			received, err := s.Poll(ctx, orgID)
+			if err != nil {
+				slog.WarnContext(ctx, "qerds: local fetch", slog.String("orgId", orgID.String()), slog.String("error", err.Error()))
+				return
+			}
+			if received > 0 {
+				return
+			}
+		}
+	}()
 }
 
 // ResolveSender picks the address a message is sent from: the org default when

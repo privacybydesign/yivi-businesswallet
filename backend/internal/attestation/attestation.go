@@ -245,7 +245,10 @@ type Issued struct {
 	Qualified       bool           `json:"qualified"`
 	Status          string         `json:"status"`
 	Delivery        string         `json:"delivery"`
-	IssuanceID      string         `json:"-"`
+	// ClaimReported is true when the issuer itself reports the claim (the EU
+	// issuer reserving a status list entry), so no page has to ask for it.
+	ClaimReported bool   `json:"claimReported"`
+	IssuanceID    string `json:"-"`
 	// CredentialUUID is the hosted issuer's handle for the minted credential,
 	// captured on claim. It keys the issuer's status-list revocation and never
 	// leaves the backend.

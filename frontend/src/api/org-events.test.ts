@@ -151,6 +151,105 @@ describe("followOrgEvents", () => {
     stop();
   });
 
+  // A tab the browser froze keeps the lock but says nothing; the other tabs
+  // must not wait on it forever.
+  it("takes the stream over from a leader that went silent", async () => {
+    const streams: FakeStream[] = [];
+    const signals: OrgSignal[] = [];
+    let release = (): void => undefined;
+    void navigator.locks
+      .request(
+        "org-events:frozen",
+        () =>
+          new Promise<void>((resolve) => {
+            release = resolve;
+          }),
+      )
+      .catch(() => undefined);
+    await settle();
+    const stop = followOrgEvents(
+      "frozen",
+      () => {
+        const stream = new FakeStream();
+        streams.push(stream);
+        return stream;
+      },
+      (what) => signals.push(what),
+      30,
+    );
+    await settle();
+    expect(streams).toHaveLength(0);
+    // Past twice the stale limit without a word from the leader.
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    const live = streams.filter((stream) => !stream.closed);
+    expect(live).toHaveLength(1);
+    live[0].emit("open");
+    live[0].emit("attestations");
+    await settle();
+    expect(signals.slice(-2)).toEqual(["connected", "attestations"]);
+    stop();
+    release();
+  });
+
+  it("closes its stream when another tab takes the lock over", async () => {
+    const streams: FakeStream[] = [];
+    const stop = followOrgEvents(
+      "stolen",
+      () => {
+        const stream = new FakeStream();
+        streams.push(stream);
+        return stream;
+      },
+      () => undefined,
+    );
+    await settle();
+    expect(streams).toHaveLength(1);
+    let release = (): void => undefined;
+    void navigator.locks.request(
+      "org-events:stolen",
+      { steal: true },
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    );
+    await settle();
+    expect(streams[0].closed).toBe(true);
+    stop();
+    release();
+  });
+
+  // Without queuing again, a tab whose lock was taken waits out its silence
+  // timer once the other tab closes, with no stream meanwhile.
+  it("leads again at once when the tab that took the lock over lets go", async () => {
+    const streams: FakeStream[] = [];
+    const stop = followOrgEvents(
+      "returned",
+      () => {
+        const stream = new FakeStream();
+        streams.push(stream);
+        return stream;
+      },
+      () => undefined,
+    );
+    await settle();
+    let release = (): void => undefined;
+    void navigator.locks.request(
+      "org-events:returned",
+      { steal: true },
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    );
+    await settle();
+    expect(streams.filter((stream) => !stream.closed)).toHaveLength(0);
+    release();
+    await settle();
+    expect(streams.filter((stream) => !stream.closed)).toHaveLength(1);
+    stop();
+  });
+
   it("gives another org a stream of its own", async () => {
     let opened = 0;
     const open = (): FakeStream => {

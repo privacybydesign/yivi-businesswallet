@@ -11,6 +11,7 @@ import (
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/database"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/openid4vciissuer"
 )
 
 const issuedColumns = `id, organization_id, template_id, schema_vct, recipient_kind,
@@ -36,6 +37,7 @@ func scanIssued(row rowScanner) (Issued, error) {
 		return Issued{}, err
 	}
 	i.Attributes = attrs
+	i.ClaimReported = openid4vciissuer.IsEudiIssuance(i.IssuanceID)
 	if reason != nil {
 		i.RevocationReason = *reason
 	}
