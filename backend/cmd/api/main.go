@@ -1120,7 +1120,7 @@ func (w *wiring) buildAttestations(ctx context.Context) error {
 			relyingparty.NewTokenVerifier(requesterIssuerTrust,
 				eudiholder.NewStatusListChecker(requesterIssuerTrust, cfg.AttestationHolderAllowInsecureHTTP)),
 			cfg.OpenID4VPRequesterPublicURL, cfg.OpenID4VPOrgRequestTTL),
-		w.requireUser, w.orgHandler.Authorize)
+		attestation.NewStore(w.pool, w.recorder), w.requireUser, w.orgHandler.Authorize)
 	w.requestTemplates = openid4vprequester.NewTemplateHandler(requesterStore, w.requireUser, w.orgHandler.Authorize)
 
 	attestationStore := attestation.NewStore(w.pool, w.recorder)

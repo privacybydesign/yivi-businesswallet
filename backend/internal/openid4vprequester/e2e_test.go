@@ -52,7 +52,7 @@ func TestOrgToOrgCredentialRequestEndToEnd(t *testing.T) {
 	srv := httptest.NewServer(http.StripPrefix("/api/v1", mux))
 	t.Cleanup(srv.Close)
 	requester := openid4vprequester.NewService(store, qerdsA, ca, verifiedAs(requestedVCT), srv.URL, e2eTTL)
-	openid4vprequester.NewHandler(requester, passThrough, passThrough).Register(mux)
+	openid4vprequester.NewHandler(requester, nil, passThrough, passThrough).Register(mux)
 
 	// B: the production validator, trusting A's CA; plain http because the
 	// test server is on loopback.
