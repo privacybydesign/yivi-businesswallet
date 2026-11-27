@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"image"
 	"image/png"
 	"net/http"
@@ -71,7 +72,7 @@ func TestCreateTransaction(t *testing.T) {
 			}))
 			t.Cleanup(srv.Close)
 
-			trx, err := New(testKeyID, testSecret, srv.URL+"/", srv.Client()).CreateTransaction(context.Background(), LocaleDutch, ScanOptions{RedactBSN: redact, RedactPortrait: redact, MinimumAge: testMinimumAge})
+			trx, err := New(testKeyID, testSecret, srv.URL+"/", srv.Client()).CreateTransaction(context.Background(), LocaleDutch, ScanOptions{RedactBSN: redact, RedactPortrait: redact, MinimumAge: testMinimumAge, PersonalNumber: redact})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -84,10 +85,11 @@ func TestCreateTransaction(t *testing.T) {
 			}
 			scan := got["settings"].(map[string]any)["documentScan"].(map[string]any)
 			// A Dutch passport has its BSN on the back: only a desired
-			// personal number makes ID Scan ask for it.
-			desired, _ := scan["desiredFields"].([]any)
-			if scan["requireBothSides"] != true || len(desired) != 1 || desired[0] != fieldPersonalNumber {
-				t.Errorf("documentScan = %v, want both sides and the personal number desired", scan)
+			// personal number makes ID Scan ask for it, so only a flow
+			// that keeps the BSN desires it.
+			desired, has := scan["desiredFields"].([]any)
+			if scan["requireBothSides"] != true || has != redact || has && (len(desired) != 1 || desired[0] != fieldPersonalNumber) {
+				t.Errorf("documentScan = %v, want both sides and the personal number desired %v", scan, redact)
 			}
 			// The BSN is printed as the personal number, and on an older
 			// Dutch document in the MRZ too. The signature goes with it.
@@ -203,6 +205,12 @@ func TestResult(t *testing.T) {
 	if res.FieldsValid == nil || !*res.FieldsValid || res.ZonesMatch == nil || *res.ZonesMatch {
 		t.Errorf("fields valid %v, zones match %v; want valid, not matching", res.FieldsValid, res.ZonesMatch)
 	}
+	if !slices.Equal(res.ZonesMismatch, []string{"date_of_expiry"}) {
+		t.Errorf("zones mismatch %v, want the field that differs", res.ZonesMismatch)
+	}
+	if want := []ZoneDiff{{Field: "date_of_expiry", Printed: "14.07.2031"}}; !slices.Equal(res.ZoneDiffs, want) {
+		t.Errorf("zone diffs %+v, want %+v", res.ZoneDiffs, want)
+	}
 	if res.Front.MimeType != "image/png" || !bytes.HasSuffix(res.Front.Data, []byte("front")) {
 		t.Errorf("front = %s, %q…", res.Front.MimeType, res.Front.Data[len(res.Front.Data)-5:])
 	}
@@ -211,19 +219,46 @@ func TestResult(t *testing.T) {
 	}
 }
 
-// A passport's personal number page comes as its page B: that is its back.
+// A passport's personal number page comes as its page B: that is its back,
+// when its personal number was read. Without one it is another page.
 func TestResultPassportPageBIsBack(t *testing.T) {
-	const passport = `{"state":"completed","tasks":[{"type":"document_scan","state":"completed","files":[
+	const passport = `{"state":"completed","tasks":[{"type":"document_scan","state":"completed",%s"files":[
 		{"category":"document","type":"passport","name":"Netherlands - ePassport (2014)","url":"{base}/downloads/front"},
 		{"category":"document","type":"passport_page","name":"Netherlands - ePassport (2014) Page B","url":"{base}/downloads/back"},
 		{"category":"image","type":"portrait","name":"","url":"{base}/downloads/portrait"}]}]}`
-	srv := resultServer(t, passport, pngBytes(t))
-	res, err := New(testKeyID, testSecret, srv.URL, srv.Client()).Result(context.Background(), "trx-1", "res-1")
-	if err != nil {
+	const personalNumber = `"result":[{"field":"personal_number","values":[{"source":"visual","value":"999999990"}]}],`
+	for name, fields := range map[string]string{"read": personalNumber, "not read": ""} {
+		t.Run(name, func(t *testing.T) {
+			srv := resultServer(t, fmt.Sprintf(passport, fields), pngBytes(t))
+			res, err := New(testKeyID, testSecret, srv.URL, srv.Client()).Result(context.Background(), "trx-1", "res-1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.HasSuffix(res.Front.Data, []byte("front")) {
+				t.Errorf("front %q…, want the data page", res.Front.Data[len(res.Front.Data)-5:])
+			}
+			if read := fields != ""; (res.Back != nil) != read || read && !bytes.HasSuffix(res.Back.Data, []byte("back")) {
+				t.Errorf("back %v, want page B as the back only when its personal number was read", res.Back != nil)
+			}
+		})
+	}
+}
+
+// A field whose zones differ keeps what each zone read, but never the
+// personal number, a Dutch document's BSN.
+func TestZoneDiffs(t *testing.T) {
+	var fields []resultField
+	if err := json.Unmarshal([]byte(`[
+		{"field":"surname","comparison":"no_match","values":[{"source":"mrz","value":"JANSEN"},{"source":"visual","value":" Janssen "}]},
+		{"field":"personal_number","comparison":"no_match","values":[{"source":"mrz","value":"999999990"},{"source":"visual","value":"999999991"}]},
+		{"field":"given_names","comparison":"match","values":[{"source":"mrz","value":"ANNA"},{"source":"visual","value":"Anna"}]}]`), &fields); err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.HasSuffix(res.Front.Data, []byte("front")) || res.Back == nil || !bytes.HasSuffix(res.Back.Data, []byte("back")) {
-		t.Errorf("front %q…, back %v; want the data page and page B as the back", res.Front.Data[len(res.Front.Data)-5:], res.Back != nil)
+	if got, want := zoneDiffs(fields), []ZoneDiff{{Field: "surname", MRZ: "JANSEN", Printed: "Janssen"}}; !slices.Equal(got, want) {
+		t.Errorf("zoneDiffs = %+v, want %+v", got, want)
+	}
+	if got := mismatchedFields(fields); !slices.Equal(got, []string{"surname", "personal_number"}) {
+		t.Errorf("mismatchedFields = %v, want both names", got)
 	}
 }
 

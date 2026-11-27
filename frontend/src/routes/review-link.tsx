@@ -6,6 +6,7 @@ import { useReviewLinkQuery } from "../api/identity-proofing.queries";
 import type { ReviewTarget } from "../api/identity-proofing";
 import { ApiError } from "../api/http";
 import { useWhenFormatter } from "../lib/format-when";
+import { embedderOrigin, postTargets } from "../lib/hosted-completion";
 import { postReviewCompleted, reviewDone } from "../lib/review-link";
 import { RequestReview } from "./proofing-review";
 
@@ -34,7 +35,7 @@ export default function ReviewLink(): React.JSX.Element {
     posted.current = true;
     postReviewCompleted(
       window.parent,
-      data.embedOrigins,
+      postTargets(data.embedOrigins, embedderOrigin()),
       data.sessionId,
       data.request.status,
     );

@@ -172,11 +172,14 @@ func buildResult(sess session.Session, req appResultRequest, verifiedChipChecks 
 // documentCheckInfo is a document scan's result as a session's result carries
 // it: its verdict and checks, and the kind of document, never what it read.
 type documentCheckInfo struct {
-	Verdict      string   `json:"verdict,omitempty"`
-	Score        *float64 `json:"score,omitempty"`
-	FieldsValid  *bool    `json:"fieldsValid,omitempty"`
-	ZonesMatch   *bool    `json:"zonesMatch,omitempty"`
-	DocumentKind string   `json:"documentKind,omitempty"`
+	Verdict     string   `json:"verdict,omitempty"`
+	Score       *float64 `json:"score,omitempty"`
+	FieldsValid *bool    `json:"fieldsValid,omitempty"`
+	ZonesMatch  *bool    `json:"zonesMatch,omitempty"`
+	// ZonesMismatch names the fields whose zones read differently: the
+	// fields' names, not what was read.
+	ZonesMismatch []string `json:"zonesMismatch,omitempty"`
+	DocumentKind  string   `json:"documentKind,omitempty"`
 }
 
 // addDocumentCheck adds sess's document scan result to result, released
@@ -188,8 +191,13 @@ func addDocumentCheck(result map[string]any, sess session.Session) {
 		return
 	}
 	c := p.Check
+	// What the zones read is document data: released with it alone.
+	if len(c.ZoneDiffs) > 0 && attrRequested(sess, attrDocument) {
+		result["documentZoneDiffs"] = c.ZoneDiffs
+	}
 	result["documentCheck"] = documentCheckInfo{
-		Verdict: c.Verdict, Score: c.Score, FieldsValid: c.FieldsValid, ZonesMatch: c.ZonesMatch, DocumentKind: c.Document.Kind,
+		Verdict: c.Verdict, Score: c.Score, FieldsValid: c.FieldsValid, ZonesMatch: c.ZonesMatch,
+		ZonesMismatch: c.ZonesMismatch, DocumentKind: c.Document.Kind,
 	}
 }
 

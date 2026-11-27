@@ -42,6 +42,7 @@ import {
 import { legalPeriodLabel } from "../lib/legal-retention";
 import {
   isDocumentVerdict,
+  isZoneField,
   documentKindOf,
   addressVerificationNote,
   assuranceLevelLabel,
@@ -983,9 +984,12 @@ function documentLabel(
 // data was valid, and whether the MRZ read the same as the printed text.
 function DocumentCheckRows({
   check,
+  diffs = [],
   outcome,
 }: Readonly<{
   check: NonNullable<ProofingResult["evidence"][number]["documentCheck"]>;
+  // What each zone read of the fields that differ.
+  diffs?: ProofingResult["zoneDiffs"];
   // A check's outcome in words (IdentityRows).
   outcome: (value: string | undefined) => string;
 }>): React.JSX.Element {
@@ -997,6 +1001,11 @@ function DocumentCheckRows({
     check.score === undefined || check.score < 0
       ? ""
       : ` (${Math.round(check.score * PERCENT)}%)`;
+  const fieldName = (field: string): string =>
+    isZoneField(field)
+      ? t(`identityProofing.sessions.identity.zoneFields.${field}`)
+      : field;
+  const mismatch = (check.zonesMismatch ?? []).map(fieldName);
   return (
     <>
       <dt className="text-muted">
@@ -1010,7 +1019,26 @@ function DocumentCheckRows({
       <dt className="text-muted">
         {t("identityProofing.sessions.identity.documentZones")}
       </dt>
-      <dd>{outcome(check.zones)}</dd>
+      <dd>
+        {outcome(check.zones)}
+        {mismatch.length > 0 &&
+          ` (${t("identityProofing.sessions.identity.zonesDiffer", {
+            fields: mismatch.join(", "),
+          })})`}
+      </dd>
+      {diffs.map((diff) => (
+        <React.Fragment key={diff.field}>
+          <dt className="text-muted first-letter:uppercase">
+            {fieldName(diff.field)}
+          </dt>
+          <dd>
+            {t("identityProofing.sessions.identity.zoneValues", {
+              mrz: diff.mrz || "—",
+              printed: diff.printed || "—",
+            })}
+          </dd>
+        </React.Fragment>
+      ))}
     </>
   );
 }
@@ -1112,7 +1140,11 @@ function IdentityRows({
                   .join(" · ") || evidence.type}
           </dd>
           {evidence.documentCheck && (
-            <DocumentCheckRows check={evidence.documentCheck} outcome={check} />
+            <DocumentCheckRows
+              check={evidence.documentCheck}
+              diffs={result.data.zoneDiffs}
+              outcome={check}
+            />
           )}
           {evidence.documentCheck === null && (
             <>

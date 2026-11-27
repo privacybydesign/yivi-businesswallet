@@ -51,11 +51,13 @@ func (s *fakeScanner) TransactionStatus(_ context.Context, _ string) (idscan.Sta
 }
 
 var scannedResult = idscan.Result{
-	Completed:    true,
-	Authenticity: idscan.Doubtful,
-	Score:        new(0.62),
-	FieldsValid:  new(true),
-	ZonesMatch:   new(false),
+	Completed:     true,
+	Authenticity:  idscan.Doubtful,
+	Score:         new(0.62),
+	FieldsValid:   new(true),
+	ZonesMatch:    new(false),
+	ZonesMismatch: []string{"surname"},
+	ZoneDiffs:     []idscan.ZoneDiff{{Field: "surname", MRZ: "JANSEN", Printed: "Janssen"}},
 	Document: idscan.Document{
 		Type: "identity_card", IssuingState: "NLD", Number: "XR1234567", Surname: "Jansen", GivenNames: "Anna",
 		DateOfBirth: "1990-03-10", DateOfExpiry: "2031-07-14", PersonalNumber: "999999990",
@@ -172,6 +174,8 @@ func checkScannedPhoto(t *testing.T, photo proofingprovider.DocumentPhoto) {
 	}
 	want := proofingprovider.DocumentCheck{
 		Verdict: proofingprovider.DocumentDoubtful, Score: scannedResult.Score, FieldsValid: scannedResult.FieldsValid, ZonesMatch: scannedResult.ZonesMatch,
+		ZonesMismatch: scannedResult.ZonesMismatch,
+		ZoneDiffs:     []proofingprovider.ZoneDiff{{Field: "surname", MRZ: "JANSEN", Printed: "Janssen"}},
 		Document: proofingprovider.ScannedDocument{
 			Kind: proofingprovider.DocumentKindIdentityCard, IssuingState: "NLD", Number: "XR1234567", Surname: "Jansen", GivenNames: "Anna",
 			DateOfBirth: "1990-03-10", DateOfExpiry: "2031-07-14",
@@ -274,6 +278,20 @@ func TestDocumentCheckBSN(t *testing.T) {
 	}
 }
 
+// What the zones read of the date of birth stays out of a flow whose age
+// check withholds it.
+func TestZoneDiffsWithholdTheAgeChecksBirthDate(t *testing.T) {
+	diffs := []idscan.ZoneDiff{{Field: "surname", MRZ: "A", Printed: "B"}, {Field: "date_of_birth", MRZ: "1990-03-10", Printed: "1990-03-11"}}
+	flow := photoFlow
+	if got := zoneDiffs(diffs, flow); len(got) != 2 {
+		t.Errorf("zoneDiffs = %+v, want both", got)
+	}
+	flow.RequestedAttributes = []string{attributeAgeOver}
+	if got := zoneDiffs(diffs, flow); len(got) != 1 || got[0].Field != "surname" {
+		t.Errorf("zoneDiffs with an age check = %+v, want the surname only", got)
+	}
+}
+
 func TestDocumentScanFollowsTheFlow(t *testing.T) {
 	for name, tc := range map[string]struct {
 		flow func(*proofingprovider.Flow)
@@ -281,7 +299,9 @@ func TestDocumentScanFollowsTheFlow(t *testing.T) {
 	}{
 		"as created":          {func(*proofingprovider.Flow) {}, idscan.ScanOptions{RedactPortrait: true}},
 		"BSN blacked":         {func(f *proofingprovider.Flow) { f.BlurBSN = new(true) }, idscan.ScanOptions{RedactBSN: true, RedactPortrait: true}},
-		"BSN kept":            {func(f *proofingprovider.Flow) { f.BSNPolicy = bsnPolicyRetrieve }, idscan.ScanOptions{RedactPortrait: true}},
+		"BSN kept":            {func(f *proofingprovider.Flow) { f.BSNPolicy = bsnPolicyRetrieve }, idscan.ScanOptions{RedactPortrait: true, PersonalNumber: true}},
+		"BSN masked":          {func(f *proofingprovider.Flow) { f.BSNPolicy = bsnPolicyMask }, idscan.ScanOptions{RedactPortrait: true, PersonalNumber: true}},
+		"BSN left out":        {func(f *proofingprovider.Flow) { f.BSNPolicy = "omit" }, idscan.ScanOptions{RedactPortrait: true}},
 		"face photos kept":    {func(f *proofingprovider.Flow) { f.KeepFacePhotos = new(true) }, idscan.ScanOptions{}},
 		"face photos dropped": {func(f *proofingprovider.Flow) { f.KeepFacePhotos = new(false) }, idscan.ScanOptions{RedactPortrait: true}},
 		"age check, 18":       {func(f *proofingprovider.Flow) { f.RequestedAttributes, f.AgeOver = []string{attributeAgeOver}, 18 }, idscan.ScanOptions{RedactPortrait: true, MinimumAge: 18}},

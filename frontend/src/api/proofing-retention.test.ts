@@ -66,6 +66,7 @@ const hostedPage = {
     documentPhoto: false,
     bsn: false,
     browserOnly: false,
+    followUp: false,
     diplomaMode: "off",
     addressMode: "off",
     employmentMode: "off",

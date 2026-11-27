@@ -882,6 +882,8 @@ export const nl: Translation<typeof en> = {
       overview: {
         heading: "{{name}} wil je identiteit verifiëren",
         headingEmbedded: "Bevestig je identiteit",
+        headingFollowUp: "Nog één stap",
+        introFollowUp: "Nu met {{sources}}. {{name}} ontvangt daarbij:",
         intro: "Je bevestigt je identiteit met {{sources}}. {{name}} ontvangt:",
         noData: "Alleen de uitkomst: of je identiteit is geverifieerd.",
         why: "Waarom:",
@@ -951,6 +953,9 @@ export const nl: Translation<typeof en> = {
           sides: "Foto's van de voor- en achterkant van je {{documents}}.",
           sidesWithPassport:
             "Foto's van de voor- en achterkant van je {{documents}}. Bij een paspoort is de achterkant de pagina met je BSN.",
+          sidesPassportFront:
+            "Foto's van de voor- en achterkant van je {{documents}}. Van een paspoort alleen de voorkant.",
+          passportFront: "Een foto van de voorkant van je paspoort.",
         },
       },
       attributeDetails: {
@@ -993,6 +998,7 @@ export const nl: Translation<typeof en> = {
           drivers_license: "de voor- en achterkant van je rijbewijs",
         },
         passportHint: "Bij een paspoort is de achterkant de pagina met je BSN.",
+        passportFront: "de voorkant van je paspoort",
         frameTitle: "ID-scan",
         start: "Document fotograferen",
         finishing: "Foto's toevoegen…",
@@ -1152,6 +1158,19 @@ export const nl: Translation<typeof en> = {
         },
         documentFields: "Gedrukte gegevens",
         documentZones: "MRZ gelijk aan gedrukte tekst",
+        zonesDiffer: "verschil in: {{fields}}",
+        zoneValues: "MRZ: {{mrz}} · gedrukt: {{printed}}",
+        zoneFields: {
+          surname: "achternaam",
+          given_names: "voornamen",
+          document_number: "documentnummer",
+          date_of_birth: "geboortedatum",
+          date_of_expiry: "vervaldatum",
+          sex: "geslacht",
+          nationality_code: "nationaliteit",
+          issuing_state_code: "land van uitgifte",
+          personal_number: "BSN",
+        },
         checks: {
           valid: "Geldig",
           invalid: "Ongeldig",
@@ -1435,7 +1454,7 @@ export const nl: Translation<typeof en> = {
     },
     redirectOrigins: {
       title: "Terugstuur-origins",
-      hint: "Eén per regel, zoals https://portal.example.com. Een gehoste pagina mag de persoon naar deze origins terugsturen en daarop worden ingesloten.",
+      hint: "Eén per regel, zoals https://portal.example.com, of https://*.example.com voor elk subdomein. Een gehoste pagina mag de persoon naar deze origins terugsturen en daarop worden ingesloten.",
       save: "Opslaan",
     },
     reviews: {
@@ -1927,6 +1946,9 @@ export const nl: Translation<typeof en> = {
       enabled: "Toestaan dat deze flow als link wordt verstuurd",
       enabledHint:
         "Leden kunnen dan “Link kopiëren” of e-mail kiezen als ze iemand verifiëren.",
+      followUp: "Volgt op een andere flow",
+      followUpHint:
+        "Voor een tweede flow voor dezelfde persoon, direct na een eerste. Het toestemmingsscherm heet dan “Nog één stap”, slaat de introductie en het contact over, en toont alleen wat deze flow verzamelt.",
       locales: "Talen",
       localesHint:
         "De pagina opent in de taal van het verzoek, anders in de browsertaal van de persoon.",
@@ -2005,7 +2027,7 @@ export const nl: Translation<typeof en> = {
       dg2: "De pasfoto van de houder op de chip, getoond naast de selfie.",
       chip_checks: "Of de chip echt bleek en geen kopie.",
       document_image:
-        "De voor- en achterkant van een ID-kaart of rijbewijs, of van een paspoort, waarvan de achterkant de pagina met het BSN is.",
+        "De voor- en achterkant van een ID-kaart of rijbewijs, en van een paspoort de voorkant, plus de pagina met het BSN als de flow het BSN bewaart.",
       selfie:
         "De foto van het gezicht die tijdens de gezichtscontrole is gemaakt.",
       biometrics:
@@ -2096,7 +2118,7 @@ export const nl: Translation<typeof en> = {
         addressHint:
           "Na de identiteitscontrole, in de browser en niet in de Idem-app: de persoon vult zijn postadres in. Een Nederlands adres wordt gecontroleerd in de Nederlandse adresregistratie (BAG); elk ander adres wordt bewaard zoals hij het opgeeft. Zo'n flow wordt op het scherm getoond of als gehoste link verstuurd, nooit gemaild.",
         photoHint:
-          "De voor- en achterkant van een ID-kaart of rijbewijs, of van een paspoort, waarvan de achterkant de pagina met het BSN is, gemaakt in de browser met de ID-scan. Getoond op het scherm of verstuurd als gehoste link, nooit per mail.",
+          "De voor- en achterkant van een ID-kaart of rijbewijs, en van een paspoort de voorkant, plus de pagina met het BSN als de flow het BSN bewaart. Gemaakt in de browser met de ID-scan. Getoond op het scherm of verstuurd als gehoste link, nooit per mail.",
         faceHint:
           "Een selfie, gecontroleerd op een levend persoon en vergeleken met de foto op de chip.",
         faceInScan: "Het gezicht controleren in de ID-scan",
@@ -2221,6 +2243,8 @@ export const nl: Translation<typeof en> = {
         keepFacePhotos: "Gezichtsfoto's bewaren na de vergelijking",
         keepFacePhotosHint:
           "Uit: het portret, de selfie en de foto van de afzender verdwijnen zodra de gezichtsvergelijking klaar is; de uitkomst blijft. Zet dit alleen aan voor een organisatie die ze moet bewaren.",
+        selfieNotReceived:
+          "De selfie zelf ontvang je pas als je ook Selfie aanvinkt onder Wat je ontvangt.",
       },
       footer:
         "Opslaan maakt versie {{version}}. Verzoeken die al zijn verstuurd houden hun versie.",

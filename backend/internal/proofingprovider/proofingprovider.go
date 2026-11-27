@@ -229,6 +229,9 @@ type Identity struct {
 	// ReferencePhoto is the relying party's own photo the live face was
 	// matched against, for a flow without the chip read; nil otherwise.
 	ReferencePhoto *Image
+	// ZoneDiffs is what the document scan's zones read of the fields that
+	// differ, for a reviewer: released with the document data only.
+	ZoneDiffs []ZoneDiff
 	// DocumentImage and DocumentImageBack are the photos of the document's
 	// front and back (the document_photo step; a passport's back is its
 	// personal number page), the printed BSN blurred under the tenant's policy.
@@ -294,6 +297,14 @@ type DocumentPhoto struct {
 	Face *FaceCheck
 }
 
+// ZoneDiff is a document field whose zones read differently: what the MRZ
+// and the printed text read.
+type ZoneDiff struct {
+	Field   string `json:"field"`
+	MRZ     string `json:"mrz"`
+	Printed string `json:"printed"`
+}
+
 // FaceCheck is a document scan service's face checks, in the engine's terms:
 // whether its liveness check passed, its score for the live face against the
 // document's portrait (nil when it gave none), and the live face.
@@ -315,6 +326,10 @@ type DocumentCheck struct {
 	// barcode) read the same; nil when it validated or compared none.
 	FieldsValid *bool
 	ZonesMatch  *bool
+	// ZonesMismatch names the fields whose zones read differently, and
+	// ZoneDiffs what each zone read of them (never the BSN).
+	ZonesMismatch []string
+	ZoneDiffs     []ZoneDiff
 	// Document is what it read off the document.
 	Document ScannedDocument
 }
@@ -384,6 +399,8 @@ type Evidence struct {
 	DocumentScore   *float64
 	DocumentFields  string
 	DocumentZones   string
+	// DocumentZonesMismatch names the fields whose zones read differently.
+	DocumentZonesMismatch []string
 }
 
 const (

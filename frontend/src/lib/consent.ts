@@ -149,7 +149,7 @@ export type ConsentTextKey =
   | `dg1WithoutBirthDate.${ConsentWording}`
   | `dg11.${"registered" | "document" | "mixed" | "mixedBsnOnly"}`
   | `ageOver.${"registered" | "document" | "mixed"}`
-  | `photos.${"sides" | "sidesWithPassport"}`;
+  | `photos.${"sides" | "sidesWithPassport" | "sidesPassportFront" | "passportFront"}`;
 
 // The text key of an item whose text depends on the sources; undefined for
 // one that says the same whatever the source.
@@ -158,6 +158,7 @@ export function consentDetailKey(
   requested: readonly string[],
   wording: ConsentWording,
   documents: readonly DocumentKind[],
+  passportBack: boolean,
 ): ConsentTextKey | undefined {
   if (value === ATTRIBUTE_DOCUMENT) {
     return requested.includes(ATTRIBUTE_AGE_OVER)
@@ -171,11 +172,26 @@ export function consentDetailKey(
     return wording === "licence" ? "ageOver.document" : `ageOver.${wording}`;
   }
   if (value === ATTRIBUTE_DOCUMENT_IMAGE) {
-    return documents.includes(PASSPORT)
-      ? "photos.sidesWithPassport"
-      : "photos.sides";
+    return photosDetailKey(documents, passportBack);
   }
   return undefined;
+}
+
+// The photos item's text: a passport's back, its BSN page, is photographed
+// only when the flow keeps the BSN.
+function photosDetailKey(
+  documents: readonly DocumentKind[],
+  passportBack: boolean,
+): ConsentTextKey {
+  if (!documents.includes(PASSPORT)) {
+    return "photos.sides";
+  }
+  if (passportBack) {
+    return "photos.sidesWithPassport";
+  }
+  return documents.length === 1
+    ? "photos.passportFront"
+    : "photos.sidesPassportFront";
 }
 
 // The BSN item's text: from the BRP, a document, or either, where a mixed

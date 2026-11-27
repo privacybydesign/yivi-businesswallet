@@ -162,9 +162,14 @@ type Result struct {
 	// text, barcode) read the same; nil when it validated or compared none.
 	FieldsValid *bool
 	ZonesMatch  *bool
-	Document    Document
-	Front       Image
-	Back        *Image
+	// ZonesMismatch names the fields whose zones read differently, and
+	// ZoneDiffs holds what each zone read of them, the personal number left
+	// out.
+	ZonesMismatch []string
+	ZoneDiffs     []ZoneDiff
+	Document      Document
+	Front         Image
+	Back          *Image
 	// Face is the face checks' outcome; nil when the scan asked none.
 	Face *Face
 }
@@ -187,6 +192,14 @@ type Document struct {
 	PersonalNumber string
 }
 
+// ZoneDiff is a field whose zones read differently: what the MRZ read and
+// what the printed text (or barcode) read.
+type ZoneDiff struct {
+	Field   string
+	MRZ     string
+	Printed string
+}
+
 // ScanOptions are the rules ID Scan enforces during the scan, from the flow.
 type ScanOptions struct {
 	// RedactBSN covers the personal number (a Dutch document's BSN), the MRZ
@@ -200,6 +213,9 @@ type ScanOptions struct {
 	// Face adds the face checks: a liveness check of the person, and a match
 	// of their face against the document's portrait.
 	Face bool
+	// PersonalNumber asks for the page holding the personal number of a
+	// document whose data page lacks it: a Dutch passport's BSN page.
+	PersonalNumber bool
 }
 
 type createRequest struct {
@@ -215,7 +231,7 @@ type createSettings struct {
 type documentScanSettings struct {
 	CaptureSources   []string `json:"captureSources"`
 	RequireBothSides bool     `json:"requireBothSides"`
-	DesiredFields    []string `json:"desiredFields"`
+	DesiredFields    []string `json:"desiredFields,omitempty"`
 	RedactFields     []string `json:"redactFields,omitempty"`
 	MinimumAge       *int     `json:"minimumAge,omitempty"`
 }
@@ -228,16 +244,19 @@ type createResponse struct {
 // CreateTransaction starts a document scan in locale, whose page the wallet
 // embeds: it posts the parent page the transaction's id, state and result id
 // when done. Only the camera counts, so no stored picture stands in for the
-// document; both sides are asked of a document that has two, and the page
-// holding the personal number of one whose data page lacks it (a Dutch
-// passport's BSN is on the back). With
+// document; both sides are asked of a document that has two, and with
+// opts.PersonalNumber the page holding the personal number of one whose data
+// page lacks it (a Dutch passport's BSN is on the back). With
 // opts.MinimumAge ID Scan refuses a holder too young. allowedExpiration and
 // validateFields are left out: with them ID Scan stopped recognising a
 // document it otherwise reads (unknown_type_front), so the engine refuses an
 // expired document or an invalid field from the result instead.
 func (c *Client) CreateTransaction(ctx context.Context, locale string, opts ScanOptions) (Transaction, error) {
 	settings := documentScanSettings{
-		CaptureSources: []string{captureCamera}, RequireBothSides: true, DesiredFields: []string{fieldPersonalNumber},
+		CaptureSources: []string{captureCamera}, RequireBothSides: true,
+	}
+	if opts.PersonalNumber {
+		settings.DesiredFields = []string{fieldPersonalNumber}
 	}
 	if opts.RedactBSN {
 		settings.RedactFields = []string{fieldPersonalNumber, fieldMRZ, fieldSignature}
@@ -308,7 +327,7 @@ const (
 
 // sourcePreference is the order a field's zones are read in: the MRZ first,
 // as ID Scan recommends, then the printed text, then a barcode.
-var sourcePreference = []string{"mrz", "visual", "barcode"}
+var sourcePreference = []string{sourceMRZ, "visual", "barcode"}
 
 type file struct {
 	Category string `json:"category"`
@@ -353,9 +372,16 @@ func (c *Client) Result(ctx context.Context, transactionID, resultID string) (Re
 	}
 	res := Result{
 		Completed: true, Authenticity: scanned, Score: score,
-		FieldsValid: fieldsAgree(fields, func(f resultField) string { return f.Validity }, validityValid, validityInvalid),
-		ZonesMatch:  fieldsAgree(fields, func(f resultField) string { return f.Comparison }, comparisonMatch, comparisonMismatch),
-		Document:    readDocument(fields, front.Type),
+		FieldsValid:   fieldsAgree(fields, func(f resultField) string { return f.Validity }, validityValid, validityInvalid),
+		ZonesMatch:    fieldsAgree(fields, func(f resultField) string { return f.Comparison }, comparisonMatch, comparisonMismatch),
+		ZonesMismatch: mismatchedFields(fields),
+		ZoneDiffs:     zoneDiffs(fields),
+		Document:      readDocument(fields, front.Type),
+	}
+	// A passport page whose personal number was not read is another page,
+	// such as the blank one before the data page, not the back.
+	if back != nil && back.Type == fileTypePassportPage && res.Document.PersonalNumber == "" {
+		back = nil
 	}
 	var err error
 	if res.Front, err = c.download(ctx, *front); err != nil {
@@ -394,6 +420,45 @@ func fieldsAgree(fields []resultField, of func(resultField) string, good, bad st
 	}
 	return new(true)
 }
+
+// mismatchedFields names the fields whose zones read differently, each once;
+// nil when none.
+func mismatchedFields(fields []resultField) []string {
+	var names []string
+	for _, f := range fields {
+		if f.Comparison == comparisonMismatch && !slices.Contains(names, f.Field) {
+			names = append(names, f.Field)
+		}
+	}
+	return names
+}
+
+// zoneDiffs is what each zone read of the fields whose zones differ, once
+// each; never the personal number, a Dutch document's BSN.
+func zoneDiffs(fields []resultField) []ZoneDiff {
+	var diffs []ZoneDiff
+	for _, f := range fields {
+		if f.Comparison != comparisonMismatch || f.Field == fieldPersonalNumber ||
+			slices.ContainsFunc(diffs, func(d ZoneDiff) bool { return d.Field == f.Field }) {
+			continue
+		}
+		d := ZoneDiff{Field: f.Field}
+		for _, v := range f.Values {
+			value := strings.TrimSpace(v.Value)
+			switch {
+			case v.Source == sourceMRZ && d.MRZ == "":
+				d.MRZ = value
+			case v.Source != sourceMRZ && d.Printed == "":
+				d.Printed = value
+			}
+		}
+		diffs = append(diffs, d)
+	}
+	return diffs
+}
+
+// sourceMRZ is the zone ID Scan names the MRZ.
+const sourceMRZ = "mrz"
 
 // readDocument is the document's data in fields, typed by the front photo's
 // document type.

@@ -573,6 +573,9 @@ type apiResultResponse struct {
 	Photo             *adminImage `json:"photo,omitempty"`
 	DocumentImage     *adminImage `json:"documentImage,omitempty"`
 	DocumentImageBack *adminImage `json:"documentImageBack,omitempty"`
+	// Selfie is the live face matched against the document, released only
+	// when the flow keeps the face photos and requests the selfie.
+	Selfie *adminImage `json:"selfie,omitempty"`
 }
 
 type apiIdentity struct {
@@ -665,12 +668,13 @@ func identityAsked(identity proofingprovider.Identity) proofingprovider.Asked {
 // apiDocumentCheck is a document scan's result: its verdict (authentic,
 // doubtful or fake) and score, and whether the fields it validated were
 // valid and its zones (MRZ, printed text) read the same (valid, invalid or
-// not_performed).
+// not_performed), and the fields whose zones read differently.
 type apiDocumentCheck struct {
-	Verdict string   `json:"verdict"`
-	Score   *float64 `json:"score,omitempty"`
-	Fields  string   `json:"fields"`
-	Zones   string   `json:"zones"`
+	Verdict       string   `json:"verdict"`
+	Score         *float64 `json:"score,omitempty"`
+	Fields        string   `json:"fields"`
+	Zones         string   `json:"zones"`
+	ZonesMismatch []string `json:"zonesMismatch,omitempty"`
 }
 
 func (h *Handler) apiSessionResult(w http.ResponseWriter, r *http.Request) error {
@@ -743,21 +747,24 @@ func (h *Handler) requestResult(w http.ResponseWriter, r *http.Request) error {
 	if identity.Status == proofingprovider.StatusApproved || identity.Status == proofingprovider.StatusNeedsReview {
 		out.Selfie = newAdminImage(identity.Selfie)
 		out.ReferencePhoto = newAdminImage(identity.ReferencePhoto)
+		out.ZoneDiffs = identity.ZoneDiffs
 	}
 	respond.JSON(w, r, http.StatusOK, out)
 	return nil
 }
 
 // adminResultResponse is the API's result as an admin reads it in the
-// wallet: for an approval, and for a check waiting for review, also the live
-// selfie matched against the document, and for the check in review its
-// identity and the document's images. The API never carries a selfie.
+// wallet: for a check waiting for review also its identity, the document's
+// images and the selfie, and for both the sender's reference photo and what
+// the document's zones read where they differ.
 type adminResultResponse struct {
 	apiResultResponse
-	Selfie *adminImage `json:"selfie,omitempty"`
 	// ReferencePhoto is the sender's own photo the selfie was matched
 	// against, for a flow without the chip read.
 	ReferencePhoto *adminImage `json:"referencePhoto,omitempty"`
+	// ZoneDiffs is what the document scan's zones read of the fields that
+	// differ: for the wallet only, never the API.
+	ZoneDiffs []proofingprovider.ZoneDiff `json:"zoneDiffs,omitempty"`
 }
 
 // withDocumentImages sets the document's portrait and the photos of its
@@ -815,6 +822,7 @@ func newAPIResultResponse(req Request, identity proofingprovider.Identity, now t
 		out.VerifiedAt = identity.CompletedAt
 		out.Identity = newAPIIdentity(identity)
 		out.withDocumentImages(identity)
+		out.Selfie = newAdminImage(identity.Selfie)
 	}
 	if ev := identity.Evidence; ev != nil {
 		want := identityAsked(identity)
@@ -829,7 +837,7 @@ func newAPIResultResponse(req Request, identity proofingprovider.Identity, now t
 			entry.PassiveAuth, entry.ActiveAuth = askedString(want.ChipChecks, ev.PassiveAuth), askedString(want.ChipChecks, ev.ActiveAuth)
 		}
 		if ev.DocumentVerdict != "" {
-			entry.DocumentCheck = askedField(want.DocumentCheck, &apiDocumentCheck{Verdict: ev.DocumentVerdict, Score: ev.DocumentScore, Fields: ev.DocumentFields, Zones: ev.DocumentZones})
+			entry.DocumentCheck = askedField(want.DocumentCheck, &apiDocumentCheck{Verdict: ev.DocumentVerdict, Score: ev.DocumentScore, Fields: ev.DocumentFields, Zones: ev.DocumentZones, ZonesMismatch: ev.DocumentZonesMismatch})
 		}
 		out.Evidence = append(out.Evidence, entry)
 	}

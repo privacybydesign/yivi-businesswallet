@@ -778,6 +778,9 @@ const proofingFlowHostedSchema = z.object({
   locales: z.array(z.string()),
   completion: z.enum(["redirect", "done"]).catch("done"),
   returnUrl: z.string(),
+  // A flow that follows another for the same person: a shorter consent
+  // screen.
+  followUp: z.boolean(),
 });
 
 export type ProofingFlowHosted = z.infer<typeof proofingFlowHostedSchema>;
@@ -1366,6 +1369,7 @@ const proofingResultSchema = z.object({
           score: z.number().optional(),
           fields: z.string(),
           zones: z.string(),
+          zonesMismatch: z.array(z.string()).optional(),
         })
         .nullable()
         .optional(),
@@ -1378,6 +1382,13 @@ const proofingResultSchema = z.object({
   referencePhoto: proofingImageSchema.optional(),
   documentImage: proofingImageSchema.optional(),
   documentImageBack: proofingImageSchema.optional(),
+  // What the document scan's MRZ and printed text read of the fields that
+  // differ; the wallet's view only.
+  zoneDiffs: z
+    .array(
+      z.object({ field: z.string(), mrz: z.string(), printed: z.string() }),
+    )
+    .optional(),
 });
 
 export type ProofingResult = z.infer<typeof proofingResultSchema>;
@@ -1775,6 +1786,7 @@ const hostedProofingSchema = hostedProgressSchema.extend({
     scanDocuments: z.array(z.string()).optional(),
     // The page runs every step itself: no app is chosen.
     browserOnly: z.boolean(),
+    followUp: z.boolean(),
     diplomaMode: diplomaModeSchema,
     addressMode: addressModeSchema,
     employmentMode: employmentModeSchema,

@@ -48,13 +48,39 @@ func TestRedirectOriginsAreHTTPS(t *testing.T) {
 		"too many":       tooMany,
 		// Each would mean something else in the hosted page's frame-ancestors.
 		"any host":         {"https://*"},
-		"any subdomain":    {"https://*.acme.example"},
+		"a top-level name": {"https://*.example"},
+		"two wildcards":    {"https://*.*.acme.example"},
+		"an inner *":       {"https://portal.*.example"},
+		"a plain wildcard": {"http://*.localhost"},
+		"an address":       {"https://*.127.0.0.1"},
 		"a CSP keyword":    {"https://'self'"},
 		"a CSP separator":  {"https://a.example;script-src"},
 		"a leading hyphen": {"https://-acme.example"},
 	} {
 		if _, err := saveOrigins(f.svc, origins); !errors.Is(err, ErrInvalidInput) {
 			t.Errorf("%s: %v, want ErrInvalidInput", name, err)
+		}
+	}
+}
+
+func TestWildcardOriginCoversSubdomains(t *testing.T) {
+	allowed, err := normalizeOrigins([]string{"https://*.Acme.example", "https://*.shop.example:8443"})
+	if err != nil {
+		t.Fatalf("normalizeOrigins: %v", err)
+	}
+	for origin, want := range map[string]bool{
+		"https://portal.acme.example":       true,
+		"https://a.b.acme.example":          true,
+		"https://acme.example":              false,
+		"https://portal.acme.example:8443":  false,
+		"http://portal.acme.example":        false,
+		"https://evilacme.example":          false,
+		"https://acme.example.evil.example": false,
+		"https://www.shop.example:8443":     true,
+		"https://www.shop.example":          false,
+	} {
+		if got := originAllowed(origin, allowed); got != want {
+			t.Errorf("originAllowed(%s) = %v, want %v", origin, got, want)
 		}
 	}
 }
@@ -491,6 +517,29 @@ func TestHostedViewLeavesOutFlowLabels(t *testing.T) {
 	}
 	if strings.Contains(w.Body.String(), appFlow.Name) {
 		t.Errorf("hosted view = %s, want no flow name %q", w.Body.String(), appFlow.Name)
+	}
+}
+
+// A follow-up flow's page is told so, for its shorter consent screen.
+func TestHostedViewCarriesFollowUp(t *testing.T) {
+	f := newFixture()
+	f.svc.flowHostedSettings = &fakeFlowHosted{byFlow: map[string]FlowHosted{
+		f.ips.flows[0].ID: {Enabled: true, Completion: CompletionRedirect, FollowUp: true},
+	}}
+	_, token := f.sendHosted(t)
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/proof/"+token, nil)
+	r.SetPathValue("token", token)
+	w := httptest.NewRecorder()
+	if err := NewHandler(f.svc, nil, nil).hostedView(w, r); err != nil {
+		t.Fatalf("hostedView: %v", err)
+	}
+	var view struct {
+		Flow struct {
+			FollowUp bool `json:"followUp"`
+		} `json:"flow"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &view); err != nil || !view.Flow.FollowUp {
+		t.Errorf("hosted view = %s, %v; want followUp", w.Body.String(), err)
 	}
 }
 

@@ -291,6 +291,9 @@ type hostedViewResponse struct {
 		ScanDocuments []string `json:"scanDocuments"`
 		// BrowserOnly is a flow the browser runs alone: no app is chosen.
 		BrowserOnly bool `json:"browserOnly"`
+		// FollowUp is a flow that follows another for the same person: the
+		// consent screen leaves out what the first one already said.
+		FollowUp bool `json:"followUp"`
 		// DiplomaMode is whether the session asks for DUO diploma extracts.
 		DiplomaMode DiplomaMode `json:"diplomaMode"`
 		// AddressMode is whether the session asks for the postal address.
@@ -421,6 +424,7 @@ func (h *Handler) hostedView(w http.ResponseWriter, r *http.Request) error {
 	out.Flow.BSN = keepsBSN(f)
 	out.Flow.ScanDocuments = scanDocuments(f)
 	out.Flow.BrowserOnly = f.BrowserOnly
+	out.Flow.FollowUp = hosted.FlowSettings.FollowUp
 	out.Flow.DiplomaMode = diplomaModeOf(hosted.Request).forSubject()
 	out.Flow.AddressMode = addressModeOf(hosted.Request).forSubject()
 	out.Flow.EmploymentMode = employmentModeOf(hosted.Request).forSubject()

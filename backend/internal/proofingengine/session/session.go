@@ -217,16 +217,28 @@ type DocumentPhotoStepEvidence struct {
 	AgeOver *AgeOver       `json:"ageOver,omitempty"`
 }
 
+// ZoneDiff is a document field whose zones read differently: what the MRZ
+// and the printed text read.
+type ZoneDiff struct {
+	Field   string `json:"field"`
+	MRZ     string `json:"mrz"`
+	Printed string `json:"printed"`
+}
+
 // DocumentCheck is a document scan service's result on the document photo:
 // its verdict (authentic, doubtful or fake) and score, whether the fields it
 // validated were valid and its zones (MRZ, printed text) read the same (nil
 // when it checked none), and what it read off the document.
 type DocumentCheck struct {
-	Verdict     string          `json:"verdict,omitempty"`
-	Score       *float64        `json:"score,omitempty"`
-	FieldsValid *bool           `json:"fieldsValid,omitempty"`
-	ZonesMatch  *bool           `json:"zonesMatch,omitempty"`
-	Document    ScannedDocument `json:"document"`
+	Verdict     string   `json:"verdict,omitempty"`
+	Score       *float64 `json:"score,omitempty"`
+	FieldsValid *bool    `json:"fieldsValid,omitempty"`
+	ZonesMatch  *bool    `json:"zonesMatch,omitempty"`
+	// ZonesMismatch names the fields whose zones read differently, and
+	// ZoneDiffs what each zone read of them.
+	ZonesMismatch []string        `json:"zonesMismatch,omitempty"`
+	ZoneDiffs     []ZoneDiff      `json:"zoneDiffs,omitempty"`
+	Document      ScannedDocument `json:"document"`
 }
 
 // ScannedDocument is what a document scan service read off a document: dates

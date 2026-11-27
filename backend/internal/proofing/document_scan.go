@@ -329,10 +329,13 @@ func (s *Service) withSpentDocumentScan(ctx context.Context, req Request) Reques
 var faceScanTasks = []string{idscan.TaskFaceLiveness, idscan.TaskFaceMatch}
 
 // documentScanOptions are the rules of flow f the scan service enforces: the
-// BSN blacked out when f says so, the portrait unless f keeps face photos, and
-// f's age check.
+// BSN blacked out when f says so, the portrait unless f keeps face photos, the
+// passport's BSN page only when f keeps the BSN, and f's age check.
 func documentScanOptions(f proofingprovider.Flow) idscan.ScanOptions {
-	opts := idscan.ScanOptions{RedactBSN: redactsDocumentBSN(f), RedactPortrait: !keepsFacePhotos(f), Face: scansFace(f)}
+	opts := idscan.ScanOptions{
+		RedactBSN: redactsDocumentBSN(f), RedactPortrait: !keepsFacePhotos(f), Face: scansFace(f),
+		PersonalNumber: keepsBSN(f),
+	}
 	if slices.Contains(f.RequestedAttributes, attributeAgeOver) {
 		opts.MinimumAge = f.AgeOver
 	}
@@ -358,9 +361,26 @@ func documentCheck(res idscan.Result, f proofingprovider.Flow) proofingprovider.
 	}
 	return proofingprovider.DocumentCheck{
 		Verdict: documentVerdicts[res.Authenticity], Score: res.Score,
-		FieldsValid: res.FieldsValid, ZonesMatch: res.ZonesMatch, Document: scanned,
+		FieldsValid: res.FieldsValid, ZonesMatch: res.ZonesMatch, ZonesMismatch: res.ZonesMismatch,
+		ZoneDiffs: zoneDiffs(res.ZoneDiffs, f), Document: scanned,
 	}
 }
+
+// zoneDiffs are diffs in the engine's terms, the date of birth left out of a
+// flow whose age check withholds it.
+func zoneDiffs(diffs []idscan.ZoneDiff, f proofingprovider.Flow) []proofingprovider.ZoneDiff {
+	var out []proofingprovider.ZoneDiff
+	for _, d := range diffs {
+		if d.Field == idscanFieldDateOfBirth && slices.Contains(f.RequestedAttributes, attributeAgeOver) {
+			continue
+		}
+		out = append(out, proofingprovider.ZoneDiff{Field: d.Field, MRZ: d.MRZ, Printed: d.Printed})
+	}
+	return out
+}
+
+// idscanFieldDateOfBirth is how ID Scan names the date of birth.
+const idscanFieldDateOfBirth = "date_of_birth"
 
 // documentKinds are ID Scan's document types the engine's flows accept,
 // as the engine's kinds; any other type has no kind.

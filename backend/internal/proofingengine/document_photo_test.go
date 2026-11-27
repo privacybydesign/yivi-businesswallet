@@ -289,10 +289,13 @@ func TestDocumentPhotoOnlyFlowDecidedByPhoto(t *testing.T) {
 		status    session.Status
 		errorCode string
 	}{
-		"authentic":      {func(*pp.DocumentCheck) {}, session.StatusApproved, ""},
-		"doubtful":       {func(c *pp.DocumentCheck) { c.Verdict = pp.DocumentDoubtful }, session.StatusNeedsReview, ""},
-		"no verdict":     {func(c *pp.DocumentCheck) { *c = pp.DocumentCheck{} }, session.StatusNeedsReview, ""},
-		"zones differ":   {func(c *pp.DocumentCheck) { c.ZonesMatch = new(false) }, session.StatusNeedsReview, ""},
+		"authentic":  {func(*pp.DocumentCheck) {}, session.StatusApproved, ""},
+		"doubtful":   {func(c *pp.DocumentCheck) { c.Verdict = pp.DocumentDoubtful }, session.StatusNeedsReview, ""},
+		"no verdict": {func(c *pp.DocumentCheck) { *c = pp.DocumentCheck{} }, session.StatusNeedsReview, ""},
+		"zones differ": {func(c *pp.DocumentCheck) {
+			c.ZonesMatch, c.ZonesMismatch = new(false), []string{"surname"}
+			c.ZoneDiffs = []pp.ZoneDiff{{Field: "surname", MRZ: "JANSEN", Printed: "Janssen"}}
+		}, session.StatusNeedsReview, ""},
 		"fake":           {func(c *pp.DocumentCheck) { c.Verdict = pp.DocumentFake }, session.StatusRejected, errCodeDocNotAuthentic},
 		"invalid fields": {func(c *pp.DocumentCheck) { c.FieldsValid = new(false) }, session.StatusRejected, errCodeDocFieldsInvalid},
 		"expired":        {func(c *pp.DocumentCheck) { c.Document.DateOfExpiry = "2020-01-01" }, session.StatusRejected, errCodeDocExpired},
@@ -311,6 +314,10 @@ func TestDocumentPhotoOnlyFlowDecidedByPhoto(t *testing.T) {
 			stored, _ := store.Get("org", sess.ID)
 			if stored.Status != tc.status || stored.ErrorCode != tc.errorCode {
 				t.Errorf("status %q, error %q; want %q, %q", stored.Status, stored.ErrorCode, tc.status, tc.errorCode)
+			}
+			// The result names the fields that differ, never what was read.
+			if check, _ := stored.Result["documentCheck"].(documentCheckInfo); !slices.Equal(check.ZonesMismatch, scan.ZonesMismatch) {
+				t.Errorf("zones mismatch %v, want %v", check.ZonesMismatch, scan.ZonesMismatch)
 			}
 		})
 	}
@@ -658,5 +665,20 @@ func TestAppHoldsSessionUntilItSubmits(t *testing.T) {
 	var refused *pp.RejectedError
 	if errors.As(err, &refused) && refused.Code == pp.CodeAppFinished {
 		t.Errorf("SessionHandover before the app's submit = %v, want no %s", err, pp.CodeAppFinished)
+	}
+}
+
+// What the zones read is document data: released with dg1 alone.
+func TestZoneDiffsReleasedWithTheDocument(t *testing.T) {
+	sess := session.Session{Steps: session.StepEvidence{DocumentPhoto: &session.DocumentPhotoStepEvidence{
+		Check: &session.DocumentCheck{ZoneDiffs: []session.ZoneDiff{{Field: "surname", MRZ: "JANSEN", Printed: "Janssen"}}},
+	}}}
+	for requested, want := range map[string]bool{attrDocument: true, attrSelfie: false} {
+		sess.RequestedAttributes = []string{requested}
+		result := map[string]any{}
+		addDocumentCheck(result, sess)
+		if _, released := result["documentZoneDiffs"]; released != want {
+			t.Errorf("requested %s: zone diffs released %v, want %v", requested, released, want)
+		}
 	}
 }

@@ -211,7 +211,13 @@ function consentText(
 ): { label: string; detail: string } {
   const { wording, documents } = consent;
   const labelKey = consentLabelKey(value, requested, wording);
-  const detailKey = consentDetailKey(value, requested, wording, documents);
+  const detailKey = consentDetailKey(
+    value,
+    requested,
+    wording,
+    documents,
+    consent.passportBack,
+  );
   const names = { documents: consent.documentNames };
   return {
     label: labelKey
@@ -237,6 +243,7 @@ interface ConsentNames {
   wording: ConsentWording;
   documents: DocumentKind[];
   documentNames: string;
+  passportBack: boolean;
 }
 
 // What is collected. Continue starts the session, starting while it is
@@ -250,6 +257,7 @@ export function Overview({
   starting = false,
   error,
   embedded = false,
+  followUp = false,
   consent,
 }: Readonly<{
   org: VerifyOrg;
@@ -264,6 +272,9 @@ export function Overview({
   error?: string;
   // Framed in the org's own page, which already names the org.
   embedded?: boolean;
+  // Follows another flow for the same person, whose screen already
+  // introduced the check and the org's contact.
+  followUp?: boolean;
   // What the flow accepts, which the texts follow.
   consent: ConsentBasis;
 }>): React.JSX.Element {
@@ -295,6 +306,7 @@ export function Overview({
     wording: consentWording(consent.sources),
     documents,
     documentNames: documentWords(documents),
+    passportBack: consent.keepsBsn,
   };
   const items: DataDisclosureItem[] = consentItems(requested, consent)
     .filter(isRequestedAttribute)
@@ -332,17 +344,27 @@ export function Overview({
     });
   }
   const { supportContact, privacyUrl } = org.branding;
+  const support = followUp ? "" : supportContact;
+  let heading: string = t("identityProofing.onScreen.overview.heading", {
+    name,
+  });
+  if (followUp) {
+    heading = t("identityProofing.onScreen.overview.headingFollowUp");
+  } else if (embedded) {
+    heading = t("identityProofing.onScreen.overview.headingEmbedded");
+  }
 
   return (
     <div className="flex flex-col gap-5">
       <div className="flex flex-col gap-1">
-        <StepHeading>
-          {embedded
-            ? t("identityProofing.onScreen.overview.headingEmbedded")
-            : t("identityProofing.onScreen.overview.heading", { name })}
-        </StepHeading>
+        <StepHeading>{heading}</StepHeading>
         <p className={HINT}>
-          {t("identityProofing.onScreen.overview.intro", { name, sources })}
+          {followUp
+            ? t("identityProofing.onScreen.overview.introFollowUp", {
+                name,
+                sources,
+              })
+            : t("identityProofing.onScreen.overview.intro", { name, sources })}
         </p>
         {onlyApp && (
           <p className={HINT}>
@@ -368,12 +390,12 @@ export function Overview({
           </p>
         </>
       )}
-      {(supportContact !== "" || privacyUrl !== "") && (
+      {(support !== "" || privacyUrl !== "") && (
         <div className="flex flex-col gap-1 text-[13px]">
-          {supportContact !== "" && (
+          {support !== "" && (
             <span className="text-ink-soft">
               {t("identityProofing.onScreen.overview.support", {
-                contact: supportContact,
+                contact: support,
               })}
             </span>
           )}
@@ -576,6 +598,7 @@ export function Session({
   methods = [],
   yiviPersonalData = false,
   scanDocuments = [],
+  passportBack = false,
   onStage,
   onMethod,
   onRestart,
@@ -603,6 +626,9 @@ export function Session({
   yiviPersonalData?: boolean;
   // The documents the document photo takes, which its text names; empty is any.
   scanDocuments?: readonly string[];
+  // The document photo takes a passport's back, its BSN page: the flow keeps
+  // the BSN.
+  passportBack?: boolean;
   // Told where the session stands, for the page's stepper.
   onStage?: (stage: SessionStage) => void;
   // Told the app picked in the session (method pending).
@@ -823,6 +849,7 @@ export function Session({
         <DocumentScanStep
           target={target}
           documents={scanDocuments}
+          passportBack={passportBack}
           sessionSecondsLeft={secondsLeft}
         />
       );
@@ -914,10 +941,12 @@ export const DOCUMENT_SCAN_WIDE_PAGE =
 function DocumentScanStep({
   target,
   documents,
+  passportBack,
   sessionSecondsLeft,
 }: Readonly<{
   target: VerifyTarget;
   documents: readonly string[];
+  passportBack: boolean;
   sessionSecondsLeft: number;
 }>): React.JSX.Element {
   const { t, i18n } = useTranslation();
@@ -1021,12 +1050,14 @@ function DocumentScanStep({
             type: "disjunction",
           }).format(
             kinds.map((kind) =>
-              t(`identityProofing.onScreen.documentScan.sides.${kind}`),
+              kind === "passport" && !passportBack
+                ? t("identityProofing.onScreen.documentScan.passportFront")
+                : t(`identityProofing.onScreen.documentScan.sides.${kind}`),
             ),
           ),
         })}
       </p>
-      {kinds.includes("passport") && (
+      {passportBack && kinds.includes("passport") && (
         <p className={HINT}>
           {t("identityProofing.onScreen.documentScan.passportHint")}
         </p>
