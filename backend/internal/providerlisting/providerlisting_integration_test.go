@@ -214,56 +214,62 @@ func TestOffTheListRevokesUnitsUntilBackOnIt(t *testing.T) {
 	}
 	w := f.watcher(f.list, 0)
 
-	if n, err := w.Check(ctx); err != nil || n != 0 {
-		t.Fatalf("Check while listed = %d, %v; want 0, nil", n, err)
-	}
+	wantCheck(t, w, 0, "while listed")
 	f.wantActive(t, acme, 1)
 
 	f.setListed(t, false)
-	if n, err := w.Check(ctx); err != nil || n != 3 {
-		t.Fatalf("Check off the list = %d, %v; want 3, nil", n, err)
-	}
-	if got := f.alert.count(); got != 2 {
-		t.Fatalf("alerts = %d, want 2: off the list, and revoked", got)
-	}
+	wantCheck(t, w, 3, "off the list")
+	f.wantAlerts(t, 2, "off the list, and revoked")
 	for _, org := range []uuid.UUID{acme, globex, initech} {
 		f.wantDelisted(t, org, organization.StatusSuspended)
 	}
 	if got := f.mail.mailed("delisted"); !slices.Equal(got, sortedOrgs(acme, globex, initech)) {
 		t.Fatalf("delisted mails to %v, want every org", got)
 	}
-	for _, m := range f.mail.sent {
-		if len(m.recipients) != 1 || !slices.Contains([]string{"admin@acme.example", "admin@globex.example", "admin@initech.example"}, m.recipients[0]) {
-			t.Fatalf("mail for %s went to %v, want its admin", m.orgID, m.recipients)
-		}
-	}
+	f.wantEachToItsAdmin(t)
 
-	if n, err := w.Check(ctx); err != nil || n != 0 {
-		t.Fatalf("second Check off the list = %d, %v; want 0, nil", n, err)
-	}
+	wantCheck(t, w, 0, "again off the list")
 	if err := f.wallets.OwnerIDRevoked(ctx, globex); err != nil {
 		t.Fatalf("globex ceases: %v", err)
 	}
 
 	f.setListed(t, true)
-	if n, err := w.Check(ctx); err != nil || n != 1 {
-		t.Fatalf("Check back on the list = %d, %v; want 1, nil", n, err)
-	}
+	wantCheck(t, w, 1, "back on the list")
 	f.wantActive(t, acme, 2)
 	f.wantDelisted(t, initech, organization.StatusSuspended)
 	f.wantDelisted(t, globex, organization.StatusRevoked)
 	if got := f.mail.mailed("relisted"); !slices.Equal(got, []uuid.UUID{acme}) {
 		t.Fatalf("relisted mails to %v, want acme", got)
 	}
-	if got := f.alert.count(); got != 3 {
-		t.Fatalf("alerts = %d, want 3: back on the list too", got)
-	}
+	f.wantAlerts(t, 3, "back on the list too")
 
-	if n, err := w.Check(ctx); err != nil || n != 0 {
-		t.Fatalf("next Check while listed = %d, %v; want 0, nil", n, err)
-	}
+	wantCheck(t, w, 0, "next while listed")
 	if len(f.mail.sent) != 4 {
 		t.Fatalf("mails = %d, want no new ones", len(f.mail.sent))
+	}
+}
+
+func wantCheck(t *testing.T, w *Watcher, want int64, when string) {
+	t.Helper()
+	if n, err := w.Check(context.Background()); err != nil || n != want {
+		t.Fatalf("Check %s = %d, %v; want %d, nil", when, n, err, want)
+	}
+}
+
+func (f fixture) wantAlerts(t *testing.T, want int, why string) {
+	t.Helper()
+	if got := f.alert.count(); got != want {
+		t.Fatalf("alerts = %d, want %d: %s", got, want, why)
+	}
+}
+
+func (f fixture) wantEachToItsAdmin(t *testing.T) {
+	t.Helper()
+	admins := []string{"admin@acme.example", "admin@globex.example", "admin@initech.example"}
+	for _, m := range f.mail.sent {
+		if len(m.recipients) != 1 || !slices.Contains(admins, m.recipients[0]) {
+			t.Fatalf("mail for %s went to %v, want its admin", m.orgID, m.recipients)
+		}
 	}
 }
 
