@@ -15,6 +15,7 @@ import (
 type listingMailer interface {
 	SendProviderDelisted(ctx context.Context, orgID uuid.UUID, recipients []string, orgName string) error
 	SendProviderRelisted(ctx context.Context, orgID uuid.UUID, recipients []string, orgName string) error
+	SendWalletCeased(ctx context.Context, orgID uuid.UUID, recipients []string, orgName string) error
 }
 
 type orgDirectory interface {
@@ -22,8 +23,9 @@ type orgDirectory interface {
 	ListAdminEmails(ctx context.Context, orgID uuid.UUID) ([]string, error)
 }
 
-// MailNotifier mails an org's admins through the org's own SMTP settings. An org
-// without them sees only that its wallet is suspended.
+// MailNotifier mails an org's admins, through Yivi's own SMTP server or, without
+// one, the org's own SMTP settings. An org with neither sees only that its wallet
+// is suspended.
 type MailNotifier struct {
 	mail listingMailer
 	orgs orgDirectory
@@ -39,6 +41,12 @@ func (n *MailNotifier) ProviderDelisted(ctx context.Context, orgID uuid.UUID) er
 
 func (n *MailNotifier) ProviderRelisted(ctx context.Context, orgID uuid.UUID) error {
 	return n.send(ctx, orgID, "resumed", n.mail.SendProviderRelisted)
+}
+
+// WalletCeased tells an org's admins its wallet was revoked because its activity
+// ended.
+func (n *MailNotifier) WalletCeased(ctx context.Context, orgID uuid.UUID) error {
+	return n.send(ctx, orgID, "revoked", n.mail.SendWalletCeased)
 }
 
 func (n *MailNotifier) send(ctx context.Context, orgID uuid.UUID, what string,
@@ -57,7 +65,7 @@ func (n *MailNotifier) send(ctx context.Context, orgID uuid.UUID, what string,
 	}
 	err = send(ctx, orgID, admins, org.Name)
 	if errors.Is(err, email.ErrNotConfigured) {
-		slog.WarnContext(ctx, "providerlisting: org has no SMTP settings; its admins are not mailed that the wallet was "+what,
+		slog.WarnContext(ctx, "providerlisting: neither we nor the org have SMTP settings; its admins are not mailed that the wallet was "+what,
 			slog.String("org_id", orgID.String()))
 		return nil
 	}

@@ -99,9 +99,16 @@ const (
 	envWalletRegistryProvider = "WALLET_REGISTRY_PROVIDER"
 
 	// The trusted list of wallet providers we must be on (Art 12(5)); off the
-	// list for the grace period, every org's wallet is suspended (Art 6(2)(f)).
+	// list for the grace period, every org's wallet unit is revoked (Art 6(2)(f)).
 	envTrustedListProvider = "TRUSTED_LIST_PROVIDER"
 	envTrustedListGrace    = "TRUSTED_LIST_GRACE"
+
+	// Yivi's own channels, independent of any org's settings: the trusted-list
+	// alerts to us and the notice to every org that its wallet was revoked. The
+	// SMTP URL is smtp://user:password@host:port.
+	envPlatformSMTPURL         = "PLATFORM_SMTP_URL"
+	envPlatformMailFrom        = "PLATFORM_MAIL_FROM"
+	envPlatformSlackWebhookURL = "PLATFORM_SLACK_WEBHOOK_URL"
 
 	// VOG screening (#242): validatie.nl real-time document check. The URL
 	// defaults to the production GAAV endpoint - there is no staging instance to
@@ -382,7 +389,9 @@ const (
 
 	// Empty checks no trusted list: no wallet is ever stopped for it.
 	defaultTrustedListProvider = ""
-	defaultTrustedListGrace    = "30m"
+	defaultTrustedListGrace    = "24h"
+
+	defaultPlatformSMTPPort = 587
 
 	// ProviderValidatieNL checks a VOG for real with validatie.nl, and is the
 	// default; ProviderStub accepts every VOG and runs only when set explicitly
@@ -542,6 +551,10 @@ type Config struct {
 
 	TrustedListProvider string
 	TrustedListGrace    time.Duration
+
+	// PlatformSMTP is our own mail server; zero Host means none.
+	PlatformSMTP            PlatformSMTP
+	PlatformSlackWebhookURL string
 
 	VogValidatorProvider string
 	VogValidatorURL      string
@@ -781,6 +794,7 @@ func Load() (Config, error) {
 		loadSigningRedirectURI,
 		loadDevMode,
 		loadTrustedProxies,
+		loadPlatformChannels,
 	} {
 		if err := load(&cfg); err != nil {
 			return Config{}, err
@@ -834,6 +848,40 @@ func loadDurations(c *Config) error {
 		}
 		*d.dst = v
 	}
+	return nil
+}
+
+// PlatformSMTP is the SMTP server Yivi itself sends from.
+type PlatformSMTP struct {
+	Host     string
+	Port     int
+	Username string
+	Password string
+	From     string
+}
+
+func loadPlatformChannels(c *Config) error {
+	c.PlatformSlackWebhookURL = os.Getenv(envPlatformSlackWebhookURL)
+	raw := os.Getenv(envPlatformSMTPURL)
+	if raw == "" {
+		return nil
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme != "smtp" || u.Hostname() == "" {
+		return fmt.Errorf("config: %s must be smtp://user:password@host:port", envPlatformSMTPURL)
+	}
+	port := defaultPlatformSMTPPort
+	if p := u.Port(); p != "" {
+		if port, err = strconv.Atoi(p); err != nil {
+			return fmt.Errorf("config: %s has an invalid port", envPlatformSMTPURL)
+		}
+	}
+	from := os.Getenv(envPlatformMailFrom)
+	if from == "" {
+		return fmt.Errorf("config: %s needs %s", envPlatformSMTPURL, envPlatformMailFrom)
+	}
+	password, _ := u.User.Password()
+	c.PlatformSMTP = PlatformSMTP{Host: u.Hostname(), Port: port, Username: u.User.Username(), Password: password, From: from}
 	return nil
 }
 

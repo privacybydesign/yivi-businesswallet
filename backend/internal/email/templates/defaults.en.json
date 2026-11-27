@@ -256,6 +256,16 @@
         { "type": "footer" }
       ]
     },
+    "wallet_ceased": {
+      "subject": "The business wallet of {{orgName}} has been revoked",
+      "blocks": [
+        { "type": "logo" },
+        { "type": "heading", "text": "Your business wallet has been revoked" },
+        { "type": "paragraph", "text": "The owner identification data (EBWOID) of {{orgName}} has been revoked by its issuer, which means the activity of {{orgName}} has ended. Under the European Business Wallet regulation, the wallet of {{orgName}} has therefore been revoked: its wallet unit and the wallet itself are revoked." },
+        { "type": "paragraph", "text": "You can still sign in and view your data. You can no longer share or sign anything with this wallet, and this does not end by itself. Issuers of credentials held in this wallet may revoke them." },
+        { "type": "footer" }
+      ]
+    },
     "identity_proofing_requested": {
       "subject": "{{orgName}} asks you to verify your identity",
       "blocks": [

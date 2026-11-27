@@ -256,6 +256,16 @@
         { "type": "footer" }
       ]
     },
+    "wallet_ceased": {
+      "subject": "De business wallet van {{orgName}} is ingetrokken",
+      "blocks": [
+        { "type": "logo" },
+        { "type": "heading", "text": "Je business wallet is ingetrokken" },
+        { "type": "paragraph", "text": "De identificatiegegevens (EBWOID) van {{orgName}} zijn ingetrokken door de uitgever, wat betekent dat de activiteit van {{orgName}} is beëindigd. Volgens de Europese verordening over de business wallet is de wallet van {{orgName}} daarom ingetrokken: de wallet-unit en de wallet zelf zijn ingetrokken." },
+        { "type": "paragraph", "text": "Je kunt nog inloggen en je gegevens bekijken. Je kunt met deze wallet niets meer delen of ondertekenen, en dat houdt niet vanzelf op. Uitgevers van attestaties in deze wallet kunnen die intrekken." },
+        { "type": "footer" }
+      ]
+    },
     "identity_proofing_requested": {
       "subject": "{{orgName}} vraagt je je identiteit te verifiëren",
       "blocks": [

@@ -172,8 +172,9 @@ func decodeInto[T any](t *testing.T, rec *httptest.ResponseRecorder) T {
 	return out
 }
 
-// The list is the whole kind × locale matrix, so the editor can show every cause
-// and which of them a tenant has taken over.
+// The list is the whole kind × locale matrix an org may edit, so the editor can
+// show every cause and which of them a tenant has taken over. Yivi's own notices
+// are not in it.
 func TestListTemplatesCoversEveryKindAndLocale(t *testing.T) {
 	store := newStubStore()
 	store.overrides[templateTargetID(KindSMTPTest, LocaleNL)] = TemplateOverride{
@@ -187,8 +188,8 @@ func TestListTemplatesCoversEveryKindAndLocale(t *testing.T) {
 		t.Fatalf("status = %d, want 200 (%s)", rec.Code, rec.Body.String())
 	}
 	got := decodeInto[templateListResponse](t, rec)
-	if len(got.Kinds) != len(Kinds()) {
-		t.Fatalf("got %d kinds, want %d", len(got.Kinds), len(Kinds()))
+	if want := len(Kinds()) - len(yiviNotices); len(got.Kinds) != want {
+		t.Fatalf("got %d kinds, want %d", len(got.Kinds), want)
 	}
 	for _, kind := range got.Kinds {
 		if len(kind.Locales) != len(Locales()) {
@@ -545,5 +546,20 @@ func TestInvalidTemplateErrorReportsTheReasonAsA400(t *testing.T) {
 	}
 	if !strings.Contains(apiErr.Message, "subject") {
 		t.Errorf("message = %q, want the field named", apiErr.Message)
+	}
+}
+
+// Yivi's own notices cannot be read, edited or previewed as an org's template.
+func TestYiviNoticesAreNotOrgTemplates(t *testing.T) {
+	store := newStubStore()
+	for _, kind := range []Kind{KindProviderDelisted, KindProviderRelisted} {
+		for _, req := range []struct{ method, path string }{
+			{http.MethodGet, "/orgs/acme/email/templates/" + string(kind) + "/en"},
+			{http.MethodDelete, "/orgs/acme/email/templates/" + string(kind) + "/en"},
+		} {
+			if rec := serve(t, store, &stubMailService{}, req.method, req.path, nil); rec.Code != http.StatusNotFound {
+				t.Errorf("%s %s = %d, want 404", req.method, req.path, rec.Code)
+			}
+		}
 	}
 }

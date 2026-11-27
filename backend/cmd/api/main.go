@@ -110,8 +110,11 @@ const (
 	// re-read: issuers publish revocations on the scale of hours, not seconds.
 	heldStatusRecheckEvery = 6 * time.Hour
 	heldStatusBootDelay    = 2 * time.Minute
-	// trustedListCheckEvery is well over the grace, so the next check confirms we are off the list.
-	trustedListCheckEvery = time.Hour
+	trustedListCheckEvery  = time.Hour
+	platformMailFromName   = "Yivi Business Wallet"
+	// ceasedNoticeEvery keeps the notice to a ceased org's admins well within the
+	// 24 hours Annex 6(2) gives, retries included.
+	ceasedNoticeEvery = 10 * time.Minute
 
 	issuerProbeTimeout = 10 * time.Second
 	issuerHTTPTimeout  = 15 * time.Second
@@ -933,6 +936,12 @@ func (w *wiring) buildOrganizations(ctx context.Context) error {
 	w.emailService = email.NewService(w.emailStore, mailer.New(),
 		mailoauth.NewMicrosoft(&http.Client{Timeout: mailOAuthHTTPTimeout}),
 		mailBranding{theme: w.themeSettingsStore}, mailLocale)
+	if p := cfg.PlatformSMTP; p.Host != "" {
+		w.emailService.UsePlatformSMTP(mailer.Config{
+			Host: p.Host, Port: p.Port, Username: p.Username, Password: p.Password,
+			FromName: platformMailFromName, FromAddress: p.From,
+		})
+	}
 
 	screeningService, err := w.newScreeningService(ctx)
 	if err != nil {
@@ -1165,7 +1174,18 @@ func (w *wiring) buildAttestations(ctx context.Context) error {
 	startQerdsInboundPoller(ctx, w.qerdsService, cfg.QerdsInboundPollInterval)
 	// A revoked EBWOID means the company ended: its wallet is revoked (Art 6(2)).
 	attestationService.SetOwnerIDRevoker(walletService)
-	if err := startProviderListing(ctx, cfg, w.pool, walletService, providerlisting.NewMailNotifier(w.emailService, w.orgStore)); err != nil {
+	webhook, err := slackchannel.NormalizeWebhookURL(cfg.PlatformSlackWebhookURL)
+	if err != nil {
+		return fmt.Errorf("platform slack webhook: %w", err)
+	}
+	if cfg.PlatformSMTP.Host == "" {
+		slog.WarnContext(ctx, "no platform SMTP server, so an org without SMTP settings of its own is not mailed when its wallet is revoked")
+	}
+	alert := providerlisting.NewPlatformAlerter(webhook, w.emailService, cfg.PlatformAdminEmails, cfg.AppBaseURL)
+	walletNotices := providerlisting.NewMailNotifier(w.emailService, w.orgStore)
+	walletService.SetCeasedNotices(walletNotices, alert)
+	startPruner(ctx, "wallet_ceased_notices", ceasedNoticeEvery, walletService.SendCeasedNotices)
+	if err := startProviderListing(ctx, cfg, w.pool, walletService, walletNotices, alert); err != nil {
 		return err
 	}
 	attestationService.SetLocalIssuers(w.qerdsStore, attestationStore)
@@ -1690,9 +1710,11 @@ func (n postguardNotifier) SendPostguardNotification(ctx context.Context, orgID 
 	return err
 }
 
-// startProviderListing revokes every org's wallet once we are off the trusted
+// startProviderListing revokes every org's wallet unit once we are off the trusted
 // list of wallet providers for the grace period (Art 6(2)(f)).
-func startProviderListing(ctx context.Context, cfg config.Config, db database.DB, wallets providerlisting.Wallets, notify providerlisting.Notifier) error {
+func startProviderListing(ctx context.Context, cfg config.Config, db database.DB, wallets providerlisting.Wallets,
+	notify providerlisting.Notifier, alert providerlisting.Alerter,
+) error {
 	list, err := newTrustedList(cfg, db)
 	if err != nil || list == nil {
 		return err
@@ -1700,7 +1722,7 @@ func startProviderListing(ctx context.Context, cfg config.Config, db database.DB
 	if err := probe(ctx, qerdsProbeTimeout, list); err != nil {
 		return fmt.Errorf("trusted list ping: %w", err)
 	}
-	watcher := providerlisting.NewWatcher(db, list, wallets, notify, cfg.TrustedListGrace)
+	watcher := providerlisting.NewWatcher(db, list, wallets, notify, alert, cfg.TrustedListGrace)
 	startPruner(ctx, "provider_listing", trustedListCheckEvery, watcher.Check)
 	return nil
 }

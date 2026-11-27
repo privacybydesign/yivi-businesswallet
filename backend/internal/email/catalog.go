@@ -71,6 +71,9 @@ const (
 	KindProviderDelisted Kind = "provider_delisted"
 	// KindProviderRelisted tells them it is active again: we are back on the list.
 	KindProviderRelisted Kind = "provider_relisted"
+	// KindWalletCeased tells an org's admins its wallet was revoked because its
+	// activity ended: its EBWOID was revoked.
+	KindWalletCeased Kind = "wallet_ceased"
 	// KindIdentityProofingRequested asks a person to prove their identity with
 	// their identity document and face: a QR code and a button carrying the
 	// vcmrtd deep link of an IPS session created at send.
@@ -207,6 +210,9 @@ var kindVariables = map[Kind][]Variable{
 	KindProviderRelisted: {
 		{Name: varOrgName},
 	},
+	KindWalletCeased: {
+		{Name: varOrgName},
+	},
 	KindIdentityProofingRequested: {
 		{Name: varOrgName},
 		{Name: varRequesterName},
@@ -216,6 +222,13 @@ var kindVariables = map[Kind][]Variable{
 		{Name: varPrivacyURL},
 	},
 }
+
+// yiviNotices are sent by Yivi as wallet provider, in its own wording, so an org
+// cannot edit them.
+var yiviNotices = map[Kind]bool{KindProviderDelisted: true, KindProviderRelisted: true, KindWalletCeased: true}
+
+// OrgEditable reports whether an org may edit kind's templates.
+func OrgEditable(kind Kind) bool { return !yiviNotices[kind] }
 
 // Kinds returns every mail kind, in a stable order.
 func Kinds() []Kind {

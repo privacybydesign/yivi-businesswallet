@@ -111,15 +111,25 @@ func New(store webhookStore, orgs orgDirectory, appBaseURL string, locale email.
 		orgs:       orgs,
 		appBaseURL: appBaseURL,
 		locale:     locale,
-		client: &http.Client{
-			Timeout: postTimeout,
-			// Slack answers a webhook post itself. A redirect could only take the request
-			// — and the organization's event metadata in its body — to a host other than
-			// the one NormalizeWebhookURL pinned, so the 3xx is handed back as the
-			// response and reported as a refusal.
-			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
-		},
+		client:     newClient(),
 	}
+}
+
+func newClient() *http.Client {
+	return &http.Client{
+		Timeout: postTimeout,
+		// Slack answers a webhook post itself. A redirect could only take the request
+		// — and the organization's event metadata in its body — to a host other than
+		// the one NormalizeWebhookURL pinned, so the 3xx is handed back as the
+		// response and reported as a refusal.
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}
+}
+
+// PostText posts plain text to a webhook of the deployment's own, such as Yivi's
+// alerts channel. webhook must have passed NormalizeWebhookURL.
+func PostText(ctx context.Context, webhook, text string) error {
+	return (&Channel{client: newClient()}).post(ctx, webhook, message{Text: escape(text)})
 }
 
 func (c *Channel) ID() notifications.ChannelID { return notifications.ChannelSlack }

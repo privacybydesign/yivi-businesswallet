@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
@@ -248,22 +249,89 @@ func (s *Store) setStatusIn(ctx context.Context, q database.Querier, orgID uuid.
 // be called again.
 func (s *Store) Cease(ctx context.Context, orgID uuid.UUID) error {
 	return database.InTx(ctx, s.db, func(q database.Querier) error {
-		if _, err := s.setStatusIn(ctx, q, orgID, organization.StatusRevoked); err != nil && !errors.Is(err, lifecycle.ErrTransition) {
+		_, err := s.setStatusIn(ctx, q, orgID, organization.StatusRevoked)
+		walletRevoked := err == nil
+		if err != nil && !errors.Is(err, lifecycle.ErrTransition) {
 			return err
 		}
-		if _, err := s.units.RevokeIn(ctx, q, orgID, walletunit.ReasonCessation); err != nil && !errors.Is(err, walletunit.ErrNoActiveUnit) {
+		_, err = s.units.RevokeIn(ctx, q, orgID, walletunit.ReasonCessation)
+		unitRevoked := err == nil
+		if err != nil && !errors.Is(err, walletunit.ErrNoActiveUnit) {
 			return err
+		}
+		if !walletRevoked && !unitRevoked {
+			return nil
+		}
+		if _, err := q.Exec(ctx, `INSERT INTO wallet_ceased_notices (organization_id) VALUES ($1)
+			ON CONFLICT DO NOTHING`, orgID); err != nil {
+			return fmt.Errorf("wallet: queue ceased notice org %s: %w", orgID, err)
 		}
 		return nil
 	})
+}
+
+// SendCeasedNotices tells the admins of each org Cease revoked, retrying every
+// run until it is sent, and alerts us once about one still unsent after
+// ceasedNoticeWarnAfter. The rows stay locked while they are sent, so a second
+// replica skips them instead of mailing twice.
+func (s *Store) SendCeasedNotices(ctx context.Context, notify CeasedNotifier, alert Alerter, now time.Time) (int64, error) {
+	var sent int64
+	var failed []error
+	err := database.InTx(ctx, s.db, func(q database.Querier) error {
+		sent, failed = 0, nil
+		rows, err := q.Query(ctx, `SELECT organization_id, queued_at, warned_at IS NOT NULL
+			FROM wallet_ceased_notices ORDER BY queued_at FOR UPDATE SKIP LOCKED`)
+		if err != nil {
+			return fmt.Errorf("wallet: read ceased notices: %w", err)
+		}
+		type notice struct {
+			OrgID    uuid.UUID
+			QueuedAt time.Time
+			Warned   bool
+		}
+		due, err := pgx.CollectRows(rows, pgx.RowToStructByPos[notice])
+		if err != nil {
+			return fmt.Errorf("wallet: read ceased notices: %w", err)
+		}
+		var late []uuid.UUID
+		for _, n := range due {
+			if err := notify.WalletCeased(ctx, n.OrgID); err != nil {
+				failed = append(failed, fmt.Errorf("wallet: tell admins of ceased org %s: %w", n.OrgID, err))
+				if !n.Warned && now.Sub(n.QueuedAt) >= ceasedNoticeWarnAfter {
+					late = append(late, n.OrgID)
+				}
+				continue
+			}
+			if _, err := q.Exec(ctx, `DELETE FROM wallet_ceased_notices WHERE organization_id = $1`, n.OrgID); err != nil {
+				return fmt.Errorf("wallet: mark ceased notice org %s sent: %w", n.OrgID, err)
+			}
+			sent++
+		}
+		if len(late) == 0 {
+			return nil
+		}
+		text := fmt.Sprintf("Orgs whose wallet was revoked because their activity ended, and whose admins have still not been mailed after %s: %d. They must be told within 24 hours; retrying.",
+			ceasedNoticeWarnAfter, len(late))
+		slog.ErrorContext(ctx, "wallet: "+text)
+		// Recorded only once the alert reached us, so a failed one is tried again.
+		if err := alert.Alert(ctx, text); err != nil {
+			failed = append(failed, fmt.Errorf("wallet: alert late ceased notices: %w", err))
+			return nil
+		}
+		if _, err := q.Exec(ctx, `UPDATE wallet_ceased_notices SET warned_at = $2 WHERE organization_id = ANY($1)`, late, now); err != nil {
+			return fmt.Errorf("wallet: record late ceased notices: %w", err)
+		}
+		return nil
+	})
+	return sent, errors.Join(err, errors.Join(failed...))
 }
 
 // SuspendForProvider revokes every live wallet unit and suspends every active
 // wallet, in one tx, because we as provider are off the trusted list (Art
 // 6(2)(f)), and returns the orgs it changed. Each wallet it suspends is
 // remembered, so ResumeForProvider brings back exactly these and not a wallet an
-// admin suspended.
-func (s *Store) SuspendForProvider(ctx context.Context) ([]uuid.UUID, error) {
+// admin suspended. then runs last in the same tx.
+func (s *Store) SuspendForProvider(ctx context.Context, then func(ctx context.Context, q database.Querier, changed []uuid.UUID) error) ([]uuid.UUID, error) {
 	var changed []uuid.UUID
 	err := database.InTx(ctx, s.db, func(q database.Querier) error {
 		changed = nil
@@ -295,7 +363,7 @@ func (s *Store) SuspendForProvider(ctx context.Context) ([]uuid.UUID, error) {
 				changed = append(changed, org.ID)
 			}
 		}
-		return nil
+		return then(ctx, q, changed)
 	})
 	return changed, err
 }
@@ -313,8 +381,8 @@ func (s *Store) suspendForProviderIn(ctx context.Context, q database.Querier, or
 
 // ResumeForProvider makes the wallets SuspendForProvider suspended active again,
 // each with a new unit in place of the one it revoked, in one tx, and returns
-// those orgs. One revoked since then stays revoked.
-func (s *Store) ResumeForProvider(ctx context.Context) ([]uuid.UUID, error) {
+// those orgs. One revoked since then stays revoked. then runs last in the same tx.
+func (s *Store) ResumeForProvider(ctx context.Context, then func(ctx context.Context, q database.Querier, resumed []uuid.UUID) error) ([]uuid.UUID, error) {
 	var ids []uuid.UUID
 	err := database.InTx(ctx, s.db, func(q database.Querier) error {
 		var err error
@@ -335,7 +403,7 @@ func (s *Store) ResumeForProvider(ctx context.Context) ([]uuid.UUID, error) {
 		if _, err := q.Exec(ctx, `DELETE FROM provider_suspended_wallets`); err != nil {
 			return fmt.Errorf("wallet: forget provider suspensions: %w", err)
 		}
-		return nil
+		return then(ctx, q, ids)
 	})
 	return ids, err
 }

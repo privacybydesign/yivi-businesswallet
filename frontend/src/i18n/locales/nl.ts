@@ -3813,8 +3813,6 @@ export const nl: Translation<typeof en> = {
       identity_requested: "Identificatie aangevraagd",
       invitation: "Uitnodiging voor lidmaatschap",
       postguard_file: "Versleuteld bestand",
-      provider_delisted: "Wallet niet meer geldig",
-      provider_relisted: "Wallet weer actief",
       signature_declined: "Ondertekening geweigerd",
       signature_requested: "Ondertekenverzoek",
       signed_document: "Ondertekend document",
@@ -3842,10 +3840,6 @@ export const nl: Translation<typeof en> = {
         "Gaat naar iemand die is uitgenodigd om lid te worden van deze organisatie.",
       postguard_file:
         "Gaat naar de ontvanger van een versleuteld bestand, als deze organisatie via de eigen SMTP-server mailt.",
-      provider_delisted:
-        "Gaat naar de beheerders als de wallet-unit van deze organisatie is ingetrokken omdat de aanbieder niet meer op de vertrouwde lijst staat.",
-      provider_relisted:
-        "Gaat naar de beheerders als die wallet weer actief is omdat de aanbieder weer op de vertrouwde lijst staat.",
       signature_declined:
         "Gaat naar de aanvrager van een verzoek als een geselecteerde ondertekenaar weigert te tekenen.",
       signature_requested:

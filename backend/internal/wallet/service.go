@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/auth"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/database"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/eudiholder"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/euid"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
@@ -31,8 +32,9 @@ type walletStore interface {
 	RegisterOrganization(ctx context.Context, reg Registration) (organization.Organization, error)
 	SetStatus(ctx context.Context, orgID uuid.UUID, status string) (organization.Organization, error)
 	Cease(ctx context.Context, orgID uuid.UUID) error
-	SuspendForProvider(ctx context.Context) ([]uuid.UUID, error)
-	ResumeForProvider(ctx context.Context) ([]uuid.UUID, error)
+	SuspendForProvider(ctx context.Context, then func(ctx context.Context, q database.Querier, changed []uuid.UUID) error) ([]uuid.UUID, error)
+	ResumeForProvider(ctx context.Context, then func(ctx context.Context, q database.Querier, resumed []uuid.UUID) error) ([]uuid.UUID, error)
+	SendCeasedNotices(ctx context.Context, notify CeasedNotifier, alert Alerter, now time.Time) (int64, error)
 	ListRepresentations(ctx context.Context, orgID uuid.UUID) ([]Representation, error)
 	ClaimRepresentation(ctx context.Context, orgID, repID, userID uuid.UUID) error
 }
@@ -93,6 +95,9 @@ type Service struct {
 	users         userDirectory
 	inbox         qerdsInbox
 	addressDomain string
+
+	ceasedNotifier CeasedNotifier
+	alert          Alerter
 }
 
 func NewService(
@@ -381,20 +386,49 @@ func (s *Service) Revoke(ctx context.Context, orgID uuid.UUID) (organization.Org
 }
 
 // OwnerIDRevoked revokes the wallet and wallet unit of an org whose EBWOID its
-// issuer revoked: KVK revokes it when the company ends (Art 6(2)(f)).
+// issuer revoked: KVK revokes it when the company ends (Art 6(2)(f)). Its admins
+// are told by SendCeasedNotices.
 func (s *Service) OwnerIDRevoked(ctx context.Context, orgID uuid.UUID) error {
 	return s.store.Cease(ctx, orgID)
 }
 
+// ceasedNoticeWarnAfter is how long a ceased notice may stay unsent before we
+// are alerted, half the 24 hours Annex 6(2) gives.
+const ceasedNoticeWarnAfter = 12 * time.Hour
+
+// CeasedNotifier tells an org's admins its wallet was revoked because its
+// activity ended, and why.
+type CeasedNotifier interface {
+	WalletCeased(ctx context.Context, orgID uuid.UUID) error
+}
+
+// Alerter tells us, Yivi, something needs a person. An error means it reached
+// nobody.
+type Alerter interface {
+	Alert(ctx context.Context, text string) error
+}
+
+// SetCeasedNotices sets how the admins of a ceased org are told and how we are
+// alerted when that fails.
+func (s *Service) SetCeasedNotices(notify CeasedNotifier, alert Alerter) {
+	s.ceasedNotifier, s.alert = notify, alert
+}
+
+// SendCeasedNotices sends the notices OwnerIDRevoked queued and reports how many.
+func (s *Service) SendCeasedNotices(ctx context.Context) (int64, error) {
+	return s.store.SendCeasedNotices(ctx, s.ceasedNotifier, s.alert, time.Now())
+}
+
 // ProviderDelisted revokes the validity of every wallet because we as provider
 // are off the trusted list (Art 6(2)(f)): its unit is revoked and the wallet is
-// suspended, so read-only. It returns the orgs it changed.
-func (s *Service) ProviderDelisted(ctx context.Context) ([]uuid.UUID, error) {
-	return s.store.SuspendForProvider(ctx)
+// suspended, so read-only. then runs in the same transaction with the orgs it
+// changed, which it also returns.
+func (s *Service) ProviderDelisted(ctx context.Context, then func(ctx context.Context, q database.Querier, changed []uuid.UUID) error) ([]uuid.UUID, error) {
+	return s.store.SuspendForProvider(ctx, then)
 }
 
 // ProviderRelisted makes the wallets ProviderDelisted suspended active again,
-// each with a new unit.
-func (s *Service) ProviderRelisted(ctx context.Context) ([]uuid.UUID, error) {
-	return s.store.ResumeForProvider(ctx)
+// each with a new unit. Like ProviderDelisted.
+func (s *Service) ProviderRelisted(ctx context.Context, then func(ctx context.Context, q database.Querier, resumed []uuid.UUID) error) ([]uuid.UUID, error) {
+	return s.store.ResumeForProvider(ctx, then)
 }

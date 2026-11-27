@@ -3728,8 +3728,6 @@ export const en = {
       identity_requested: "Identification requested",
       invitation: "Member invitation",
       postguard_file: "Encrypted file",
-      provider_delisted: "Wallet no longer valid",
-      provider_relisted: "Wallet active again",
       signature_declined: "Signature declined",
       signature_requested: "Signature request",
       signed_document: "Signed document",
@@ -3756,10 +3754,6 @@ export const en = {
       invitation: "Sent to someone invited to join this organization.",
       postguard_file:
         "Sent to a recipient of an encrypted file, when this organization mails through its own SMTP server.",
-      provider_delisted:
-        "Sent to the admins when this organization's wallet unit is revoked because its provider is no longer on the trusted list.",
-      provider_relisted:
-        "Sent to the admins when that wallet is active again because its provider is back on the trusted list.",
       signature_declined:
         "Sent to a request's creator when a selected signer declines to sign.",
       signature_requested:

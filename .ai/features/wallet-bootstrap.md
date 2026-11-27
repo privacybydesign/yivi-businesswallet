@@ -359,16 +359,28 @@ on `active` (single tx): create organization (identity from attestation)
    representations soft-revoked (`revoked_at`); dependent memberships handled by the existing
    last-admin guard (`organization.ErrLastAdmin`). External-validator propagation is out of
    scope for v1 (§11).
+   Cessation (the org's EBWOID revoked, `wallet.Store.Cease`) queues a mail to its admins
+   (`wallet_ceased_notices`) in the same transaction; it is sent every 10 minutes until it
+   goes out, in our own wording through our own SMTP else the org's, and an unsent one
+   alerts us after 12h (Annex 6(2) gives 24h).
 7. Provider off the trusted list (Art 6(2)(f), Art 12(5)): `internal/providerlisting` checks
    the list hourly (`TRUSTED_LIST_PROVIDER`; `stub` is our own list, off by default). Only a
    list that was read and does not name us counts. Once we are off it for
-   `TRUSTED_LIST_GRACE` (30m, so the next hourly check confirms), the validity of every
+   `TRUSTED_LIST_GRACE` (24h; no rule sets it, so it belongs in our public revocation
+   policy, Annex 6(1)), the validity of every
    wallet is revoked (`wallet.Store.SuspendForProvider`): its wallet unit is revoked for
    `provider_delisted`, and an active wallet is suspended, so read-only with its data kept.
    Back on the list, exactly those wallets are active again with a new unit
    (`provider_suspended_wallets`); nobody registers again. One an admin suspended stays
-   suspended, one revoked in between stays revoked. Admins get a mail each way through the
-   org's own SMTP.
+   suspended, one revoked in between stays revoked.
+   We are alerted on our own Slack (`PLATFORM_SLACK_WEBHOOK_URL`) and by mail to
+   `PLATFORM_ADMIN_EMAILS` the first time we are off the list, on the revocation and back on
+   it. Each org's admins get a mail when it is revoked (reason and consequences, Annex 6(2),
+   Art 7(6)(f)) and when it is back, through our own SMTP (`PLATFORM_SMTP_URL`), else the
+   org's, always in our own wording: an org cannot edit these two mails (`email.OrgEditable`). Notices and alerts are queued (`provider_listing_notices`,
+   `provider_listing_alerts`) in the transaction of the change that caused them, and sent
+   and retried every check under a row lock, so none is lost or sent twice by two
+   replicas; a notice still unsent after 12h alerts us, as Annex 6(2) gives 24h.
 
 ---
 
