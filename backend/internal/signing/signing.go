@@ -114,6 +114,13 @@ var (
 	ErrSessionExpired = errors.New("signing: authorization session expired")
 	// ErrInvalidPDF means the uploaded bytes are not a usable PDF.
 	ErrInvalidPDF = errors.New("signing: the uploaded file is not a valid PDF")
+	// ErrEncryptedPDF means the document is encrypted, as one protected against
+	// editing is even when it opens without a password. A signature is appended to
+	// the file as it is, and what is appended to an encrypted file has to be
+	// encrypted with it; this service does not, so the result would show the page
+	// without the signature in one reader and the signature without the page in
+	// another.
+	ErrEncryptedPDF = errors.New("signing: the uploaded PDF is encrypted")
 	// ErrNotSigner means the acting user is not a signer of the request.
 	ErrNotSigner = errors.New("signing: you are not a signer of this request")
 	// ErrAlreadySigned means the acting user has already signed the request.
@@ -364,9 +371,11 @@ type ExternalView struct {
 	SignerCount  int    `json:"signerCount"`
 	SignedCount  int    `json:"signedCount"`
 	// HasCredential reports whether this signee already linked a signing credential
-	// (so the page knows whether to offer linking first); CanSign whether it is their
-	// turn right now.
+	// (so the page knows whether signing starts with getting one); YourTurn whether
+	// the request is waiting for them right now; CanSign whether they can sign this
+	// moment, which also takes the credential.
 	HasCredential bool      `json:"hasCredential"`
+	YourTurn      bool      `json:"yourTurn"`
 	CanSign       bool      `json:"canSign"`
 	CreatedAt     time.Time `json:"createdAt"`
 	// ReturnURL is where the page sends the signee back to once they signed or

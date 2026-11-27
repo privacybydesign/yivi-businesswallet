@@ -3,6 +3,7 @@ package signing
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"mime/multipart"
 	"net/http"
@@ -184,5 +185,35 @@ func TestCreateRequestRefusesABodyOverTheHardLimitWhileParsing(t *testing.T) {
 	}
 	if svc.pdf != nil {
 		t.Error("an over-sized document reached the service anyway")
+	}
+}
+
+// callbackService answers the callback with a fixed destination.
+type callbackService struct {
+	recordingService
+	dest string
+}
+
+func (s *callbackService) HandleCallback(context.Context, string, string) string { return s.dest }
+
+// A browser is redirected; the wallet's own page, which asks for JSON, is told
+// where it would have been sent.
+func TestCallbackAnswersAPageWithTheDestination(t *testing.T) {
+	const dest = "https://wallet.example.org/acme/signing?link=ok"
+	h := &Handler{svc: &callbackService{dest: dest}}
+
+	rec := httptest.NewRecorder()
+	h.callback(rec, httptest.NewRequest(http.MethodGet, "/signing/callback?code=c&state=s", nil))
+	if rec.Code != http.StatusFound || rec.Header().Get("Location") != dest {
+		t.Fatalf("browser callback = %d to %q, want a redirect to the destination", rec.Code, rec.Header().Get("Location"))
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/signing/callback?code=c&state=s", nil)
+	req.Header.Set("Accept", "application/json")
+	rec = httptest.NewRecorder()
+	h.callback(rec, req)
+	var got callbackResult
+	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil || rec.Code != http.StatusOK || got.RedirectURL != dest {
+		t.Fatalf("page callback = %d %+v (%v), want 200 with the destination", rec.Code, got, err)
 	}
 }

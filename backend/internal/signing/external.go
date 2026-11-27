@@ -72,8 +72,8 @@ func (s *Service) ExternalView(ctx context.Context, token string) (ExternalView,
 	} else if !errors.Is(err, ErrNoCredential) {
 		return ExternalView{}, err
 	}
-	view.CanSign = req.Status == StatusAwaitingSignatures &&
-		checkTurn(req, me.ID) == nil && view.HasCredential
+	view.YourTurn = req.Status == StatusAwaitingSignatures && checkTurn(req, me.ID) == nil
+	view.CanSign = view.YourTurn && view.HasCredential
 	return view, nil
 }
 

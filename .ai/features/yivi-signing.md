@@ -115,10 +115,23 @@ page, the external signee's `/sign/{token}`) asks `authorizeUrl` for JSON:
 shows the same step in a dialog (`routes/signing-authorization-dialog.tsx`; the
 panel and `lib/use-signing-authorization.ts` are shared with the standalone page),
 so the signer scans where they pressed Sign. The decided authorization's
-`redirectUrl` is still a full navigation, to the callback and back to the same
-page. Closing the dialog cancels a pending authorization rather than hiding it: the
-ceremony holds the request until that redirect ends it. If the JSON start fails the
-browser is sent to `authorizeUrl` as before. A remote provider is never
+`redirectUrl` is the ceremony's callback, and the dialog asks that for JSON too:
+`GET /signing/callback` does its work and answers `{redirectUrl}`, whose query says
+how the ceremony ended (`lib/signing-authorization-start.ts`, `ceremonyEnd`), so the
+page never reloads. The callback can be answered once, so that request is never
+retried; if it fails the browser follows the redirect. Closing the dialog cancels a
+pending authorization rather than hiding it: the ceremony holds the request until
+its callback ends it. If the JSON start fails the browser is sent to `authorizeUrl`
+as before.
+
+**Linking is not a step the signer takes.** Pressing Sign runs whichever of the two
+legs are still needed, one after the other, in that dialog
+(`lib/use-sign-ceremony.ts`): no certificate yet means link, then sign ("Step 1 of
+2", "Step 2 of 2"). A start refused with `no_credential` (the organisation changed
+provider) does the same. My credential still shows the certificate and re-links it.
+An external signee's view carries `yourTurn` beside `canSign`, since Sign is offered
+before they have a certificate. A remote provider still redirects for each leg, and
+the signer presses Sign again after linking. A remote provider is never
 `authorizeInApp`: its authorization page is its own.
 
 The page shows the document's name because a cross-device QR code can be relayed:

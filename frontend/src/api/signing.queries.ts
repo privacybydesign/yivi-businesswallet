@@ -314,6 +314,23 @@ export function useDeclineExternalSignMutation(
   });
 }
 
+// A signature made or refused from this page moves the request it was for.
+export function useInvalidateSigningRequests(slug: string): () => void {
+  const queryClient = useQueryClient();
+  return () =>
+    void queryClient.invalidateQueries({
+      predicate: signingRequestReads(slug),
+    });
+}
+
+export function useInvalidateExternalSigning(token: string): () => void {
+  const queryClient = useQueryClient();
+  return () =>
+    void queryClient.invalidateQueries({
+      queryKey: externalSigningQueryKey(token),
+    });
+}
+
 export function useInvalidateSigningCredential(slug: string): () => void {
   const queryClient = useQueryClient();
   return () =>

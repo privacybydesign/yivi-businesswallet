@@ -132,6 +132,18 @@ describe("withPlacement", () => {
     expect(got).toEqual([second]);
   });
 
+  it("turns the default mark with a sideways page", () => {
+    expect(defaultSize(PLACEMENT_KIND.signature, a4)).toEqual(
+      DEFAULT_SIGNATURE_SIZE,
+    );
+    expect(
+      defaultSize(PLACEMENT_KIND.signature, { ...a4, sideways: true }),
+    ).toEqual({
+      width: DEFAULT_SIGNATURE_SIZE.height,
+      height: DEFAULT_SIGNATURE_SIZE.width,
+    });
+  });
+
   it("keeps one paraph per page and replaces the one on that page", () => {
     const got = withPlacement(
       withPlacement([paraph(1)], paraph(2)),

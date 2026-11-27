@@ -304,7 +304,7 @@ func TestParaphTextIsEncodedForTheFontItIsDrawnIn(t *testing.T) {
 			// And the box is measured in the glyphs that are drawn, one per byte.
 			appearance := paraphAppearance(
 				Placement{Kind: PlacementParaph, Page: 1, Width: 48, Height: 24},
-				paraphText(tc.name), 9)
+				paraphText(tc.name), 9, 0)
 			if !bytes.Contains(appearance, []byte(pdfLiteral(got)+" Tj")) {
 				t.Fatalf("the appearance stream does not draw %q:\n%s", tc.want, appearance)
 			}
@@ -345,5 +345,70 @@ func TestParaphOnlyPageKeepsItsEntries(t *testing.T) {
 	}
 	if got := rdr.Page(2).V.Key("LastModified").RawString(); got != "D:20240101120000Z" {
 		t.Fatalf("the paraph page's /LastModified came back as %q", got)
+	}
+}
+
+// A reader turns an annotation with its page, so on a page shown sideways the
+// text has to be turned back or it runs up the side of its box. The matrix takes
+// the box as the reader sees it onto the mark's own rectangle: its corners must
+// land on the rectangle's corners, and "to the right" as seen must be the
+// direction the page's rotation turns to the right.
+func TestUprightBoxTurnsTextBackByThePageRotation(t *testing.T) {
+	const width, height = 180.0, 56.0
+	tests := []struct {
+		rotation              int
+		seenWidth, seenHeight float64
+		rightX, rightY        float64 // where one step right, as seen, goes in the rectangle
+		originX, originY      float64 // where the seen box's lower-left corner lands
+	}{
+		{0, width, height, 1, 0, 0, 0},
+		{90, height, width, 0, 1, width, 0},
+		{180, width, height, -1, 0, width, height},
+		{270, height, width, 0, -1, 0, height},
+	}
+	for _, tc := range tests {
+		t.Run(fmt.Sprint(tc.rotation), func(t *testing.T) {
+			seenWidth, seenHeight, matrix := uprightBox(width, height, tc.rotation)
+			if seenWidth != tc.seenWidth || seenHeight != tc.seenHeight {
+				t.Fatalf("seen box = %vx%v, want %vx%v", seenWidth, seenHeight, tc.seenWidth, tc.seenHeight)
+			}
+			a, b, c, d, e, f := 1.0, 0.0, 0.0, 1.0, 0.0, 0.0
+			if matrix != "" {
+				if _, err := fmt.Sscanf(matrix, "%f %f %f %f %f %f cm", &a, &b, &c, &d, &e, &f); err != nil {
+					t.Fatalf("matrix %q: %v", matrix, err)
+				}
+			}
+			if a != tc.rightX || b != tc.rightY || e != tc.originX || f != tc.originY {
+				t.Fatalf("matrix = %q, want right (%v, %v) from origin (%v, %v)", matrix, tc.rightX, tc.rightY, tc.originX, tc.originY)
+			}
+			// The seen box's far corner lands on a corner of the rectangle too.
+			farX, farY := a*seenWidth+c*seenHeight+e, b*seenWidth+d*seenHeight+f
+			if farX < 0 || farX > width || farY < 0 || farY > height {
+				t.Fatalf("the seen box's far corner lands at (%v, %v), outside the %vx%v rectangle", farX, farY, width, height)
+			}
+		})
+	}
+}
+
+// The rotation is read from the page, which may inherit it, and a signature
+// block on a sideways page is drawn turned back.
+func TestSignatureBlockOnASidewaysPageIsDrawnUpright(t *testing.T) {
+	doc := buildTestPDFWith(t, testPDFOptions{
+		pages:       1,
+		pageEntries: func(int) string { return "/Rotate 90" },
+	})
+	signed := signWithPlacements(t, doc, []Placement{
+		{Kind: PlacementSignature, Page: 1, X: 72, Y: 96, Width: 56, Height: 180},
+	})
+	mustVerify(t, signed, 1)
+	if !bytes.Contains(signed, []byte("0 1 -1 0 56.00 0 cm")) {
+		t.Fatal("the signature block on a page rotated 90 degrees is not turned back")
+	}
+
+	upright := signWithPlacements(t, buildTestPDF(t, 1, false), []Placement{
+		{Kind: PlacementSignature, Page: 1, X: 72, Y: 96, Width: 180, Height: 56},
+	})
+	if bytes.Contains(upright, []byte(" cm\n")) {
+		t.Fatal("a signature block on an unrotated page was turned")
 	}
 }

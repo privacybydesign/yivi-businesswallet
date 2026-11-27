@@ -107,7 +107,7 @@ func stampMarks(input []byte, rdr *pdf.Reader, paraphs []Placement, paraphMark s
 				return nil, err
 			}
 			objects = append(objects,
-				incrObject{id: appearanceID, body: paraphAppearance(m, paraphMark, fontID)},
+				incrObject{id: appearanceID, body: paraphAppearance(m, paraphMark, fontID, pageRotation(rdr, m.Page))},
 				incrObject{id: annotID, body: stampAnnotation(m, paraphMark, appearanceID, pageRef)},
 			)
 			queue(m.Page, annotID)
@@ -120,7 +120,7 @@ func stampMarks(input []byte, rdr *pdf.Reader, paraphs []Placement, paraphMark s
 				return nil, err
 			}
 			objects = append(objects,
-				incrObject{id: appearanceID, body: signatureBlockAppearance(*block, blockLines, fontID)},
+				incrObject{id: appearanceID, body: signatureBlockAppearance(*block, blockLines, fontID, pageRotation(rdr, block.Page))},
 				incrObject{id: annotID, body: stampAnnotation(*block, strings.Join(blockLines, " "), appearanceID, pageRef)},
 			)
 			queue(block.Page, annotID)
@@ -205,14 +205,63 @@ func winAnsi(text string) []byte {
 	return out
 }
 
+// Page rotations, in degrees clockwise (PDF 32000-1 table 30: /Rotate is a
+// multiple of 90).
+const (
+	quarterTurn       = 90
+	halfTurn          = 180
+	threeQuarterTurns = 270
+	fullTurn          = 360
+)
+
+// pageRotation is how far a page is turned clockwise when shown: its /Rotate,
+// which a page may inherit, brought into 0, 90, 180 or 270. A value that is not a
+// multiple of 90 is not a rotation a reader applies, so it counts as none.
+func pageRotation(rdr *pdf.Reader, number int) int {
+	v := inherited(rdr.Page(number).V, "Rotate")
+	if v.Kind() != pdf.Integer {
+		return 0
+	}
+	turn := int(v.Int64() % fullTurn)
+	if turn < 0 {
+		turn += fullTurn
+	}
+	if turn%quarterTurn != 0 {
+		return 0
+	}
+	return turn
+}
+
+// uprightBox is the space a mark's text is laid out in so that it reads upright
+// on a page shown turned by rotation: the size of the mark's rectangle as the
+// reader sees it, and the content-stream matrix that takes that space to the
+// rectangle's own. A reader turns an annotation with its page, so text written
+// along the rectangle's own x axis would run up the side of a sideways page.
+// The matrix turns the text back by the page's rotation and shifts it so the
+// turned box lands on the rectangle again.
+func uprightBox(width, height float64, rotation int) (seenWidth, seenHeight float64, matrix string) {
+	switch rotation {
+	case quarterTurn:
+		return height, width, fmt.Sprintf("0 1 -1 0 %.2f 0 cm\n", width)
+	case halfTurn:
+		return width, height, fmt.Sprintf("-1 0 0 -1 %.2f %.2f cm\n", width, height)
+	case threeQuarterTurns:
+		return height, width, fmt.Sprintf("0 -1 1 0 0 %.2f cm\n", height)
+	default:
+		return width, height, ""
+	}
+}
+
 // paraphAppearance is the Form XObject drawn inside the paraph's rectangle. Its
 // coordinate space is the rectangle itself (origin at its lower-left corner), so
 // the text is positioned without reference to where on the page the box sits.
-func paraphAppearance(m Placement, text string, fontID uint32) []byte {
+// rotation is the page's, so the initials read upright on a turned page.
+func paraphAppearance(m Placement, text string, fontID uint32, rotation int) []byte {
 	drawn := winAnsi(text)
-	fontSize, x, y := paraphTextLayout(len(drawn), m.Width, m.Height)
+	seenWidth, seenHeight, matrix := uprightBox(m.Width, m.Height, rotation)
+	fontSize, x, y := paraphTextLayout(len(drawn), seenWidth, seenHeight)
 	var stream bytes.Buffer
-	stream.WriteString("q\nBT\n")
+	stream.WriteString("q\n" + matrix + "BT\n")
 	fmt.Fprintf(&stream, "/F1 %.2f Tf\n", fontSize)
 	fmt.Fprintf(&stream, "%.2f %.2f Td\n", x, y)
 	stream.WriteString(paraphInk + "\n")
@@ -258,8 +307,9 @@ const signatureLinePitch = 1.25
 // block: their lines top-to-bottom, left-aligned, in the same font and ink the
 // paraphs use so the two marks read as one hand. Its coordinate space is the
 // rectangle itself (origin at the lower-left corner), so the text is positioned
-// without reference to where on the page the box sits.
-func signatureBlockAppearance(m Placement, lines []string, fontID uint32) []byte {
+// without reference to where on the page the box sits. rotation is the page's, so
+// the lines read upright, left to right, on a turned page.
+func signatureBlockAppearance(m Placement, lines []string, fontID uint32, rotation int) []byte {
 	drawn := make([][]byte, len(lines))
 	widest := 0
 	for i, line := range lines {
@@ -268,10 +318,11 @@ func signatureBlockAppearance(m Placement, lines []string, fontID uint32) []byte
 			widest = len(drawn[i])
 		}
 	}
-	fontSize, x, top, pitch := signatureTextLayout(len(drawn), widest, m.Width, m.Height)
+	seenWidth, seenHeight, matrix := uprightBox(m.Width, m.Height, rotation)
+	fontSize, x, top, pitch := signatureTextLayout(len(drawn), widest, seenWidth, seenHeight)
 
 	var stream bytes.Buffer
-	stream.WriteString("q\nBT\n")
+	stream.WriteString("q\n" + matrix + "BT\n")
 	fmt.Fprintf(&stream, "/F1 %.2f Tf\n", fontSize)
 	stream.WriteString(paraphInk + "\n")
 	fmt.Fprintf(&stream, "%.2f %.2f Td\n", x, top)

@@ -3045,7 +3045,8 @@ export const nl: Translation<typeof en> = {
     signTitle: "Een document ondertekenen",
     signDescription:
       "Upload een PDF. De hash wordt met je wallet geautoriseerd, door de provider ondertekend en de ondertekende PDF wordt aan je teruggegeven.",
-    signNeedsCredential: "Koppel eerst een ondertekencertificaat.",
+    signFirstTimeHint:
+      "De eerste keer dat je ondertekent, identificeer je je met Yivi om je ondertekencertificaat te krijgen. Daarna keur je de handtekening goed.",
     signButton: "Document ondertekenen",
     reviewButton: "Bekijken en ondertekenen",
     viewer: {
@@ -3086,6 +3087,8 @@ export const nl: Translation<typeof en> = {
     documentRemove: "Verwijderen",
     documentNone: "Geen bestand gekozen",
     documentTooLarge: "Het document is groter dan {{size}}.",
+    documentEncrypted:
+      "Deze pdf is beveiligd (versleuteld) en kan daarom niet worden ondertekend. Upload een kopie zonder beveiliging, bijvoorbeeld door het document af te drukken naar een nieuwe pdf.",
     signersLabel: "Ondertekenaars",
     signersHint:
       "Voeg iedereen toe die moet ondertekenen, in de volgorde waarin ze tekenen. Een lid tekent vanuit zijn eigen account; een externe ondertekenaar krijgt een link per e-mail en tekent met zijn eigen wallet.",
@@ -3229,9 +3232,8 @@ export const nl: Translation<typeof en> = {
       progressLabel: "Handtekeningen",
       progress: "{{signed}} van {{total}}",
       reviewDocument: "Openen in een nieuw tabblad",
-      needsCredential:
-        "Koppel eerst je ondertekencertificaat. Daarvoor identificeer je je één keer met je wallet-app; daarna kun je ondertekenen.",
-      linkButton: "Ondertekencertificaat koppelen",
+      firstTimeHint:
+        "De eerste keer dat je ondertekent, identificeer je je met Yivi om je ondertekencertificaat te krijgen. Daarna keur je de handtekening goed.",
       signButton: "Document ondertekenen",
       declineButton: "Weigeren",
       notYourTurn:
@@ -3286,6 +3288,9 @@ export const nl: Translation<typeof en> = {
       cancelError: "Kon niet annuleren. Probeer het opnieuw.",
       leaving: "Je wordt teruggebracht…",
       finishing: "Goedgekeurd. Bezig met afronden…",
+      cancelling: "Bezig met annuleren…",
+      dialogTitleStep:
+        "Stap {{position}} van {{total}}: keur goed in de Yivi-app",
       dialogTitle: "Keur goed in de Yivi-app",
       denied: {
         title: "Niet goedgekeurd",

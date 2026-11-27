@@ -27,6 +27,9 @@ export interface PageBox {
   minY: number;
   maxX: number;
   maxY: number;
+  // True for a page shown a quarter turn from how its box is written (/Rotate 90
+  // or 270): what reads as its width on screen is its height in PDF points.
+  sideways?: boolean;
 }
 
 export interface Size {
@@ -34,10 +37,17 @@ export interface Size {
   height: number;
 }
 
-export function defaultSize(kind: PlacementKind): Size {
-  return kind === PLACEMENT_KIND.signature
-    ? { ...DEFAULT_SIGNATURE_SIZE }
-    : { ...DEFAULT_PARAPH_SIZE };
+// defaultSize is the size of a freshly placed mark on a page, in PDF points. The
+// defaults are wider than tall as the reader sees them, so on a sideways page the
+// two swap: a block that is wide on screen is tall in the page's own space.
+export function defaultSize(kind: PlacementKind, box?: PageBox): Size {
+  const size =
+    kind === PLACEMENT_KIND.signature
+      ? DEFAULT_SIGNATURE_SIZE
+      : DEFAULT_PARAPH_SIZE;
+  return box?.sideways === true
+    ? { width: size.height, height: size.width }
+    : { ...size };
 }
 
 function clampBetween(value: number, low: number, high: number): number {

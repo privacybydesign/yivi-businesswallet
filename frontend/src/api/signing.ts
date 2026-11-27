@@ -1,5 +1,7 @@
 import { z } from "zod";
 import { ApiError, absoluteApiUrl, request, requestBlob } from "./http";
+import { callbackPath, ceremonyEnd } from "../lib/signing-authorization-start";
+import type { CeremonyEnd } from "../lib/signing-authorization-start";
 
 // The co-signing workflow: the business wallet is the RP-centric Signature
 // Creation Application. Each signer links a signing credential once (a member in
@@ -157,6 +159,28 @@ export const signingStartSchema = z.object({
   authorizeInApp: z.boolean().optional(),
 });
 export type SigningStart = z.infer<typeof signingStartSchema>;
+
+// What the ceremony's callback answers a page that asks for JSON: where it
+// would have sent the browser, whose query says how the ceremony ended.
+const ceremonyCallbackSchema = z.object({ redirectUrl: z.string() });
+
+// finishSigningCeremony ends a ceremony from the page that started it, with the
+// redirect of its decided authorization, and reports how it ended. It rejects
+// for a redirect that is not the ceremony's callback, which the browser has to
+// follow itself. The callback can be answered only once, so it is never retried.
+export async function finishSigningCeremony(
+  redirectUrl: string,
+): Promise<CeremonyEnd> {
+  const path = callbackPath(redirectUrl);
+  if (path === undefined) {
+    throw new Error("the redirect is not the signing ceremony's callback");
+  }
+  const { redirectUrl: destination } = await request(path, {
+    schema: ceremonyCallbackSchema,
+    maxRetries: 0,
+  });
+  return ceremonyEnd(destination);
+}
 
 const createdSchema = z.object({ id: z.string() });
 
@@ -338,6 +362,9 @@ export const externalSigningSchema = z.object({
   signerCount: z.number(),
   signedCount: z.number(),
   hasCredential: z.boolean(),
+  // The request is waiting for this signee: Sign is offered, and gets them a
+  // certificate first when they have none.
+  yourTurn: z.boolean().optional(),
   canSign: z.boolean(),
   createdAt: z.string(),
   // The site that sent the signee here, to offer a way back once they are
