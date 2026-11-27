@@ -66,6 +66,9 @@ type Brand struct {
 	// It is not part of the palette derivation (resolveBrand leaves it zero); the
 	// service sets it only for a layout that actually has a logo block.
 	Logo Logo
+	// Wordmark, when set, stands in for the org name as the logo's alt text and
+	// text wordmark: Yivi's own notices are not from the org.
+	Wordmark string
 }
 
 // Logo is an org's uploaded logo image, ready to embed inline in mail. The zero

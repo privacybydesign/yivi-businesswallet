@@ -309,9 +309,22 @@ const catalogSource = readFileSync(catalogGoPath, "utf8");
 // the type — it is still an untyped string constant assignable to `Kind`, so it
 // compiles and can be served. Requiring the type here would skip it, and the
 // length assertion below would pass too, both lists being short by the same one.
-const backendKinds = [
-  ...catalogSource.matchAll(/^\s*Kind\w+(?:\s+Kind)?\s*=\s*"([^"]+)"/gm),
-].map((m) => m[1]);
+const kindValues = new Map(
+  [
+    ...catalogSource.matchAll(/^\s*(Kind\w+)(?:\s+Kind)?\s*=\s*"([^"]+)"/gm),
+  ].map((m) => [m[1], m[2]]),
+);
+// Yivi's own notices (yiviNotices in catalog.go) are not org templates, so the
+// editor does not list them.
+const yiviNotices = [
+  ...(
+    /var yiviNotices = map\[Kind\]bool\{([^}]*)\}/.exec(catalogSource)?.[1] ??
+    ""
+  ).matchAll(/(Kind\w+):/g),
+].map((m) => kindValues.get(m[1]));
+const backendKinds = [...kindValues.values()].filter(
+  (kind) => !yiviNotices.includes(kind),
+);
 
 // The copy is read out of en.ts rather than through t(), because t()'s key type
 // is the union of the shipped keys and a raw string from the Go source is not
@@ -323,6 +336,7 @@ const kindDescriptions: Record<string, string> =
 describe("mail kinds backend/frontend parity", () => {
   it("extracts the kinds from catalog.go", () => {
     expect(backendKinds).toContain("invitation");
+    expect(yiviNotices).toContain("provider_delisted");
     expect(backendKinds).toHaveLength(MAIL_TEMPLATE_KINDS.length);
   });
 

@@ -65,6 +65,15 @@ const (
 	// KindVogExpired is sent once a member's VOG has expired, on the org's
 	// overdue reminder cadence.
 	KindVogExpired Kind = "vog_expired"
+	// KindProviderDelisted tells an org's admins their wallet unit was revoked
+	// because we as provider are off the trusted list (Annex 6(2): within 24 hours,
+	// with the reason and the consequences).
+	KindProviderDelisted Kind = "provider_delisted"
+	// KindProviderRelisted tells them it is active again: we are back on the list.
+	KindProviderRelisted Kind = "provider_relisted"
+	// KindWalletCeased tells an org's admins its wallet was revoked because its
+	// activity ended: its EBWOID was revoked.
+	KindWalletCeased Kind = "wallet_ceased"
 	// KindIdentityProofingRequested asks a person to prove their identity with
 	// their identity document and face: a QR code and a button carrying the
 	// vcmrtd deep link of an IPS session created at send.
@@ -99,6 +108,9 @@ const (
 	// empty for a member's request: their paragraphs are then left out.
 	varSupportContact = "supportContact"
 	varPrivacyURL     = "privacyUrl"
+	varWalletURL      = "walletUrl"
+	// varPolicyURL is empty until the revocation policy is published.
+	varPolicyURL = "policyUrl"
 )
 
 // appSchemeVCMRTD is the scheme of the vcmrtd app's deep links (identity
@@ -195,6 +207,21 @@ var kindVariables = map[Kind][]Variable{
 		{Name: varVogURL, IsURL: true},
 		{Name: varDueDate},
 	},
+	KindProviderDelisted: {
+		{Name: varOrgName},
+		{Name: varWalletURL, IsURL: true},
+		{Name: varPolicyURL},
+	},
+	KindProviderRelisted: {
+		{Name: varOrgName},
+		{Name: varWalletURL, IsURL: true},
+		{Name: varPolicyURL},
+	},
+	KindWalletCeased: {
+		{Name: varOrgName},
+		{Name: varWalletURL, IsURL: true},
+		{Name: varPolicyURL},
+	},
 	KindIdentityProofingRequested: {
 		{Name: varOrgName},
 		{Name: varRequesterName},
@@ -204,6 +231,13 @@ var kindVariables = map[Kind][]Variable{
 		{Name: varPrivacyURL},
 	},
 }
+
+// yiviNotices are sent by Yivi as wallet provider, in its own wording, so an org
+// cannot edit them.
+var yiviNotices = map[Kind]bool{KindProviderDelisted: true, KindProviderRelisted: true, KindWalletCeased: true}
+
+// OrgEditable reports whether an org may edit kind's templates.
+func OrgEditable(kind Kind) bool { return !yiviNotices[kind] }
 
 // Kinds returns every mail kind, in a stable order.
 func Kinds() []Kind {

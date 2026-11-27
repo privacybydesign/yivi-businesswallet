@@ -103,6 +103,9 @@ func (h *Handler) listTemplates(w http.ResponseWriter, r *http.Request) error {
 
 	out := templateListResponse{Kinds: make([]templateKindSummary, 0, len(Kinds()))}
 	for _, kind := range Kinds() {
+		if !OrgEditable(kind) {
+			continue
+		}
 		summary := templateKindSummary{
 			Kind:      string(kind),
 			Variables: variablesFor(kind),
@@ -248,9 +251,10 @@ func templateTarget(r *http.Request) (Kind, Locale, error) {
 	return kind, locale, nil
 }
 
+// parseKind resolves a kind an org may edit or send a specimen of.
 func parseKind(value string) (Kind, bool) {
 	for _, kind := range Kinds() {
-		if string(kind) == value {
+		if string(kind) == value && OrgEditable(kind) {
 			return kind, true
 		}
 	}

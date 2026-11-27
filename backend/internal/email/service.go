@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"html"
 	"log/slog"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -67,7 +69,15 @@ type Service struct {
 	// defaultLocale is the deployment's fallback mail language, used when the
 	// recipient's own preference is unknown.
 	defaultLocale Locale
+	// platform is Yivi's own SMTP server, nil when the deployment has none.
+	platform *mailer.Config
 }
+
+// YiviFromName is the sender name of the mail Yivi itself sends.
+const YiviFromName = "Yivi Business Wallet"
+
+// UsePlatformSMTP sets the SMTP server Yivi itself sends from.
+func (s *Service) UsePlatformSMTP(cfg mailer.Config) { s.platform = &cfg }
 
 // NewService builds the mail service. brand may be nil, in which case every
 // message renders in the default Yivi palette. tokens may be nil, in which case
@@ -386,6 +396,96 @@ func (s *Service) SendVogExpired(ctx context.Context, orgID uuid.UUID, to, orgNa
 	})
 }
 
+// SendProviderDelisted tells an org's admins its wallet unit was revoked because
+// we as provider are off the trusted list. It goes through Yivi's own SMTP server
+// when there is one, so it reaches orgs without SMTP settings of their own. One
+// failing mailbox does not cost the rest. Returns ErrNotConfigured when neither
+// can send.
+func (s *Service) SendProviderDelisted(ctx context.Context, orgID uuid.UUID, recipients []string, n ProviderNotice) error {
+	return s.sendProviderNotice(ctx, orgID, KindProviderDelisted, recipients, n)
+}
+
+// SendProviderRelisted tells an org's admins its wallet is active again because
+// we are back on the trusted list. Like SendProviderDelisted.
+func (s *Service) SendProviderRelisted(ctx context.Context, orgID uuid.UUID, recipients []string, n ProviderNotice) error {
+	return s.sendProviderNotice(ctx, orgID, KindProviderRelisted, recipients, n)
+}
+
+// ProviderNotice is what a Yivi notice to an org's admins names. PolicyURL may be
+// empty until the revocation policy is published: its paragraph is then left out.
+type ProviderNotice struct {
+	OrgName   string
+	WalletURL string
+	PolicyURL string
+}
+
+// sendProviderNotice sends our notice in our wording and look, never the org's,
+// through our own SMTP server or else the org's.
+func (s *Service) sendProviderNotice(ctx context.Context, orgID uuid.UUID, kind Kind, recipients []string, n ProviderNotice) error {
+	cfg, err := s.providerNoticeConfig(ctx, orgID)
+	if err != nil {
+		return err
+	}
+	locale := s.locale("")
+	tpl, ok := DefaultTemplate(kind, locale)
+	if !ok {
+		return fmt.Errorf("email: no template for kind %q", kind)
+	}
+	brand := resolveBrand(Seeds{})
+	brand.Logo = Logo{Bytes: yiviLogo, ContentType: "image/png"}
+	brand.Wordmark = yiviWordmark
+	body, err := Render(kind, locale, tpl, brand, map[string]string{
+		varOrgName: n.OrgName, varWalletURL: n.WalletURL, varPolicyURL: n.PolicyURL,
+	})
+	if err != nil {
+		return err
+	}
+	return s.deliverEach(cfg, messageOf(body), recipients)
+}
+
+func (s *Service) providerNoticeConfig(ctx context.Context, orgID uuid.UUID) (mailer.Config, error) {
+	if s.platform != nil {
+		return *s.platform, nil
+	}
+	resolved, ok, err := s.settings.configFor(ctx, orgID)
+	if err != nil {
+		return mailer.Config{}, err
+	}
+	if !ok {
+		return mailer.Config{}, ErrNotConfigured
+	}
+	cfg, err := s.authenticate(ctx, resolved)
+	cfg.FromName = YiviFromName
+	return cfg, err
+}
+
+// SendPlatformText mails a plain-text message from Yivi's own SMTP server.
+// Returns ErrNotConfigured when the deployment has none.
+func (s *Service) SendPlatformText(recipients []string, subject, text string) error {
+	if s.platform == nil {
+		return ErrNotConfigured
+	}
+	htmlBody := "<p>" + strings.ReplaceAll(html.EscapeString(text), "\n", "<br>") + "</p>"
+	return s.deliverEach(*s.platform, mailer.Message{Subject: subject, TextBody: text, HTMLBody: htmlBody}, recipients)
+}
+
+func (s *Service) deliverEach(cfg mailer.Config, msg mailer.Message, recipients []string) error {
+	var failures []error
+	for _, to := range recipients {
+		msg.To = to
+		if err := s.sender.Send(cfg, msg); err != nil {
+			failures = append(failures, fmt.Errorf("%s: %w", to, err))
+		}
+	}
+	return errors.Join(failures...)
+}
+
+// SendWalletCeased tells an org's admins its wallet was revoked because its
+// activity ended. Like SendProviderDelisted.
+func (s *Service) SendWalletCeased(ctx context.Context, orgID uuid.UUID, recipients []string, n ProviderNotice) error {
+	return s.sendProviderNotice(ctx, orgID, KindWalletCeased, recipients, n)
+}
+
 // SendSpecimen sends a sample of one kind to a single address, rendered from the
 // org's own template (or the shipped default) with the kind's sample variables, so
 // an admin can check a real, fully branded message of that cause against their own
@@ -472,14 +572,7 @@ func (s *Service) sendToEach(ctx context.Context, orgID uuid.UUID, kind Kind, lo
 	if err != nil {
 		return err
 	}
-	var failures []error
-	for _, to := range recipients {
-		msg.To = to
-		if err := s.sender.Send(cfg, msg); err != nil {
-			failures = append(failures, fmt.Errorf("%s: %w", to, err))
-		}
-	}
-	return errors.Join(failures...)
+	return s.deliverEach(cfg, msg, recipients)
 }
 
 // compose resolves the org's SMTP config, template and branding and renders the
@@ -519,6 +612,10 @@ func (s *Service) composeBranded(ctx context.Context, orgID uuid.UUID, kind Kind
 		return mailer.Config{}, mailer.Message{}, err
 	}
 
+	return cfg, messageOf(body), nil
+}
+
+func messageOf(body Body) mailer.Message {
 	var inline []mailer.InlineImage
 	if body.InlineLogo != nil {
 		inline = append(inline, mailer.InlineImage{
@@ -530,12 +627,12 @@ func (s *Service) composeBranded(ctx context.Context, orgID uuid.UUID, kind Kind
 	for _, img := range body.InlineQR {
 		inline = append(inline, mailer.InlineImage{ContentID: img.ContentID, ContentType: img.ContentType, Bytes: img.Bytes})
 	}
-	return cfg, mailer.Message{
+	return mailer.Message{
 		Subject:  body.Subject,
 		TextBody: body.TextBody,
 		HTMLBody: body.HTMLBody,
 		Inline:   inline,
-	}, nil
+	}
 }
 
 // authenticate completes the wire config with the credential the send presents.

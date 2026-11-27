@@ -11,11 +11,14 @@ export const WALLET_UNIT_REVOKE_REASONS = [
 export type WalletUnitRevokeReason =
   (typeof WALLET_UNIT_REVOKE_REASONS)[number];
 
-// "cessation" is set by the backend when the owner's EBWOID is revoked; an admin
-// cannot choose it, and a unit revoked for it cannot be replaced.
+// The backend sets "cessation" when the owner's EBWOID is revoked, and
+// "provider_delisted" while we as provider are off the trusted list; an admin
+// chooses neither. A cessation unit is never replaced, a delisted one is replaced
+// by the backend once we are back on the list.
 export const WALLET_UNIT_REVOKED_REASONS = [
   ...WALLET_UNIT_REVOKE_REASONS,
   "cessation",
+  "provider_delisted",
 ] as const;
 
 export const walletUnitSchema = z.object({

@@ -17,11 +17,11 @@ const (
 // ErrTransition is returned for a move the table does not allow.
 var ErrTransition = errors.New("lifecycle: status transition not allowed")
 
-// transitions lists, per status, the statuses it may move to. There is no way
-// back: revoked is final, and nothing reactivates a suspended one yet.
+// transitions lists, per status, the statuses it may move to. Revoked is final;
+// suspended can be resumed.
 var transitions = map[string][]string{
 	Active:    {Suspended, Revoked},
-	Suspended: {Revoked},
+	Suspended: {Active, Revoked},
 }
 
 func CanTransition(from, to string) bool {

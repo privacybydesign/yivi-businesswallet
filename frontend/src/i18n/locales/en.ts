@@ -2729,6 +2729,7 @@ export const en = {
       walletOpened: "Opened wallet",
       walletBootstrapped: "Bootstrapped wallet",
       walletSuspended: "Suspended wallet",
+      walletResumed: "Resumed wallet",
       walletRevoked: "Revoked wallet",
       representationClaimed: "Claimed representation",
       representationRevoked: "Revoked representation",
@@ -3590,7 +3591,10 @@ export const en = {
       owner_request: "Organization request",
       key_compromise: "Key compromise",
       cessation: "Company ended (owner identification revoked)",
+      provider_delisted: "Provider not on the trusted list",
     },
+    delistedHint:
+      "The provider of this business wallet is not on the trusted list of wallet providers, so the validity of every wallet it provides is revoked. You can still view and export your data. Issuers may revoke credentials issued to this wallet. Once the provider is back on the list, this wallet gets a new wallet unit by itself.",
     ceasedHint:
       "The issuer revoked this organization's owner identification data because the company ended. The wallet is revoked and no new wallet unit can be activated.",
     loadError: "Could not load the wallet unit: {{message}}",

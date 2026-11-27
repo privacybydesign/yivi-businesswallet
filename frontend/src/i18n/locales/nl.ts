@@ -2780,6 +2780,7 @@ export const nl: Translation<typeof en> = {
       walletOpened: "Wallet geopend",
       walletBootstrapped: "Wallet geïnitialiseerd",
       walletSuspended: "Wallet opgeschort",
+      walletResumed: "Wallet hervat",
       walletRevoked: "Wallet ingetrokken",
       representationClaimed: "Vertegenwoordiging geclaimd",
       representationRevoked: "Vertegenwoordiging ingetrokken",
@@ -3674,7 +3675,10 @@ export const nl: Translation<typeof en> = {
       owner_request: "Verzoek van de organisatie",
       key_compromise: "Sleutel gecompromitteerd",
       cessation: "Bedrijf beëindigd (eigenaar-identificatie ingetrokken)",
+      provider_delisted: "Aanbieder staat niet op de vertrouwde lijst",
     },
+    delistedHint:
+      "De aanbieder van deze business wallet staat niet op de vertrouwde lijst van wallet-aanbieders, dus de geldigheid van elke wallet van deze aanbieder is ingetrokken. Je kunt je gegevens nog bekijken en exporteren. Uitgevers kunnen attestaties van deze wallet intrekken. Zodra de aanbieder weer op de lijst staat, krijgt deze wallet vanzelf een nieuwe wallet-unit.",
     ceasedHint:
       "De uitgever heeft de eigenaar-identificatie van deze organisatie ingetrokken omdat het bedrijf is beëindigd. De wallet is ingetrokken en er kan geen nieuwe wallet-unit worden geactiveerd.",
     loadError: "De wallet-unit kon niet worden geladen: {{message}}",

@@ -670,3 +670,38 @@ func TestLoadWalletUnitAttester(t *testing.T) {
 		t.Errorf("unknown attester: err = %v, want one naming %s", err, envWalletUnitAttester)
 	}
 }
+
+// PLATFORM_SMTP_URL is optional; set, it needs PLATFORM_MAIL_FROM and a host, and
+// the port defaults to submission.
+func TestLoadPlatformSMTP(t *testing.T) {
+	cfg, err := loadWith(t, nil)
+	if err != nil || cfg.PlatformSMTP.Host != "" {
+		t.Fatalf("Load without it = %+v, %v; want no platform SMTP", cfg.PlatformSMTP, err)
+	}
+
+	cfg, err = loadWith(t, map[string]string{envPlatformSMTPURL: "smtp://alerts:s3cret@smtp.example.org", envPlatformMailFrom: "noreply@example.org"})
+	want := PlatformSMTP{Host: "smtp.example.org", Port: defaultPlatformSMTPPort, Username: "alerts", Password: "s3cret", From: "noreply@example.org"}
+	if err != nil || cfg.PlatformSMTP != want {
+		t.Fatalf("Load = %+v, %v; want %+v", cfg.PlatformSMTP, err, want)
+	}
+
+	for _, env := range []map[string]string{
+		{envPlatformSMTPURL: "smtp://smtp.example.org:465", envPlatformMailFrom: ""},
+		{envPlatformSMTPURL: "https://smtp.example.org", envPlatformMailFrom: "noreply@example.org"},
+		{envPlatformSMTPURL: "smtp://smtp.example.org:port", envPlatformMailFrom: "noreply@example.org"},
+	} {
+		if _, err := loadWith(t, env); err == nil {
+			t.Errorf("Load(%v) = nil, want an error", env)
+		}
+	}
+}
+
+func TestLoadRevocationPolicyURL(t *testing.T) {
+	cfg, err := loadWith(t, map[string]string{envRevocationPolicyURL: "https://www.yivi.app/revocation-policy"})
+	if err != nil || cfg.RevocationPolicyURL != "https://www.yivi.app/revocation-policy" {
+		t.Fatalf("Load = %q, %v", cfg.RevocationPolicyURL, err)
+	}
+	if _, err := loadWith(t, map[string]string{envRevocationPolicyURL: "/revocation-policy"}); err == nil {
+		t.Fatal("Load with a relative URL succeeded, want an error")
+	}
+}

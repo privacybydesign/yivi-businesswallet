@@ -38,6 +38,11 @@ services:
       # VOG uploads likewise: dev accepts any VOG. Set
       # VOG_VALIDATOR_PROVIDER=validatie_nl in .env to check for real.
       VOG_VALIDATOR_PROVIDER: ${VOG_VALIDATOR_PROVIDER:-stub}
+      # Our own stub trusted list of wallet providers, with us on it.
+      TRUSTED_LIST_PROVIDER: ${TRUSTED_LIST_PROVIDER:-stub}
+      # Yivi's own mail goes to Mailpit, so every org's admins get Yivi's notices.
+      PLATFORM_SMTP_URL: ${PLATFORM_SMTP_URL:-smtp://mailpit:1025}
+      PLATFORM_MAIL_FROM: ${PLATFORM_MAIL_FROM:-noreply@yivi.app}
       # The EU Trusted Lists cache, on the diploma-trust-cache volume so a
       # restart does not fetch them again.
       DIPLOMA_TRUST_CACHE_DIR: ${DIPLOMA_TRUST_CACHE_DIR:-/var/cache/diploma-trust}

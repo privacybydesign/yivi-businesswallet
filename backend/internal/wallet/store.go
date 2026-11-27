@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
@@ -40,6 +41,7 @@ const orgColumns = `id, name, slug, kvk_number, euid, digital_address, status, b
 // statusAudit maps an org status change to its audit action.
 var statusAudit = map[string]string{
 	organization.StatusSuspended: audit.WalletSuspended,
+	organization.StatusActive:    audit.WalletResumed,
 	organization.StatusRevoked:   audit.WalletRevoked,
 }
 
@@ -247,14 +249,192 @@ func (s *Store) setStatusIn(ctx context.Context, q database.Querier, orgID uuid.
 // be called again.
 func (s *Store) Cease(ctx context.Context, orgID uuid.UUID) error {
 	return database.InTx(ctx, s.db, func(q database.Querier) error {
-		if _, err := s.setStatusIn(ctx, q, orgID, organization.StatusRevoked); err != nil && !errors.Is(err, lifecycle.ErrTransition) {
+		_, err := s.setStatusIn(ctx, q, orgID, organization.StatusRevoked)
+		walletRevoked := err == nil
+		if err != nil && !errors.Is(err, lifecycle.ErrTransition) {
 			return err
 		}
-		if _, err := s.units.RevokeIn(ctx, q, orgID, walletunit.ReasonCessation); err != nil && !errors.Is(err, walletunit.ErrNoActiveUnit) {
+		_, err = s.units.RevokeIn(ctx, q, orgID, walletunit.ReasonCessation)
+		unitRevoked := err == nil
+		if err != nil && !errors.Is(err, walletunit.ErrNoActiveUnit) {
 			return err
+		}
+		if !walletRevoked && !unitRevoked {
+			return nil
+		}
+		if _, err := q.Exec(ctx, `INSERT INTO wallet_ceased_notices (organization_id) VALUES ($1)
+			ON CONFLICT DO NOTHING`, orgID); err != nil {
+			return fmt.Errorf("wallet: queue ceased notice org %s: %w", orgID, err)
 		}
 		return nil
 	})
+}
+
+// SendCeasedNotices tells the admins of each org Cease revoked, retrying every
+// run until it is sent, and alerts us once about one still unsent after
+// ceasedNoticeWarnAfter. The rows stay locked while they are sent, so a second
+// replica skips them instead of mailing twice.
+func (s *Store) SendCeasedNotices(ctx context.Context, notify CeasedNotifier, alert Alerter, now time.Time) (int64, error) {
+	var sent int64
+	var failed []error
+	err := database.InTx(ctx, s.db, func(q database.Querier) error {
+		sent, failed = 0, nil
+		rows, err := q.Query(ctx, `SELECT organization_id, queued_at, warned_at IS NOT NULL
+			FROM wallet_ceased_notices ORDER BY queued_at FOR UPDATE SKIP LOCKED`)
+		if err != nil {
+			return fmt.Errorf("wallet: read ceased notices: %w", err)
+		}
+		type notice struct {
+			OrgID    uuid.UUID
+			QueuedAt time.Time
+			Warned   bool
+		}
+		due, err := pgx.CollectRows(rows, pgx.RowToStructByPos[notice])
+		if err != nil {
+			return fmt.Errorf("wallet: read ceased notices: %w", err)
+		}
+		var late []uuid.UUID
+		for _, n := range due {
+			if err := notify.WalletCeased(ctx, n.OrgID); err != nil {
+				failed = append(failed, fmt.Errorf("wallet: tell admins of ceased org %s: %w", n.OrgID, err))
+				if !n.Warned && now.Sub(n.QueuedAt) >= ceasedNoticeWarnAfter {
+					late = append(late, n.OrgID)
+				}
+				continue
+			}
+			if _, err := q.Exec(ctx, `DELETE FROM wallet_ceased_notices WHERE organization_id = $1`, n.OrgID); err != nil {
+				return fmt.Errorf("wallet: mark ceased notice org %s sent: %w", n.OrgID, err)
+			}
+			sent++
+		}
+		if len(late) == 0 {
+			return nil
+		}
+		text := fmt.Sprintf("Orgs whose wallet was revoked because their activity ended, and whose admins have still not been mailed after %s: %d. They must be told within 24 hours; retrying.",
+			ceasedNoticeWarnAfter, len(late))
+		slog.ErrorContext(ctx, "wallet: "+text)
+		// Recorded only once the alert reached us, so a failed one is tried again.
+		if err := alert.Alert(ctx, text); err != nil {
+			failed = append(failed, fmt.Errorf("wallet: alert late ceased notices: %w", err))
+			return nil
+		}
+		if _, err := q.Exec(ctx, `UPDATE wallet_ceased_notices SET warned_at = $2 WHERE organization_id = ANY($1)`, late, now); err != nil {
+			return fmt.Errorf("wallet: record late ceased notices: %w", err)
+		}
+		return nil
+	})
+	return sent, errors.Join(err, errors.Join(failed...))
+}
+
+// SuspendForProvider revokes every live wallet unit and suspends every active
+// wallet, in one tx, because we as provider are off the trusted list (Art
+// 6(2)(f)), and returns the orgs it changed. Each wallet it suspends is
+// remembered, so ResumeForProvider brings back exactly these and not a wallet an
+// admin suspended. then runs last in the same tx.
+func (s *Store) SuspendForProvider(ctx context.Context, then func(ctx context.Context, q database.Querier, changed []uuid.UUID) error) ([]uuid.UUID, error) {
+	var changed []uuid.UUID
+	err := database.InTx(ctx, s.db, func(q database.Querier) error {
+		changed = nil
+		rows, err := q.Query(ctx, `SELECT id, status FROM organizations WHERE status IN ($1, $2) ORDER BY created_at FOR UPDATE`,
+			organization.StatusActive, organization.StatusSuspended)
+		if err != nil {
+			return fmt.Errorf("wallet: live orgs: %w", err)
+		}
+		type liveOrg struct {
+			ID     uuid.UUID
+			Status string
+		}
+		live, err := pgx.CollectRows(rows, pgx.RowToStructByPos[liveOrg])
+		if err != nil {
+			return fmt.Errorf("wallet: live orgs rows: %w", err)
+		}
+		for _, org := range live {
+			_, err := s.units.RevokeIn(ctx, q, org.ID, walletunit.ReasonProviderDelisted)
+			revoked := err == nil
+			if err != nil && !errors.Is(err, walletunit.ErrNoActiveUnit) {
+				return err
+			}
+			if org.Status == organization.StatusActive {
+				if err := s.suspendForProviderIn(ctx, q, org.ID); err != nil {
+					return err
+				}
+			}
+			if revoked || org.Status == organization.StatusActive {
+				changed = append(changed, org.ID)
+			}
+		}
+		return then(ctx, q, changed)
+	})
+	return changed, err
+}
+
+func (s *Store) suspendForProviderIn(ctx context.Context, q database.Querier, orgID uuid.UUID) error {
+	if _, err := s.setStatusIn(ctx, q, orgID, organization.StatusSuspended); err != nil {
+		return err
+	}
+	if _, err := q.Exec(ctx, `INSERT INTO provider_suspended_wallets (organization_id) VALUES ($1)
+		ON CONFLICT DO NOTHING`, orgID); err != nil {
+		return fmt.Errorf("wallet: remember provider suspension org %s: %w", orgID, err)
+	}
+	return nil
+}
+
+// ResumeForProvider makes the wallets SuspendForProvider suspended active again,
+// each with a new unit in place of the one it revoked, in one tx, and returns
+// those orgs. One revoked since then stays revoked. then runs last in the same tx.
+func (s *Store) ResumeForProvider(ctx context.Context, then func(ctx context.Context, q database.Querier, resumed []uuid.UUID) error) ([]uuid.UUID, error) {
+	var ids []uuid.UUID
+	err := database.InTx(ctx, s.db, func(q database.Querier) error {
+		var err error
+		ids, err = orgIDs(ctx, q, `SELECT o.id FROM provider_suspended_wallets p
+			JOIN organizations o ON o.id = p.organization_id
+			WHERE o.status = $1 ORDER BY o.created_at FOR UPDATE OF o`, organization.StatusSuspended)
+		if err != nil {
+			return err
+		}
+		for _, id := range ids {
+			if _, err := s.setStatusIn(ctx, q, id, organization.StatusActive); err != nil {
+				return err
+			}
+			if err := s.replaceDelistedUnit(ctx, q, id); err != nil {
+				return err
+			}
+		}
+		if _, err := q.Exec(ctx, `DELETE FROM provider_suspended_wallets`); err != nil {
+			return fmt.Errorf("wallet: forget provider suspensions: %w", err)
+		}
+		return then(ctx, q, ids)
+	})
+	return ids, err
+}
+
+// replaceDelistedUnit gives the org a new unit when its latest was revoked for
+// ReasonProviderDelisted; an org that never had a unit gets its first on issue.
+func (s *Store) replaceDelistedUnit(ctx context.Context, q database.Querier, orgID uuid.UUID) error {
+	var delisted bool
+	err := q.QueryRow(ctx, `SELECT status = 'revoked' AND revoked_reason = $2 FROM wallet_units
+		WHERE organization_id = $1 ORDER BY (status = 'active') DESC, created_at DESC LIMIT 1`,
+		orgID, walletunit.ReasonProviderDelisted).Scan(&delisted)
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && !delisted) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("wallet: latest unit org %s: %w", orgID, err)
+	}
+	_, err = s.units.Provision(ctx, q, orgID)
+	return err
+}
+
+func orgIDs(ctx context.Context, q database.Querier, query string, args ...any) ([]uuid.UUID, error) {
+	rows, err := q.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("wallet: list orgs: %w", err)
+	}
+	ids, err := pgx.CollectRows(rows, pgx.RowTo[uuid.UUID])
+	if err != nil {
+		return nil, fmt.Errorf("wallet: list orgs rows: %w", err)
+	}
+	return ids, nil
 }
 
 // ListRepresentations returns the (non-revoked) mandate list for an org.

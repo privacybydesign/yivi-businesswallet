@@ -130,6 +130,7 @@ var catalog = []CatalogEntry{
 
 	{audit.WalletBootstrapped, GroupWallet},
 	{audit.WalletSuspended, GroupWallet},
+	{audit.WalletResumed, GroupWallet},
 	{audit.WalletRevoked, GroupWallet},
 	{audit.RepresentationClaimed, GroupWallet},
 	{audit.RepresentationRevoked, GroupWallet},

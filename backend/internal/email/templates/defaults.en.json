@@ -25,7 +25,9 @@
     "proofingUrl": "vcmrtd://verify?handover=sample&api=https%3A%2F%2Fproofing.example.org",
     "validMinutes": "10",
     "supportContact": "support@example.org",
-    "privacyUrl": "https://example.org/privacy"
+    "privacyUrl": "https://example.org/privacy",
+    "walletUrl": "https://wallet.example.org/acme",
+    "policyUrl": "https://example.org/revocation-policy"
   },
   "events": {
     "membership.invited": "Invited member",
@@ -48,6 +50,7 @@
 
     "wallet.bootstrapped": "Bootstrapped wallet",
     "wallet.suspended": "Suspended wallet",
+    "wallet.resumed": "Resumed wallet",
     "wallet.revoked": "Revoked wallet",
     "wallet.representation_claimed": "Claimed representation",
     "wallet.representation_revoked": "Revoked representation",
@@ -233,6 +236,46 @@
         { "type": "paragraph", "text": "Your certificate of conduct for {{orgName}} expired on {{dueDate}}. Please upload a new one." },
         { "type": "button", "label": "Upload my VOG", "url": "{{vogUrl}}" },
         { "type": "footer" }
+      ]
+    },
+    "provider_delisted": {
+      "subject": "The business wallet of {{orgName}} is no longer valid",
+      "blocks": [
+        { "type": "logo" },
+        { "type": "heading", "text": "Your business wallet is no longer valid" },
+        { "type": "paragraph", "text": "Yivi, the provider of your business wallet, is no longer on the trusted list of business wallet providers. Under the European Business Wallet regulation, the wallet of {{orgName}} is therefore no longer valid. Its wallet unit has been revoked and the wallet is suspended." },
+        { "type": "paragraph", "text": "You can still sign in, view your data and export it. You cannot share or sign anything with this wallet until it is valid again. Issuers of credentials in this wallet may revoke them." },
+        { "type": "paragraph", "text": "Once Yivi is back on the list, your wallet becomes active again by itself, with a new wallet unit and all your data. We will let you know. A credential that was revoked in the meantime has to be requested again." },
+        { "type": "button", "label": "Open your business wallet", "url": "{{walletUrl}}" },
+        { "type": "paragraph", "text": "How Yivi handles your data: https://www.yivi.app/en/privacy" },
+        { "type": "paragraph", "text": "When and how Yivi revokes a business wallet: {{policyUrl}}" },
+        { "type": "footer", "text": "Sent by Yivi, the provider of your Yivi Business Wallet." }
+      ]
+    },
+    "provider_relisted": {
+      "subject": "The business wallet of {{orgName}} is active again",
+      "blocks": [
+        { "type": "logo" },
+        { "type": "heading", "text": "Your business wallet is active again" },
+        { "type": "paragraph", "text": "Yivi, the provider of your business wallet, is back on the trusted list of business wallet providers. The wallet of {{orgName}} is valid and active again, with a new wallet unit." },
+        { "type": "paragraph", "text": "All your data is still there. A credential that its issuer revoked while the wallet was not valid has to be requested again." },
+        { "type": "button", "label": "Open your business wallet", "url": "{{walletUrl}}" },
+        { "type": "paragraph", "text": "How Yivi handles your data: https://www.yivi.app/en/privacy" },
+        { "type": "paragraph", "text": "When and how Yivi revokes a business wallet: {{policyUrl}}" },
+        { "type": "footer", "text": "Sent by Yivi, the provider of your Yivi Business Wallet." }
+      ]
+    },
+    "wallet_ceased": {
+      "subject": "The business wallet of {{orgName}} has been revoked",
+      "blocks": [
+        { "type": "logo" },
+        { "type": "heading", "text": "Your business wallet has been revoked" },
+        { "type": "paragraph", "text": "The issuer of the owner identification data (EBWOID) of {{orgName}} has revoked it, which means the activity of {{orgName}} has ended. Under the European Business Wallet regulation, the wallet of {{orgName}} has therefore been revoked, together with its wallet unit." },
+        { "type": "paragraph", "text": "You can still sign in and view your data. You can no longer share or sign anything with this wallet, and this does not end by itself. Issuers of credentials in this wallet may revoke them." },
+        { "type": "button", "label": "Open your business wallet", "url": "{{walletUrl}}" },
+        { "type": "paragraph", "text": "How Yivi handles your data: https://www.yivi.app/en/privacy" },
+        { "type": "paragraph", "text": "When and how Yivi revokes a business wallet: {{policyUrl}}" },
+        { "type": "footer", "text": "Sent by Yivi, the provider of your Yivi Business Wallet." }
       ]
     },
     "identity_proofing_requested": {

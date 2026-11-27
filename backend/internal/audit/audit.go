@@ -90,6 +90,7 @@ const (
 	WalletOpened          = "wallet.opened"
 	WalletBootstrapped    = "wallet.bootstrapped"
 	WalletSuspended       = "wallet.suspended"
+	WalletResumed         = "wallet.resumed"
 	WalletRevoked         = "wallet.revoked"
 	RepresentationClaimed = "wallet.representation_claimed"
 	RepresentationRevoked = "wallet.representation_revoked"

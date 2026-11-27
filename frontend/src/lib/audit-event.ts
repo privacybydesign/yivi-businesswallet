@@ -352,6 +352,8 @@ export function auditActionLabel(action: string, t: TFunction): string {
       return t("auditLog.actions.walletBootstrapped");
     case "wallet.suspended":
       return t("auditLog.actions.walletSuspended");
+    case "wallet.resumed":
+      return t("auditLog.actions.walletResumed");
     case "wallet.revoked":
       return t("auditLog.actions.walletRevoked");
     case "wallet.representation_claimed":
