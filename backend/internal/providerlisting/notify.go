@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
+	"strings"
 
 	"github.com/google/uuid"
 
@@ -13,9 +15,9 @@ import (
 )
 
 type listingMailer interface {
-	SendProviderDelisted(ctx context.Context, orgID uuid.UUID, recipients []string, orgName string) error
-	SendProviderRelisted(ctx context.Context, orgID uuid.UUID, recipients []string, orgName string) error
-	SendWalletCeased(ctx context.Context, orgID uuid.UUID, recipients []string, orgName string) error
+	SendProviderDelisted(ctx context.Context, orgID uuid.UUID, recipients []string, n email.ProviderNotice) error
+	SendProviderRelisted(ctx context.Context, orgID uuid.UUID, recipients []string, n email.ProviderNotice) error
+	SendWalletCeased(ctx context.Context, orgID uuid.UUID, recipients []string, n email.ProviderNotice) error
 }
 
 type orgDirectory interface {
@@ -27,12 +29,16 @@ type orgDirectory interface {
 // one, the org's own SMTP settings. An org with neither sees only that its wallet
 // is suspended.
 type MailNotifier struct {
-	mail listingMailer
-	orgs orgDirectory
+	mail       listingMailer
+	orgs       orgDirectory
+	appBaseURL string
+	policyURL  string
 }
 
-func NewMailNotifier(mail listingMailer, orgs orgDirectory) *MailNotifier {
-	return &MailNotifier{mail: mail, orgs: orgs}
+// NewMailNotifier builds the notifier. policyURL may be empty until the
+// revocation policy is published.
+func NewMailNotifier(mail listingMailer, orgs orgDirectory, appBaseURL, policyURL string) *MailNotifier {
+	return &MailNotifier{mail: mail, orgs: orgs, appBaseURL: strings.TrimRight(appBaseURL, "/"), policyURL: policyURL}
 }
 
 func (n *MailNotifier) ProviderDelisted(ctx context.Context, orgID uuid.UUID) error {
@@ -50,7 +56,7 @@ func (n *MailNotifier) WalletCeased(ctx context.Context, orgID uuid.UUID) error 
 }
 
 func (n *MailNotifier) send(ctx context.Context, orgID uuid.UUID, what string,
-	send func(ctx context.Context, orgID uuid.UUID, recipients []string, orgName string) error,
+	send func(ctx context.Context, orgID uuid.UUID, recipients []string, n email.ProviderNotice) error,
 ) error {
 	org, err := n.orgs.GetByID(ctx, orgID)
 	if err != nil {
@@ -63,7 +69,11 @@ func (n *MailNotifier) send(ctx context.Context, orgID uuid.UUID, what string,
 	if len(admins) == 0 {
 		return nil
 	}
-	err = send(ctx, orgID, admins, org.Name)
+	err = send(ctx, orgID, admins, email.ProviderNotice{
+		OrgName:   org.Name,
+		WalletURL: n.appBaseURL + "/" + url.PathEscape(org.Slug),
+		PolicyURL: n.policyURL,
+	})
 	if errors.Is(err, email.ErrNotConfigured) {
 		slog.WarnContext(ctx, "providerlisting: neither we nor the org have SMTP settings; its admins are not mailed that the wallet was "+what,
 			slog.String("org_id", orgID.String()))

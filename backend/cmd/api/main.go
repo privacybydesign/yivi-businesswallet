@@ -111,7 +111,6 @@ const (
 	heldStatusRecheckEvery = 6 * time.Hour
 	heldStatusBootDelay    = 2 * time.Minute
 	trustedListCheckEvery  = time.Hour
-	platformMailFromName   = "Yivi Business Wallet"
 	// ceasedNoticeEvery keeps the notice to a ceased org's admins well within the
 	// 24 hours Annex 6(2) gives, retries included.
 	ceasedNoticeEvery = 10 * time.Minute
@@ -939,7 +938,7 @@ func (w *wiring) buildOrganizations(ctx context.Context) error {
 	if p := cfg.PlatformSMTP; p.Host != "" {
 		w.emailService.UsePlatformSMTP(mailer.Config{
 			Host: p.Host, Port: p.Port, Username: p.Username, Password: p.Password,
-			FromName: platformMailFromName, FromAddress: p.From,
+			FromName: email.YiviFromName, FromAddress: p.From,
 		})
 	}
 
@@ -1182,7 +1181,7 @@ func (w *wiring) buildAttestations(ctx context.Context) error {
 		slog.WarnContext(ctx, "no platform SMTP server, so an org without SMTP settings of its own is not mailed when its wallet is revoked")
 	}
 	alert := providerlisting.NewPlatformAlerter(webhook, w.emailService, cfg.PlatformAdminEmails, cfg.AppBaseURL)
-	walletNotices := providerlisting.NewMailNotifier(w.emailService, w.orgStore)
+	walletNotices := providerlisting.NewMailNotifier(w.emailService, w.orgStore, cfg.AppBaseURL, cfg.RevocationPolicyURL)
 	walletService.SetCeasedNotices(walletNotices, alert)
 	startPruner(ctx, "wallet_ceased_notices", ceasedNoticeEvery, walletService.SendCeasedNotices)
 	if err := startProviderListing(ctx, cfg, w.pool, walletService, walletNotices, alert); err != nil {

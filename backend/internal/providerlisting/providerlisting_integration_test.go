@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/email"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/testdb"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
@@ -23,10 +24,16 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/walletunit"
 )
 
+const (
+	testAppBaseURL = "https://wallet.example.org"
+	testPolicyURL  = "https://example.org/revocation-policy"
+)
+
 type sentMail struct {
 	kind       string
 	orgID      uuid.UUID
 	recipients []string
+	notice     email.ProviderNotice
 }
 
 type captureMailer struct {
@@ -36,26 +43,26 @@ type captureMailer struct {
 	failing uuid.UUID
 }
 
-func (m *captureMailer) record(kind string, orgID uuid.UUID, recipients []string) error {
+func (m *captureMailer) record(kind string, orgID uuid.UUID, recipients []string, n email.ProviderNotice) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if orgID == m.failing {
 		return errors.New("mailbox unavailable")
 	}
-	m.sent = append(m.sent, sentMail{kind: kind, orgID: orgID, recipients: recipients})
+	m.sent = append(m.sent, sentMail{kind: kind, orgID: orgID, recipients: recipients, notice: n})
 	return nil
 }
 
-func (m *captureMailer) SendProviderDelisted(_ context.Context, orgID uuid.UUID, recipients []string, _ string) error {
-	return m.record("delisted", orgID, recipients)
+func (m *captureMailer) SendProviderDelisted(_ context.Context, orgID uuid.UUID, recipients []string, n email.ProviderNotice) error {
+	return m.record("delisted", orgID, recipients, n)
 }
 
-func (m *captureMailer) SendProviderRelisted(_ context.Context, orgID uuid.UUID, recipients []string, _ string) error {
-	return m.record("relisted", orgID, recipients)
+func (m *captureMailer) SendProviderRelisted(_ context.Context, orgID uuid.UUID, recipients []string, n email.ProviderNotice) error {
+	return m.record("relisted", orgID, recipients, n)
 }
 
-func (m *captureMailer) SendWalletCeased(_ context.Context, orgID uuid.UUID, recipients []string, _ string) error {
-	return m.record("ceased", orgID, recipients)
+func (m *captureMailer) SendWalletCeased(_ context.Context, orgID uuid.UUID, recipients []string, n email.ProviderNotice) error {
+	return m.record("ceased", orgID, recipients, n)
 }
 
 // mailed returns the orgs mailed kind, sorted.
@@ -132,7 +139,7 @@ func newFixture(t *testing.T) fixture {
 }
 
 func (f fixture) watcher(list List, grace time.Duration) *Watcher {
-	return NewWatcher(f.pool, list, f.wallets, NewMailNotifier(f.mail, f.orgs), f.alert, grace)
+	return NewWatcher(f.pool, list, f.wallets, NewMailNotifier(f.mail, f.orgs, testAppBaseURL, testPolicyURL), f.alert, grace)
 }
 
 // seedOrg creates an org with an active wallet unit and one admin.
@@ -269,6 +276,9 @@ func (f fixture) wantEachToItsAdmin(t *testing.T) {
 	for _, m := range f.mail.sent {
 		if len(m.recipients) != 1 || !slices.Contains(admins, m.recipients[0]) {
 			t.Fatalf("mail for %s went to %v, want its admin", m.orgID, m.recipients)
+		}
+		if !strings.HasPrefix(m.notice.WalletURL, testAppBaseURL+"/") || m.notice.PolicyURL != testPolicyURL {
+			t.Fatalf("mail for %s links %q and %q, want its wallet and the policy", m.orgID, m.notice.WalletURL, m.notice.PolicyURL)
 		}
 	}
 }
@@ -427,7 +437,7 @@ func TestCeasedOrgIsToldOnce(t *testing.T) {
 	ctx := context.Background()
 	acme, globex := f.seedOrg(t, "acme"), f.seedOrg(t, "globex")
 	f.mail.failing = globex
-	notify := NewMailNotifier(f.mail, f.orgs)
+	notify := NewMailNotifier(f.mail, f.orgs, testAppBaseURL, testPolicyURL)
 	send := func(at time.Duration) (int64, error) {
 		return f.store.SendCeasedNotices(ctx, notify, f.alert, time.Now().Add(at))
 	}

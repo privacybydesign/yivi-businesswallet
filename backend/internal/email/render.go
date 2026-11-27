@@ -244,6 +244,9 @@ func Render(kind Kind, locale Locale, tpl Template, brand Brand, vars map[string
 
 	content := resolveContent(tpl, vars)
 	content.locale = locale
+	if brand.Wordmark != "" {
+		content.orgName = prose{html: escapeToHTML(brand.Wordmark), text: brand.Wordmark}
+	}
 	// The resolved URL is what actually lands in the href, so it is checked here
 	// too rather than only in its two source shapes. An app deep link was checked
 	// against its own scheme above, and validateButtonURL lets it in only whole.

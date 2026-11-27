@@ -25,7 +25,9 @@
     "proofingUrl": "vcmrtd://verify?handover=sample&api=https%3A%2F%2Fproofing.example.org",
     "validMinutes": "10",
     "supportContact": "support@example.org",
-    "privacyUrl": "https://example.org/privacy"
+    "privacyUrl": "https://example.org/privacy",
+    "walletUrl": "https://wallet.example.org/acme",
+    "policyUrl": "https://example.org/revocation-policy"
   },
   "events": {
     "membership.invited": "Lid uitgenodigd",
@@ -241,9 +243,13 @@
       "blocks": [
         { "type": "logo" },
         { "type": "heading", "text": "Je business wallet is niet meer geldig" },
-        { "type": "paragraph", "text": "De aanbieder van de Yivi Business Wallet staat niet meer op de vertrouwde lijst van aanbieders van business wallets. Volgens de Europese verordening over de business wallet is de geldigheid van de wallet van {{orgName}} daarom ingetrokken: de wallet-unit is ingetrokken en de wallet is opgeschort." },
-        { "type": "paragraph", "text": "Je kunt nog inloggen, je gegevens bekijken en exporteren. Je kunt met deze wallet niets delen of ondertekenen tot hij weer geldig is. Uitgevers van attestaties in deze wallet kunnen die intrekken. Zodra de aanbieder weer op de lijst staat, wordt je wallet vanzelf weer actief met een nieuwe wallet-unit en al je gegevens, en laten we het je weten; een ingetrokken attestatie moet je dan opnieuw aanvragen." },
-        { "type": "footer" }
+        { "type": "paragraph", "text": "Yivi, de aanbieder van je business wallet, staat niet meer op de vertrouwde lijst van aanbieders van business wallets. Volgens de Europese verordening over de business wallet is de wallet van {{orgName}} daarom niet meer geldig. De wallet-unit is ingetrokken en de wallet is opgeschort." },
+        { "type": "paragraph", "text": "Je kunt nog inloggen, je gegevens bekijken en exporteren. Je kunt met deze wallet niets delen of ondertekenen tot hij weer geldig is. Uitgevers van attestaties in deze wallet kunnen die intrekken." },
+        { "type": "paragraph", "text": "Zodra Yivi weer op de lijst staat, wordt je wallet vanzelf weer actief, met een nieuwe wallet-unit en al je gegevens. We laten het je dan weten. Een attestatie die in de tussentijd is ingetrokken, moet je opnieuw aanvragen." },
+        { "type": "button", "label": "Open je business wallet", "url": "{{walletUrl}}" },
+        { "type": "paragraph", "text": "Hoe Yivi met je gegevens omgaat: https://www.yivi.app/privacy" },
+        { "type": "paragraph", "text": "Wanneer en hoe Yivi een business wallet intrekt: {{policyUrl}}" },
+        { "type": "footer", "text": "Verstuurd door Yivi, de aanbieder van je Yivi Business Wallet." }
       ]
     },
     "provider_relisted": {
@@ -251,9 +257,12 @@
       "blocks": [
         { "type": "logo" },
         { "type": "heading", "text": "Je business wallet is weer actief" },
-        { "type": "paragraph", "text": "De aanbieder van de Yivi Business Wallet staat weer op de vertrouwde lijst van aanbieders van business wallets, dus de wallet van {{orgName}} is weer geldig en actief, met een nieuwe wallet-unit." },
+        { "type": "paragraph", "text": "Yivi, de aanbieder van je business wallet, staat weer op de vertrouwde lijst van aanbieders van business wallets. De wallet van {{orgName}} is weer geldig en actief, met een nieuwe wallet-unit." },
         { "type": "paragraph", "text": "Al je gegevens zijn er nog. Een attestatie die de uitgever heeft ingetrokken terwijl de wallet niet geldig was, moet je opnieuw aanvragen." },
-        { "type": "footer" }
+        { "type": "button", "label": "Open je business wallet", "url": "{{walletUrl}}" },
+        { "type": "paragraph", "text": "Hoe Yivi met je gegevens omgaat: https://www.yivi.app/privacy" },
+        { "type": "paragraph", "text": "Wanneer en hoe Yivi een business wallet intrekt: {{policyUrl}}" },
+        { "type": "footer", "text": "Verstuurd door Yivi, de aanbieder van je Yivi Business Wallet." }
       ]
     },
     "wallet_ceased": {
@@ -261,9 +270,12 @@
       "blocks": [
         { "type": "logo" },
         { "type": "heading", "text": "Je business wallet is ingetrokken" },
-        { "type": "paragraph", "text": "De identificatiegegevens (EBWOID) van {{orgName}} zijn ingetrokken door de uitgever, wat betekent dat de activiteit van {{orgName}} is beëindigd. Volgens de Europese verordening over de business wallet is de wallet van {{orgName}} daarom ingetrokken: de wallet-unit en de wallet zelf zijn ingetrokken." },
+        { "type": "paragraph", "text": "De uitgever van de eigenaar-identificatiegegevens (EBWOID) van {{orgName}} heeft die ingetrokken. Dat betekent dat de activiteit van {{orgName}} is beëindigd. Volgens de Europese verordening over de business wallet is de wallet van {{orgName}} daarom ingetrokken, samen met de wallet-unit." },
         { "type": "paragraph", "text": "Je kunt nog inloggen en je gegevens bekijken. Je kunt met deze wallet niets meer delen of ondertekenen, en dat houdt niet vanzelf op. Uitgevers van attestaties in deze wallet kunnen die intrekken." },
-        { "type": "footer" }
+        { "type": "button", "label": "Open je business wallet", "url": "{{walletUrl}}" },
+        { "type": "paragraph", "text": "Hoe Yivi met je gegevens omgaat: https://www.yivi.app/privacy" },
+        { "type": "paragraph", "text": "Wanneer en hoe Yivi een business wallet intrekt: {{policyUrl}}" },
+        { "type": "footer", "text": "Verstuurd door Yivi, de aanbieder van je Yivi Business Wallet." }
       ]
     },
     "identity_proofing_requested": {

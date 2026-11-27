@@ -695,3 +695,13 @@ func TestLoadPlatformSMTP(t *testing.T) {
 		}
 	}
 }
+
+func TestLoadRevocationPolicyURL(t *testing.T) {
+	cfg, err := loadWith(t, map[string]string{envRevocationPolicyURL: "https://www.yivi.app/revocation-policy"})
+	if err != nil || cfg.RevocationPolicyURL != "https://www.yivi.app/revocation-policy" {
+		t.Fatalf("Load = %q, %v", cfg.RevocationPolicyURL, err)
+	}
+	if _, err := loadWith(t, map[string]string{envRevocationPolicyURL: "/revocation-policy"}); err == nil {
+		t.Fatal("Load with a relative URL succeeded, want an error")
+	}
+}

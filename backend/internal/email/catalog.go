@@ -108,6 +108,9 @@ const (
 	// empty for a member's request: their paragraphs are then left out.
 	varSupportContact = "supportContact"
 	varPrivacyURL     = "privacyUrl"
+	varWalletURL      = "walletUrl"
+	// varPolicyURL is empty until the revocation policy is published.
+	varPolicyURL = "policyUrl"
 )
 
 // appSchemeVCMRTD is the scheme of the vcmrtd app's deep links (identity
@@ -206,12 +209,18 @@ var kindVariables = map[Kind][]Variable{
 	},
 	KindProviderDelisted: {
 		{Name: varOrgName},
+		{Name: varWalletURL, IsURL: true},
+		{Name: varPolicyURL},
 	},
 	KindProviderRelisted: {
 		{Name: varOrgName},
+		{Name: varWalletURL, IsURL: true},
+		{Name: varPolicyURL},
 	},
 	KindWalletCeased: {
 		{Name: varOrgName},
+		{Name: varWalletURL, IsURL: true},
+		{Name: varPolicyURL},
 	},
 	KindIdentityProofingRequested: {
 		{Name: varOrgName},

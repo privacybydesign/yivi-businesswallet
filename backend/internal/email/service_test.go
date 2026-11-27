@@ -583,7 +583,8 @@ func TestProviderNoticeUsesPlatformSMTP(t *testing.T) {
 	platform := mailer.Config{Host: "smtp.yivi.example", Port: 587, FromAddress: "noreply@yivi.example"}
 	svc.UsePlatformSMTP(platform)
 
-	err := svc.SendProviderDelisted(context.Background(), uuid.New(), []string{"a@acme.example", "b@acme.example"}, "Acme BV")
+	notice := ProviderNotice{OrgName: "Acme BV", WalletURL: "https://wallet.example.org/acme", PolicyURL: "https://yivi.example/policy"}
+	err := svc.SendProviderDelisted(context.Background(), uuid.New(), []string{"a@acme.example", "b@acme.example"}, notice)
 	if err != nil {
 		t.Fatalf("SendProviderDelisted: %v", err)
 	}
@@ -592,6 +593,15 @@ func TestProviderNoticeUsesPlatformSMTP(t *testing.T) {
 	}
 	if sender.configs[0] != platform || !strings.Contains(sender.sent[0].TextBody, "Acme BV") {
 		t.Fatalf("sent with %+v, body %q; want the platform server and the org name", sender.configs[0], sender.sent[0].TextBody)
+	}
+	msg := sender.sent[0]
+	for _, want := range []string{notice.WalletURL, notice.PolicyURL, "https://www.yivi.app/en/privacy"} {
+		if !strings.Contains(msg.TextBody, want) {
+			t.Fatalf("body %q lacks %q", msg.TextBody, want)
+		}
+	}
+	if len(msg.Inline) != 1 || !bytes.Equal(msg.Inline[0].Bytes, yiviLogo) || !strings.Contains(msg.HTMLBody, `alt="Yivi"`) {
+		t.Fatalf("want Yivi's logo inline with alt Yivi, got %d inline parts", len(msg.Inline))
 	}
 }
 
@@ -617,11 +627,18 @@ func TestProviderNoticeFallsBackToOrgSMTPInShippedWording(t *testing.T) {
 	svc := newTestService(sender, nil, LocaleEN)
 	svc.templates = &stubTemplates{tpl: Template{Subject: "Our own words"}}
 
-	if err := svc.SendProviderRelisted(context.Background(), uuid.New(), []string{"a@acme.example"}, "Acme BV"); err != nil {
+	notice := ProviderNotice{OrgName: "Acme BV", WalletURL: "https://wallet.example.org/acme"}
+	if err := svc.SendProviderRelisted(context.Background(), uuid.New(), []string{"a@acme.example"}, notice); err != nil {
 		t.Fatalf("SendProviderRelisted: %v", err)
 	}
 	want, _ := DefaultTemplate(KindProviderRelisted, LocaleEN)
 	if got := sender.sent[0].Subject; sender.configs[0].Host != "mail.example.org" || got != strings.ReplaceAll(want.Subject, "{{orgName}}", "Acme BV") {
 		t.Fatalf("sent via %q with subject %q; want the org's server and the shipped subject", sender.configs[0].Host, got)
+	}
+	if sender.configs[0].FromName != YiviFromName || !strings.Contains(sender.sent[0].TextBody, "Sent by Yivi,") {
+		t.Fatalf("from %q, body %q; want Yivi as sender", sender.configs[0].FromName, sender.sent[0].TextBody)
+	}
+	if strings.Contains(sender.sent[0].TextBody, "revokes a business wallet") {
+		t.Fatalf("body %q names the revocation policy, but there is none yet", sender.sent[0].TextBody)
 	}
 }

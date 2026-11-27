@@ -73,6 +73,9 @@ type Service struct {
 	platform *mailer.Config
 }
 
+// YiviFromName is the sender name of the mail Yivi itself sends.
+const YiviFromName = "Yivi Business Wallet"
+
 // UsePlatformSMTP sets the SMTP server Yivi itself sends from.
 func (s *Service) UsePlatformSMTP(cfg mailer.Config) { s.platform = &cfg }
 
@@ -398,19 +401,27 @@ func (s *Service) SendVogExpired(ctx context.Context, orgID uuid.UUID, to, orgNa
 // when there is one, so it reaches orgs without SMTP settings of their own. One
 // failing mailbox does not cost the rest. Returns ErrNotConfigured when neither
 // can send.
-func (s *Service) SendProviderDelisted(ctx context.Context, orgID uuid.UUID, recipients []string, orgName string) error {
-	return s.sendProviderNotice(ctx, orgID, KindProviderDelisted, recipients, orgName)
+func (s *Service) SendProviderDelisted(ctx context.Context, orgID uuid.UUID, recipients []string, n ProviderNotice) error {
+	return s.sendProviderNotice(ctx, orgID, KindProviderDelisted, recipients, n)
 }
 
 // SendProviderRelisted tells an org's admins its wallet is active again because
 // we are back on the trusted list. Like SendProviderDelisted.
-func (s *Service) SendProviderRelisted(ctx context.Context, orgID uuid.UUID, recipients []string, orgName string) error {
-	return s.sendProviderNotice(ctx, orgID, KindProviderRelisted, recipients, orgName)
+func (s *Service) SendProviderRelisted(ctx context.Context, orgID uuid.UUID, recipients []string, n ProviderNotice) error {
+	return s.sendProviderNotice(ctx, orgID, KindProviderRelisted, recipients, n)
+}
+
+// ProviderNotice is what a Yivi notice to an org's admins names. PolicyURL may be
+// empty until the revocation policy is published: its paragraph is then left out.
+type ProviderNotice struct {
+	OrgName   string
+	WalletURL string
+	PolicyURL string
 }
 
 // sendProviderNotice sends our notice in our wording and look, never the org's,
 // through our own SMTP server or else the org's.
-func (s *Service) sendProviderNotice(ctx context.Context, orgID uuid.UUID, kind Kind, recipients []string, orgName string) error {
+func (s *Service) sendProviderNotice(ctx context.Context, orgID uuid.UUID, kind Kind, recipients []string, n ProviderNotice) error {
 	cfg, err := s.providerNoticeConfig(ctx, orgID)
 	if err != nil {
 		return err
@@ -420,11 +431,16 @@ func (s *Service) sendProviderNotice(ctx context.Context, orgID uuid.UUID, kind 
 	if !ok {
 		return fmt.Errorf("email: no template for kind %q", kind)
 	}
-	body, err := Render(kind, locale, tpl, resolveBrand(Seeds{}), map[string]string{varOrgName: orgName})
+	brand := resolveBrand(Seeds{})
+	brand.Logo = Logo{Bytes: yiviLogo, ContentType: "image/png"}
+	brand.Wordmark = yiviWordmark
+	body, err := Render(kind, locale, tpl, brand, map[string]string{
+		varOrgName: n.OrgName, varWalletURL: n.WalletURL, varPolicyURL: n.PolicyURL,
+	})
 	if err != nil {
 		return err
 	}
-	return s.deliverEach(cfg, mailer.Message{Subject: body.Subject, TextBody: body.TextBody, HTMLBody: body.HTMLBody}, recipients)
+	return s.deliverEach(cfg, messageOf(body), recipients)
 }
 
 func (s *Service) providerNoticeConfig(ctx context.Context, orgID uuid.UUID) (mailer.Config, error) {
@@ -438,7 +454,9 @@ func (s *Service) providerNoticeConfig(ctx context.Context, orgID uuid.UUID) (ma
 	if !ok {
 		return mailer.Config{}, ErrNotConfigured
 	}
-	return s.authenticate(ctx, resolved)
+	cfg, err := s.authenticate(ctx, resolved)
+	cfg.FromName = YiviFromName
+	return cfg, err
 }
 
 // SendPlatformText mails a plain-text message from Yivi's own SMTP server.
@@ -464,8 +482,8 @@ func (s *Service) deliverEach(cfg mailer.Config, msg mailer.Message, recipients 
 
 // SendWalletCeased tells an org's admins its wallet was revoked because its
 // activity ended. Like SendProviderDelisted.
-func (s *Service) SendWalletCeased(ctx context.Context, orgID uuid.UUID, recipients []string, orgName string) error {
-	return s.sendProviderNotice(ctx, orgID, KindWalletCeased, recipients, orgName)
+func (s *Service) SendWalletCeased(ctx context.Context, orgID uuid.UUID, recipients []string, n ProviderNotice) error {
+	return s.sendProviderNotice(ctx, orgID, KindWalletCeased, recipients, n)
 }
 
 // SendSpecimen sends a sample of one kind to a single address, rendered from the
@@ -594,6 +612,10 @@ func (s *Service) composeBranded(ctx context.Context, orgID uuid.UUID, kind Kind
 		return mailer.Config{}, mailer.Message{}, err
 	}
 
+	return cfg, messageOf(body), nil
+}
+
+func messageOf(body Body) mailer.Message {
 	var inline []mailer.InlineImage
 	if body.InlineLogo != nil {
 		inline = append(inline, mailer.InlineImage{
@@ -605,12 +627,12 @@ func (s *Service) composeBranded(ctx context.Context, orgID uuid.UUID, kind Kind
 	for _, img := range body.InlineQR {
 		inline = append(inline, mailer.InlineImage{ContentID: img.ContentID, ContentType: img.ContentType, Bytes: img.Bytes})
 	}
-	return cfg, mailer.Message{
+	return mailer.Message{
 		Subject:  body.Subject,
 		TextBody: body.TextBody,
 		HTMLBody: body.HTMLBody,
 		Inline:   inline,
-	}, nil
+	}
 }
 
 // authenticate completes the wire config with the credential the send presents.

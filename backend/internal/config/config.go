@@ -109,6 +109,8 @@ const (
 	envPlatformSMTPURL         = "PLATFORM_SMTP_URL"
 	envPlatformMailFrom        = "PLATFORM_MAIL_FROM"
 	envPlatformSlackWebhookURL = "PLATFORM_SLACK_WEBHOOK_URL"
+	// The published revocation policy (Annex 6(1)) Yivi's notices link to.
+	envRevocationPolicyURL = "REVOCATION_POLICY_URL"
 
 	// VOG screening (#242): validatie.nl real-time document check. The URL
 	// defaults to the production GAAV endpoint - there is no staging instance to
@@ -555,6 +557,8 @@ type Config struct {
 	// PlatformSMTP is our own mail server; zero Host means none.
 	PlatformSMTP            PlatformSMTP
 	PlatformSlackWebhookURL string
+	// RevocationPolicyURL is empty until the policy is published.
+	RevocationPolicyURL string
 
 	VogValidatorProvider string
 	VogValidatorURL      string
@@ -862,6 +866,11 @@ type PlatformSMTP struct {
 
 func loadPlatformChannels(c *Config) error {
 	c.PlatformSlackWebhookURL = os.Getenv(envPlatformSlackWebhookURL)
+	if c.RevocationPolicyURL = os.Getenv(envRevocationPolicyURL); c.RevocationPolicyURL != "" {
+		if err := requireAbsoluteHTTPURL(envRevocationPolicyURL, c.RevocationPolicyURL); err != nil {
+			return err
+		}
+	}
 	raw := os.Getenv(envPlatformSMTPURL)
 	if raw == "" {
 		return nil
