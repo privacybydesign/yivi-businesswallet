@@ -22,6 +22,7 @@ import {
   emptyFlowDraft,
   flowDraftError,
   flowSpecFromDraft,
+  askedStepReasons,
   identityRequired,
   proofingErrorMessage,
   selectedLocales,
@@ -181,7 +182,10 @@ export function FlowEditor({
       }
       return;
     }
-    const spec = flowSpecFromDraft(draft);
+    const spec = flowSpecFromDraft(
+      draft,
+      askedStepReasons({ address, diplomas, employment }),
+    );
     const specKey = JSON.stringify(spec);
     const finish = (flow: ProofingFlow): void => {
       onSaved?.(flow);

@@ -448,6 +448,15 @@ var yiviDocumentKinds = map[string]string{
 	"drivinglicence":  flow.DocumentTypeDrivingLicence,
 }
 
+// isoDisclosedDate is a disclosed date as YYYY-MM-DD, the form every other
+// source gives the result in; one in no known format stays as disclosed.
+func isoDisclosedDate(raw string) string {
+	if t, ok := disclosedDate(raw); ok {
+		return t.Format(time.DateOnly)
+	}
+	return raw
+}
+
 // documentFromDisclosure maps the passport, idcard or residencepermit claims
 // onto documentInfo.
 func documentFromDisclosure(info disclosureInfo) documentInfo {
@@ -456,7 +465,7 @@ func documentFromDisclosure(info disclosureInfo) documentInfo {
 		Type: a["documentType"], Kind: yiviDocumentKinds[info.Credential[strings.LastIndex(info.Credential, ".")+1:]],
 		Number: a["documentNumber"], IssuingState: a["country"], Nationality: a["nationality"],
 		FirstName: a["firstName"], LastName: a["lastName"], Sex: a["gender"],
-		DateOfBirth: a["dateOfBirth"], DateOfExpiry: a["dateOfExpiry"],
+		DateOfBirth: isoDisclosedDate(a["dateOfBirth"]), DateOfExpiry: isoDisclosedDate(a["dateOfExpiry"]),
 	}
 	if doc.FirstName == "" && doc.LastName == "" {
 		doc.DisplayName = firstNonEmpty(a["displayName"], a["name"], a["fullName"])

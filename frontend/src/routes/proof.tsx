@@ -29,6 +29,7 @@ import {
 } from "../lib/hosted-completion";
 import type { CheckEndReason } from "../lib/hosted-completion";
 import { applyOrgTheme, clearOrgTheme } from "../lib/theme";
+import { hostedConsentBasis } from "../lib/consent";
 import {
   currentStage,
   dataRequestRefusal,
@@ -150,6 +151,9 @@ function HostedFlow({
   const { organization, flow } = page;
   const dataRequest = isDataRequest(flow.kind);
   const methods = methodChoices(flow.yiviAvailable, flow.idemAvailable);
+  // The one app the flow allows, which the overview names.
+  const onlyApp =
+    !flow.browserOnly && methods.length === 1 ? methods[0] : undefined;
   const [inAddress, setInAddress] = useState(false);
   const [inDocuments, setInDocuments] = useState(false);
   const [step, setStep] = useState<Step>(initialStep(page));
@@ -195,6 +199,8 @@ function HostedFlow({
 
   // The session's look for as long as the page shows.
   const { primaryColor } = organization.branding;
+  // Framed in the org's own page, which has its own header.
+  const framed = window.parent !== window;
   const { theme } = page;
   useEffect(() => {
     applyOrgTheme(hostedTheme(theme, primaryColor));
@@ -215,7 +221,7 @@ function HostedFlow({
         status: progress.status,
         handedBack: handedBack.current,
         dataRequest,
-        framed: window.parent !== window,
+        framed,
         redirectUrl: page.redirectUrl,
       });
       if (!handBack) {
@@ -232,7 +238,7 @@ function HostedFlow({
         window.location.replace(handBack.redirectTo);
       }
     },
-    [page.sessionId, page.embedOrigins, page.redirectUrl, dataRequest],
+    [page.sessionId, page.embedOrigins, page.redirectUrl, dataRequest, framed],
   );
 
   function begin(picked: ProofingMethod): void {
@@ -273,20 +279,22 @@ function HostedFlow({
   return (
     <Card className="flex flex-col overflow-hidden">
       {/* The theme's header colour, as the top of the Idem app's screens. */}
-      <div className="bg-topbar text-topbar-fg border-topbar-line flex items-center gap-3 border-b px-6 py-5">
-        <BrandMark
-          name={organization.name}
-          // The mark wears the page's colour: a flow's own, else the theme's.
-          branding={{
-            ...organization.branding,
-            primaryColor: primaryColor || (theme?.primaryColor ?? ""),
-          }}
-          size="lg"
-        />
-        <span className="font-display text-[16px] font-bold">
-          {organization.name}
-        </span>
-      </div>
+      {!framed && (
+        <div className="bg-topbar text-topbar-fg border-topbar-line flex items-center gap-3 border-b px-6 py-5">
+          <BrandMark
+            name={organization.name}
+            // The mark wears the page's colour: a flow's own, else the theme's.
+            branding={{
+              ...organization.branding,
+              primaryColor: primaryColor || (theme?.primaryColor ?? ""),
+            }}
+            size="lg"
+          />
+          <span className="font-display text-[16px] font-bold">
+            {organization.name}
+          </span>
+        </div>
+      )}
       {page.test && (
         <output className="bg-warning-bg text-warning-fg block px-6 py-2 text-[13px] font-semibold">
           {t("testMode.hostedNotice", { organization: organization.name })}
@@ -311,16 +319,14 @@ function HostedFlow({
             <Overview
               org={organization}
               flow={flow}
-              onlyApp={
-                !flow.browserOnly && methods.length === 1
-                  ? methods[0]
-                  : undefined
-              }
+              onlyApp={onlyApp}
               // Continue starts the session; with a choice of apps, the app
               // is chosen in it.
               onContinue={() => begin(firstMethod(flow.browserOnly, methods))}
               starting={start.isPending}
               error={actionError}
+              embedded={framed}
+              consent={hostedConsentBasis(flow)}
               cancel={
                 <Button
                   variant="secondary"

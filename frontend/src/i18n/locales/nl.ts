@@ -881,8 +881,8 @@ export const nl: Translation<typeof en> = {
       },
       overview: {
         heading: "{{name}} wil je identiteit verifiëren",
-        intro:
-          "Je bevestigt je identiteit met je paspoort of identiteitskaart. {{name}} ontvangt:",
+        headingEmbedded: "Bevestig je identiteit",
+        intro: "Je bevestigt je identiteit met {{sources}}. {{name}} ontvangt:",
         noData: "Alleen de uitkomst: of je identiteit is geverifieerd.",
         why: "Waarom:",
         retention_one:
@@ -894,20 +894,71 @@ export const nl: Translation<typeof en> = {
         cancel: "Annuleren",
         continue: "Verder",
       },
+      consent: {
+        sources: {
+          personal_data: "je persoonsgegevens uit de BRP",
+          passport: "je paspoort",
+          identity_card: "je identiteitskaart",
+          residence_permit: "je verblijfsdocument",
+          drivers_license: "je rijbewijs",
+        },
+        documents: {
+          passport: "paspoort",
+          identity_card: "identiteitskaart",
+          residence_permit: "verblijfsdocument",
+          drivers_license: "rijbewijs",
+        },
+        labels: {
+          registeredData: "Naam en persoonsgegevens",
+          bsn: "Burgerservicenummer (BSN)",
+        },
+        dg1: {
+          registered:
+            "Je naam en geboortedatum uit de BRP, en of je de Nederlandse nationaliteit hebt.",
+          document:
+            "Je naam, geboortedatum en nationaliteit, en het nummer en de vervaldatum van je {{documents}}.",
+          licence:
+            "Je naam en geboortedatum, en het nummer en de vervaldatum van je rijbewijs.",
+          mixed:
+            "Je naam, geboortedatum en nationaliteit. Met je {{documents}} ook het nummer en de vervaldatum daarvan.",
+        },
+        dg1WithoutBirthDate: {
+          registered:
+            "Je naam uit de BRP, en of je de Nederlandse nationaliteit hebt.",
+          document:
+            "Je naam en nationaliteit, en het nummer en de vervaldatum van je {{documents}}.",
+          licence: "Je naam, en het nummer en de vervaldatum van je rijbewijs.",
+          mixed:
+            "Je naam en nationaliteit. Met je {{documents}} ook het nummer en de vervaldatum daarvan.",
+        },
+        dg11: {
+          registered: "Je burgerservicenummer (BSN) uit de BRP.",
+          document:
+            "Je geboorteplaats en persoonsnummer (BSN), als je {{documents}} die op de chip heeft staan.",
+          mixed:
+            "Je BSN uit de BRP. Met je {{documents}} je geboorteplaats en BSN, als de chip die heeft staan.",
+          mixedBsnOnly: "Je BSN, als je je persoonsgegevens uit de BRP deelt.",
+        },
+        ageOver: {
+          registered:
+            "Alleen of je oud genoeg bent, bepaald uit de BRP: niet je geboortedatum.",
+          document:
+            "Alleen of je oud genoeg bent, bepaald uit je {{documents}}: niet je geboortedatum.",
+          mixed:
+            "Alleen of je oud genoeg bent, bepaald uit de BRP of je {{documents}}: niet je geboortedatum.",
+        },
+        photos: {
+          sides: "Foto's van de voor- en achterkant van je {{documents}}.",
+          sidesWithPassport:
+            "Foto's van de voor- en achterkant van je {{documents}}. Bij een paspoort is de achterkant de pagina met je BSN.",
+        },
+      },
       attributeDetails: {
-        dg1: "Je naam, geboortedatum en nationaliteit, en het nummer en de vervaldatum van het document.",
-        dg1WithoutBirthDate:
-          "Je naam en nationaliteit, en het nummer en de vervaldatum van het document.",
-        age_over:
-          "Alleen of je oud genoeg bent, bepaald uit je document: niet je geboortedatum.",
-        dg11: "Je geboorteplaats en persoonsnummer (BSN), als je document die op de chip heeft staan.",
-        dg2: "Je pasfoto op de chip van het document.",
+        dg2: "Je pasfoto op de chip van je {{documents}}.",
         chip_checks: "Of de chip echt en onveranderd is.",
-        document_image:
-          "Foto's van de voor- en achterkant van je document (bij een paspoort alleen de fotopagina).",
         selfie: "Een foto van je gezicht tijdens de controle.",
         biometrics:
-          "Hoe goed je gezicht overeenkomt met de foto op het document.",
+          "Hoe goed je gezicht overeenkomt met de foto op je {{documents}}.",
       },
       method: {
         heading: "Hoe wil je je verifiëren?",
@@ -934,19 +985,18 @@ export const nl: Translation<typeof en> = {
           residence_permit: "Fotografeer je verblijfsdocument",
           drivers_license: "Fotografeer je rijbewijs",
         },
-        hint: "Maak hieronder in de beveiligde scan van CM.com een foto van {{documents}}.",
+        hint: "Maak hieronder in de beveiligde scan een foto van {{documents}}.",
         sides: {
-          passport: "de fotopagina van je paspoort",
+          passport: "de voor- en achterkant van je paspoort",
           identity_card: "de voor- en achterkant van je ID-kaart",
           residence_permit: "de voor- en achterkant van je verblijfsdocument",
           drivers_license: "de voor- en achterkant van je rijbewijs",
         },
-        passportHint:
-          "Voor een paspoort: sla het open als een boek en draai het een kwartslag, zodat het opengeslagen paspoort in het kader past.",
-        frameTitle: "ID-scan van CM.com",
+        passportHint: "Bij een paspoort is de achterkant de pagina met je BSN.",
+        frameTitle: "ID-scan",
         start: "Document fotograferen",
         finishing: "Foto's toevoegen…",
-        loading: "De beveiligde scan van CM.com wordt geladen…",
+        loading: "De beveiligde scan wordt geladen…",
         cancelled: "De foto's zijn niet gemaakt. Probeer het opnieuw.",
         retry: "Opnieuw proberen",
       },
@@ -1955,7 +2005,7 @@ export const nl: Translation<typeof en> = {
       dg2: "De pasfoto van de houder op de chip, getoond naast de selfie.",
       chip_checks: "Of de chip echt bleek en geen kopie.",
       document_image:
-        "De voor- en achterkant van een ID-kaart of rijbewijs, of de fotopagina van een paspoort.",
+        "De voor- en achterkant van een ID-kaart of rijbewijs, of van een paspoort, waarvan de achterkant de pagina met het BSN is.",
       selfie:
         "De foto van het gezicht die tijdens de gezichtscontrole is gemaakt.",
       biometrics:
@@ -2046,7 +2096,7 @@ export const nl: Translation<typeof en> = {
         addressHint:
           "Na de identiteitscontrole, in de browser en niet in de Idem-app: de persoon vult zijn postadres in. Een Nederlands adres wordt gecontroleerd in de Nederlandse adresregistratie (BAG); elk ander adres wordt bewaard zoals hij het opgeeft. Zo'n flow wordt op het scherm getoond of als gehoste link verstuurd, nooit gemaild.",
         photoHint:
-          "De voor- en achterkant van een ID-kaart of rijbewijs, of de fotopagina van een paspoort, gemaakt in de browser met de ID-scan. Getoond op het scherm of verstuurd als gehoste link, nooit per mail.",
+          "De voor- en achterkant van een ID-kaart of rijbewijs, of van een paspoort, waarvan de achterkant de pagina met het BSN is, gemaakt in de browser met de ID-scan. Getoond op het scherm of verstuurd als gehoste link, nooit per mail.",
         faceHint:
           "Een selfie, gecontroleerd op een levend persoon en vergeleken met de foto op de chip.",
         faceInScan: "Het gezicht controleren in de ID-scan",
@@ -2114,6 +2164,8 @@ export const nl: Translation<typeof en> = {
         identityLocked:
           "Naam en documentgegevens blijft aan: een gegevensverzoek vindt de sessies van de persoon op naam en geboortedatum, en een diploma of Verzekeringsbericht wordt daarmee vergeleken.",
         ageOver: "Minimumleeftijd",
+        stepHint:
+          "Gevraagd onder Wat de persoon doet. Een reden is hier optioneel.",
         ageOverOption: "{{age}} jaar of ouder",
         ageOverHint:
           "Alleen leeftijdscontrole beantwoordt of de persoon op de dag van de controle deze leeftijd of ouder is.",

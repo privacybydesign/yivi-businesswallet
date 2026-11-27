@@ -19,3 +19,19 @@ func TestDisclosureDocumentKind(t *testing.T) {
 		}
 	}
 }
+
+// The BRP and the Yivi document credentials disclose DD-MM-YYYY; the result
+// gives every date as YYYY-MM-DD, whatever the source.
+func TestDisclosureDatesAreISO(t *testing.T) {
+	for raw, want := range map[string]string{
+		"24-10-2001": "2001-10-24",
+		"2001-10-24": "2001-10-24",
+		"":           "",
+		"oct 2001":   "oct 2001",
+	} {
+		doc := documentFromDisclosure(disclosureInfo{Attributes: map[string]string{"dateOfBirth": raw, "dateOfExpiry": raw}})
+		if doc.DateOfBirth != want || doc.DateOfExpiry != want {
+			t.Errorf("dates disclosed as %q = %q and %q, want %q", raw, doc.DateOfBirth, doc.DateOfExpiry, want)
+		}
+	}
+}

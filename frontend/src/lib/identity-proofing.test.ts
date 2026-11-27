@@ -25,6 +25,7 @@ import {
 } from "../api/identity-proofing";
 import {
   ATTRIBUTE_AGE_OVER,
+  askedStepReasons,
   DOCUMENT_KINDS,
   REQUESTED_ATTRIBUTES,
   PROOFING_REJECTION_CODES,
@@ -3577,5 +3578,38 @@ describe("document scan message", () => {
     expect(
       documentScanMessage(message({ data: null }), scanUrl, frame),
     ).toBeUndefined();
+  });
+});
+
+describe("step reasons", () => {
+  const reasons = {
+    address: {
+      en: "To send you the contract.",
+      nl: "Om je het contract te sturen.",
+    },
+    diplomas: { en: "To check the job's requirements." },
+  };
+
+  it("keeps the reasons of the steps the flow asks", () => {
+    const spec = flowSpecFromDraft(
+      draft({ attributeReasons: reasons }),
+      askedStepReasons({
+        address: "required",
+        diplomas: "off",
+        employment: "off",
+      }),
+    );
+    expect(spec.attributeReasons?.address).toEqual(reasons.address);
+    expect(spec.attributeReasons?.diplomas).toBeUndefined();
+  });
+
+  it("names the asked steps", () => {
+    expect(
+      askedStepReasons({
+        address: "off",
+        diplomas: "required",
+        employment: "always_review",
+      }),
+    ).toEqual(["diplomas", "employment"]);
   });
 });

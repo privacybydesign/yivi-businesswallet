@@ -281,6 +281,11 @@ type hostedViewResponse struct {
 		// YiviPersonalData is a flow whose Yivi app shares the registered
 		// personal data, not a document.
 		YiviPersonalData bool `json:"yiviPersonalData"`
+		// DocumentPhoto is a flow that photographs the document.
+		DocumentPhoto bool `json:"documentPhoto"`
+		// BSN is a flow that keeps the BSN, in full or masked: from the
+		// personal data it needs no requested item.
+		BSN bool `json:"bsn"`
 		// ScanDocuments are the documents the document photo takes; empty is
 		// any.
 		ScanDocuments []string `json:"scanDocuments"`
@@ -412,6 +417,8 @@ func (h *Handler) hostedView(w http.ResponseWriter, r *http.Request) error {
 	out.Flow.YiviAvailable = yiviAppAvailable(f)
 	out.Flow.IdemAvailable = idemAppAvailable(f)
 	out.Flow.YiviPersonalData = acceptsPersonalData(f)
+	out.Flow.DocumentPhoto = takesDocumentPhoto(f)
+	out.Flow.BSN = keepsBSN(f)
 	out.Flow.ScanDocuments = scanDocuments(f)
 	out.Flow.BrowserOnly = f.BrowserOnly
 	out.Flow.DiplomaMode = diplomaModeOf(hosted.Request).forSubject()

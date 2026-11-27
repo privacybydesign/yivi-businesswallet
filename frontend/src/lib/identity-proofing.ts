@@ -969,7 +969,10 @@ function acceptedDocuments(draft: ProofingFlowDraft): string[] {
 
 // The request body for a draft, as the service's editor builds it. Call only
 // on a draft flowDraftError accepts.
-export function flowSpecFromDraft(draft: ProofingFlowDraft): ProofingFlowSpec {
+export function flowSpecFromDraft(
+  draft: ProofingFlowDraft,
+  askedSteps: readonly StepReason[] = [],
+): ProofingFlowSpec {
   const requiredChecks = draftRequiredChecks(draft);
   const requestedAttributes = collectedAttributes(draft);
   const spec: ProofingFlowSpec = {
@@ -989,15 +992,16 @@ export function flowSpecFromDraft(draft: ProofingFlowDraft): ProofingFlowSpec {
     keepFacePhotos: draft.keepFacePhotos,
     alwaysReview: draft.alwaysReview,
   };
-  applyDraftOverrides(spec, draft, requestedAttributes);
+  applyDraftOverrides(spec, draft, [...requestedAttributes, ...askedSteps]);
   return spec;
 }
 
-// Sets the spec's fields a draft only sends when it sets them.
+// Sets the spec's fields a draft only sends when it sets them; reasons only
+// for what it collects.
 function applyDraftOverrides(
   spec: ProofingFlowSpec,
   draft: ProofingFlowDraft,
-  requestedAttributes: readonly string[],
+  collected: readonly string[],
 ): void {
   if (draft.faceVerification) {
     spec.faceProvider = scansFace(draft)
@@ -1013,7 +1017,7 @@ function applyDraftOverrides(
     spec.checkThresholds = { [CHECK_FACE_MATCH]: draft.faceMatchThreshold };
   }
 
-  const reasons = savedReasons(draft, requestedAttributes);
+  const reasons = savedReasons(draft, collected);
   if (Object.keys(reasons).length > 0) {
     spec.attributeReasons = reasons;
   }
@@ -2207,6 +2211,20 @@ export function isProofingStep(value: string): value is ProofingStep {
 // EmploymentMode and DiplomaMode have the same values.
 export function stepAsked(mode: AddressMode | undefined): boolean {
   return mode !== undefined && mode !== "off";
+}
+
+// The steps after the identity check whose reason, optional, a flow keeps in
+// attributeReasons beside the requested items.
+export const STEP_REASONS = ["address", "diplomas", "employment"] as const;
+export type StepReason = (typeof STEP_REASONS)[number];
+
+// The steps of STEP_REASONS a flow asks.
+export function askedStepReasons(modes: {
+  address: AddressMode;
+  diplomas: DiplomaMode;
+  employment: EmploymentMode;
+}): StepReason[] {
+  return STEP_REASONS.filter((step) => modes[step] !== "off");
 }
 
 // A flow version's steps in words, in the order the app runs them; a step the

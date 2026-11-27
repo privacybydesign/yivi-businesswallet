@@ -9,8 +9,10 @@ import {
   APP_IDEM,
   acceptsPersonalData,
   allowsApp,
+  STEP_DOCUMENT_PHOTO,
   yiviAppAvailable,
 } from "./identity-proofing";
+import { keepsBsn } from "./consent";
 
 // The branding settings show the real hosted page in a frame of the wallet's
 // own origin, so the page's look applies to that frame's document alone. The
@@ -105,6 +107,8 @@ export function hostedPreviewPage(input: HostedPreviewInput): HostedProofing {
       yiviAvailable: flow ? yiviAppAvailable(flow) : false,
       idemAvailable: flow ? allowsApp(flow, APP_IDEM) : true,
       yiviPersonalData: flow ? acceptsPersonalData(flow) : false,
+      documentPhoto: flow?.steps.includes(STEP_DOCUMENT_PHOTO) ?? false,
+      bsn: keepsBsn(flow?.bsnPolicy),
       browserOnly: flow?.browserOnly ?? false,
       diplomaMode: flow?.diplomaMode ?? "off",
       addressMode: flow?.addressMode ?? "off",
