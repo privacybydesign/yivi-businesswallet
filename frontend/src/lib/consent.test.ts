@@ -131,27 +131,29 @@ describe("consentItems", () => {
 
 describe("consentDetailKey", () => {
   it("words the document data by the sources, without the date of birth under an age check", () => {
-    expect(consentDetailKey("dg1", ["dg1"], "mixed", CARDS)).toBe("dg1.mixed");
-    expect(consentDetailKey("dg1", ["dg1", "age_over"], "licence", CARDS)).toBe(
-      "dg1WithoutBirthDate.licence",
+    expect(consentDetailKey("dg1", ["dg1"], "mixed", CARDS, true)).toBe(
+      "dg1.mixed",
     );
+    expect(
+      consentDetailKey("dg1", ["dg1", "age_over"], "licence", CARDS, true),
+    ).toBe("dg1WithoutBirthDate.licence");
   });
 
   it("says where a mixed flow's BSN comes from", () => {
-    expect(consentDetailKey("dg11", ["dg1", "dg11"], "mixed", CARDS)).toBe(
-      "dg11.mixed",
-    );
-    expect(consentDetailKey("dg11", ["dg1"], "mixed", CARDS)).toBe(
+    expect(
+      consentDetailKey("dg11", ["dg1", "dg11"], "mixed", CARDS, true),
+    ).toBe("dg11.mixed");
+    expect(consentDetailKey("dg11", ["dg1"], "mixed", CARDS, true)).toBe(
       "dg11.mixedBsnOnly",
     );
-    expect(consentDetailKey("dg11", ["dg11"], "licence", CARDS)).toBe(
+    expect(consentDetailKey("dg11", ["dg11"], "licence", CARDS, true)).toBe(
       "dg11.document",
     );
   });
 
   it("leaves the items that do not depend on the source", () => {
     expect(
-      consentDetailKey("selfie", ["selfie"], "registered", CARDS),
+      consentDetailKey("selfie", ["selfie"], "registered", CARDS, true),
     ).toBeUndefined();
   });
 });
@@ -164,16 +166,20 @@ describe("the documents the texts name", () => {
     expect(consentDocuments(["personal_data"])).toEqual(EVERY_DOCUMENT);
   });
 
-  it("say a passport's back is the page with the BSN", () => {
-    expect(consentDetailKey("document_image", [], "document", CARDS)).toBe(
-      "photos.sides",
-    );
+  it("ask a passport's back, its BSN page, only of a flow keeping the BSN", () => {
+    const withPassport: DocumentKind[] = ["passport", "identity_card"];
     expect(
-      consentDetailKey("document_image", [], "document", [
-        "passport",
-        "identity_card",
-      ]),
+      consentDetailKey("document_image", [], "document", CARDS, true),
+    ).toBe("photos.sides");
+    expect(
+      consentDetailKey("document_image", [], "document", withPassport, true),
     ).toBe("photos.sidesWithPassport");
+    expect(
+      consentDetailKey("document_image", [], "document", withPassport, false),
+    ).toBe("photos.sidesPassportFront");
+    expect(
+      consentDetailKey("document_image", [], "document", ["passport"], false),
+    ).toBe("photos.passportFront");
   });
 });
 

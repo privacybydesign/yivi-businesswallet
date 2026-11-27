@@ -536,6 +536,7 @@ type resultView struct {
 		DocumentImage     *imageView         `json:"documentImage"`
 		DocumentImageBack *imageView         `json:"documentImageBack"`
 		DocumentCheck     *documentCheckInfo `json:"documentCheck"`
+		ZoneDiffs         []pp.ZoneDiff      `json:"documentZoneDiffs"`
 	} `json:"result"`
 	Devices []struct {
 		Role string `json:"role"`
@@ -659,8 +660,10 @@ func (s *Server) SessionIdentity(ctx context.Context, t pp.Tenant, id, token str
 	if doc := res.Document; doc != nil {
 		out.GivenName, out.FamilyName = strings.TrimSpace(doc.FirstName), strings.TrimSpace(doc.LastName)
 		out.FullGivenName, out.FullFamilyName = strings.TrimSpace(doc.FullFirstName), strings.TrimSpace(doc.FullLastName)
-		out.BirthDate, out.Nationality, out.PersonalNumber = doc.DateOfBirth, doc.Nationality, doc.PersonalNumber
-		ev.DocumentType, ev.DocumentKind, ev.IssuingState, ev.ExpiryDate = doc.Type, doc.Kind, doc.IssuingState, doc.DateOfExpiry
+		// A session disclosed before its dates were stored as YYYY-MM-DD holds
+		// them as the Yivi app gave them (DD-MM-YYYY): read as the spec says.
+		out.BirthDate, out.Nationality, out.PersonalNumber = isoDisclosedDate(doc.DateOfBirth), doc.Nationality, doc.PersonalNumber
+		ev.DocumentType, ev.DocumentKind, ev.IssuingState, ev.ExpiryDate = doc.Type, doc.Kind, doc.IssuingState, isoDisclosedDate(doc.DateOfExpiry)
 	}
 	if chip := res.ChipChecks; chip != nil {
 		if p := chip.Passive; p != nil {
@@ -687,6 +690,7 @@ func (s *Server) SessionIdentity(ctx context.Context, t pp.Tenant, id, token str
 	}
 	out.Photo, out.Selfie, out.ReferencePhoto = res.Photo.image(), res.Selfie.image(), res.ReferencePhoto.image()
 	out.DocumentImage, out.DocumentImageBack = res.DocumentImage.image(), res.DocumentImageBack.image()
+	out.ZoneDiffs = res.ZoneDiffs
 	return out, nil
 }
 
@@ -722,6 +726,7 @@ func addDocumentCheckEvidence(ev *pp.Evidence, c *documentCheckInfo) {
 	}
 	ev.DocumentVerdict, ev.DocumentScore = c.Verdict, c.Score
 	ev.DocumentFields, ev.DocumentZones = checkOf(c.FieldsValid), checkOf(c.ZonesMatch)
+	ev.DocumentZonesMismatch = c.ZonesMismatch
 	if ev.DocumentKind == "" {
 		ev.DocumentKind = c.DocumentKind
 	}
@@ -1278,11 +1283,21 @@ func (s *Server) auditDocumentPhoto(updated session.Session, fd *flow.FlowDefini
 	s.auditStepSubmitted(updated, fd, faceStepName(fd), face)
 }
 
+// sessionZoneDiffs are diffs as the session keeps them.
+func sessionZoneDiffs(diffs []pp.ZoneDiff) []session.ZoneDiff {
+	var out []session.ZoneDiff
+	for _, d := range diffs {
+		out = append(out, session.ZoneDiff(d))
+	}
+	return out
+}
+
 // documentCheckEvidence is c as the session keeps it.
 func documentCheckEvidence(c pp.DocumentCheck) *session.DocumentCheck {
 	d := c.Document
 	return &session.DocumentCheck{
 		Verdict: string(c.Verdict), Score: c.Score, FieldsValid: c.FieldsValid, ZonesMatch: c.ZonesMatch,
+		ZonesMismatch: c.ZonesMismatch, ZoneDiffs: sessionZoneDiffs(c.ZoneDiffs),
 		Document: session.ScannedDocument{
 			Kind: d.Kind, IssuingState: flow.IssuingStateCode(d.IssuingState), Nationality: d.Nationality, Number: d.Number,
 			Surname: d.Surname, GivenNames: d.GivenNames, DateOfBirth: d.DateOfBirth, DateOfExpiry: d.DateOfExpiry,

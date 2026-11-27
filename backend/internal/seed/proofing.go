@@ -246,7 +246,7 @@ var (
 	odixusDigiDDocuments = []string{flow.DocumentKindPersonalData}
 	odixusDocuments      = []string{flow.DocumentKindPassport, flow.DocumentKindIdentityCard, flow.DocumentKindResidencePermit}
 	odixusIdentityData   = []string{"dg1"}
-	odixusDocumentData   = []string{"dg1", "dg11", "biometrics", "document_image"}
+	odixusDocumentData   = []string{"dg1", "dg11", "biometrics", "selfie", "document_image"}
 	odixusLicenceData    = []string{"dg1", "dg11", "document_image"}
 	odixusCopyReason     = map[string]string{
 		"en": "To keep a copy of your identity document, as the law asks of your employer.",

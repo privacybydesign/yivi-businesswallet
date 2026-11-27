@@ -7068,8 +7068,9 @@ paths:
         `completion`: `redirect` (the session's `redirectUrl` when it has one, else the page's
         own thank-you screen) or `done` (always the thank-you screen), and `returnUrl`: the
         page a link for the flow is made with as its `redirectUrl` when it names none of its
-        own (empty for none). A flow never set reads `enabled: true, locales: [], completion:
-        redirect, returnUrl: ""`.
+        own (empty for none), and `followUp`: whether the flow follows another for the same
+        person. A flow never set reads `enabled: true, locales: [], completion: redirect,
+        returnUrl: "", followUp: false`.
       responses:
         '200':
           description: The flow's hosted page settings.
@@ -7085,6 +7086,7 @@ paths:
                     locales: []
                     completion: redirect
                     returnUrl: ""
+                    followUp: false
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -7147,6 +7149,7 @@ paths:
                     locales: [nl]
                     completion: done
                     returnUrl: ""
+                    followUp: false
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -7670,7 +7673,7 @@ paths:
         `selfie` (the live face matched against it), and `documentImage` and `documentImageBack`
         (photos of the document's front and back; a passport's back is its personal number
         page), each `{mimeType, data}` with `data` base64, when the flow requested them; the API
-        carries the document's images for an approval only, and never the selfie. A check
+        carries the document's images and the selfie for an approval only. A check
         waiting for review holds its face photos until it is decided, also on a flow that does
         not keep them after the match. Audited `identity_proofing.result_read`
         with the administrator as actor on every read. A member's request, one erased, or a
@@ -10906,7 +10909,8 @@ paths:
         Authenticated with the organisation's API key as a Bearer token, with `settings:write`. Changes the fields sent and leaves the rest,
         audited `identity_proofing.settings_updated`. `allowedRedirectOrigins` replaces the list:
         each an origin (`https://host[:port]`, or `http` on `localhost`, `127.0.0.1` or `[::1]`),
-        at most 10. Removing the
+        at most 50. `https://*.example.com` covers every subdomain of `example.com`, but not
+        `example.com` itself. Removing the
         origin of a flow's return page is refused (`redirect_origin_in_use`, 409): change that
         flow's `returnUrl` first.
       security:
@@ -11484,6 +11488,7 @@ paths:
                       documentPhoto: false
                       bsn: false
                       browserOnly: false
+                      followUp: false
                       diplomaMode: "off"
                       addressMode: "off"
                       retentionDays: 31
@@ -17095,6 +17100,15 @@ components:
                     type: string
                     enum: [valid, invalid, not_performed]
                     description: Whether every field read twice (MRZ and printed text) read the same.
+                  zonesMismatch:
+                    type: array
+                    items:
+                      type: string
+                    example: [surname]
+                    description: >-
+                      With `zones` `invalid`, the names of the fields whose MRZ and printed text
+                      read differently, such as `surname`, `given_names`, `document_number` or
+                      `date_of_birth`. Only the names, never what was read. Absent otherwise.
                 required: [verdict, fields, zones]
             required: [type]
         diplomas:
@@ -17127,6 +17141,13 @@ components:
           description: >-
             The photo of the document's back (a residence permit's back, a passport's personal
             number page), for an approval of a flow that photographs it.
+          allOf:
+            - $ref: '#/components/schemas/ProofingImage'
+        selfie:
+          description: >-
+            The live face matched against the document, for an approval of a flow that keeps
+            the face photos and requests `selfie`; absent otherwise, and once the engine
+            dropped it.
           allOf:
             - $ref: '#/components/schemas/ProofingImage'
       required: [id, status, evidence]
@@ -17796,7 +17817,12 @@ components:
           description: >-
             Where a link for the flow sends the person when it names no `redirectUrl` of its
             own; empty for none.
-      required: [enabled, locales, completion, returnUrl]
+        followUp:
+          type: boolean
+          description: >-
+            The flow follows another for the same person: its consent screen leaves out the
+            introduction the first one already gave, and lists only what this flow collects.
+      required: [enabled, locales, completion, returnUrl, followUp]
     ProofingFlowHostedUpdate:
       type: object
       additionalProperties: false
@@ -17821,6 +17847,9 @@ components:
           description: >-
             Optional, only with `completion: redirect`. The return page, on one of the
             organisation's `allowedRedirectOrigins`. Leave it out for no return page.
+        followUp:
+          type: boolean
+          description: Optional. Whether the flow follows another for the same person. Default false.
       required: [enabled, completion]
     ProofingDataMatches:
       type: object
@@ -18853,13 +18882,13 @@ components:
           description: Optional. What the law makes the organisation keep. `null` removes it.
         allowedRedirectOrigins:
           type: array
-          maxItems: 10
+          maxItems: 50
           items:
             type: string
           description: >-
             Optional. Replaces the list of origins a hosted page may send its person back to
             and be framed on: each `https://host[:port]` (or `http` on `localhost`, `127.0.0.1`
-            or `[::1]`). An origin a
+            or `[::1]`), or `https://*.host[:port]` for every subdomain of `host`. An origin a
             flow's return page is on cannot be removed (409 `redirect_origin_in_use`).
     ProofingBrandingForm:
       type: object
@@ -19229,6 +19258,11 @@ components:
                   description: >-
                     Whether the page runs every step of the flow by itself, so no app is chosen:
                     a flow of only the document photo, say.
+                followUp:
+                  type: boolean
+                  description: >-
+                    Whether the flow follows another for the same person, so the consent screen
+                    leaves out the introduction.
                 diplomaMode:
                   type: string
                   enum: ['off', required]

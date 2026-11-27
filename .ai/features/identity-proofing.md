@@ -899,8 +899,10 @@ post-review outcome stay the system's.
   images: `photo`, `selfie`, `referencePhoto`, `documentImage` and
   `documentImageBack`; never the document number), audited `result_read`; 404
   once erased. For an approval the public API adds the document's images
-  (`photo`, `documentImage`, `documentImageBack`), never the selfie or the
-  reference photo.
+  (`photo`, `documentImage`, `documentImageBack`) and the `selfie` the engine
+  released (a flow keeping face photos and requesting `selfie`), never the
+  reference photo or the document scan's `zoneDiffs` (what the MRZ and the
+  printed text read of the fields that differ: the wallet's view only).
   An org admin reads the same shape in the wallet at
   `GET /orgs/{slug}/identity-proofing/requests/{id}/result`
   (`AdminRequestResult`, sharing `requestResult`), audited `result_read` with the
@@ -1357,9 +1359,14 @@ request is in flight), then calls
 actor label `hosted_link`); a started link is 409 `link_started`. The org
 lists `allowedRedirectOrigins` (org settings, `PATCH .../settings`; stored
 `identity_proofing_settings.allowed_redirect_origins`): https origins, or http
-on a loopback host, at most 10, normalised lowercase. The host must be a DNS
+on a loopback host, at most 50, normalised lowercase. The host must be a DNS
 name or an IP address (`validHost`): the origins are written into the page's
-`frame-ancestors`, where `*`, a quote or a `;` would mean something else. A hosted create may carry
+`frame-ancestors`, where `*`, a quote or a `;` would mean something else. The
+one exception is a leading `*.` over https (`https://*.example.nl`, at least
+two labels after it): every subdomain at any depth, not the name itself, as
+`frame-ancestors` matches it; `originAllowed` matches a redirect the same way,
+and the page posts its completion to the framing page's own origin
+(`postTargets`) since `postMessage` takes no pattern. A hosted create may carry
 `redirectUrl` on one of them (else 400 `redirect_not_allowed`; any other channel
 400). The link's redirect, stored on the request when it is made:
 

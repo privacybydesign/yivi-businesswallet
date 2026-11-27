@@ -25,6 +25,7 @@ import {
   missingReasonLocales,
   personalDataAllowed,
   idemAppAllowed,
+  keepsSelfieUnreleased,
   noApp,
   withoutApps,
   lockedByLevel,
@@ -1157,7 +1158,11 @@ function PrivacySection({
         id="flow-keep-face-photos"
         checked={draft.keepFacePhotos}
         label={t("identityProofingFlows.editor.privacy.keepFacePhotos")}
-        hint={t("identityProofingFlows.editor.privacy.keepFacePhotosHint")}
+        hint={
+          keepsSelfieUnreleased(draft)
+            ? `${t("identityProofingFlows.editor.privacy.keepFacePhotosHint")} ${t("identityProofingFlows.editor.privacy.selfieNotReceived")}`
+            : t("identityProofingFlows.editor.privacy.keepFacePhotosHint")
+        }
         onChange={() => update({ keepFacePhotos: !draft.keepFacePhotos })}
       />
     </Section>

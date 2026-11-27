@@ -110,6 +110,7 @@ export function hostedPreviewPage(input: HostedPreviewInput): HostedProofing {
       documentPhoto: flow?.steps.includes(STEP_DOCUMENT_PHOTO) ?? false,
       bsn: keepsBsn(flow?.bsnPolicy),
       browserOnly: flow?.browserOnly ?? false,
+      followUp: false,
       diplomaMode: flow?.diplomaMode ?? "off",
       addressMode: flow?.addressMode ?? "off",
       employmentMode: flow?.employmentMode ?? "off",

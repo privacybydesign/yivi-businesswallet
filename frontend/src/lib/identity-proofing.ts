@@ -641,6 +641,18 @@ export function attributeAvailable(
   return draftSteps(draft).some((step) => steps.includes(step));
 }
 
+// Whether a draft keeps the face photos but releases no selfie: keeping it
+// alone does not hand it out, "selfie" must be ticked too.
+export function keepsSelfieUnreleased(draft: ProofingFlowDraft): boolean {
+  return (
+    draft.keepFacePhotos &&
+    attributeAvailable(draft, ATTRIBUTE_SELFIE) &&
+    !draft.requestedAttributes.has(ATTRIBUTE_SELFIE)
+  );
+}
+
+const ATTRIBUTE_SELFIE = "selfie";
+
 // The requested data a draft collects: ticked, with its step in the draft.
 export function collectedAttributes(draft: ProofingFlowDraft): string[] {
   return REQUESTED_ATTRIBUTES.map((a) => a.value).filter(
@@ -2587,6 +2599,7 @@ export function hostedDraftDirty(
     draft.enabled !== seed.enabled ||
     draft.completion !== seed.completion ||
     savedReturnUrl(draft) !== seed.returnUrl ||
+    draft.followUp !== seed.followUp ||
     draft.locales.join() !== seed.locales.join()
   );
 }
@@ -2879,6 +2892,26 @@ export function isDocumentVerdict(
   value: string,
 ): value is (typeof DOCUMENT_VERDICTS)[number] {
   return (DOCUMENT_VERDICTS as readonly string[]).includes(value);
+}
+
+// The fields a document scan compares between the MRZ and the printed text,
+// as the scan service names them.
+export const ZONE_FIELDS = [
+  "surname",
+  "given_names",
+  "document_number",
+  "date_of_birth",
+  "date_of_expiry",
+  "sex",
+  "nationality_code",
+  "issuing_state_code",
+  "personal_number",
+] as const;
+
+export function isZoneField(
+  value: string,
+): value is (typeof ZONE_FIELDS)[number] {
+  return (ZONE_FIELDS as readonly string[]).includes(value);
 }
 
 export const CHECK_OUTCOMES = [

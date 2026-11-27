@@ -439,7 +439,7 @@ func (s *Service) DeclineHosted(ctx context.Context, token string) (Request, err
 // maxRedirectOrigins and maxRedirectLength bound what an org lists and what a
 // hosted request redirects to.
 const (
-	maxRedirectOrigins = 10
+	maxRedirectOrigins = 50
 	maxRedirectLength  = 2048
 )
 
@@ -455,27 +455,67 @@ const (
 var loopbackHosts = []string{"localhost", "127.0.0.1", "::1"}
 
 // parseRedirectOrigin reads raw as an origin: https (or http on a loopback
-// host), a host, an optional port, and nothing else. It returns the origin
-// lowercased, as a browser serialises it.
+// host), a host, an optional port, and nothing else. The host may start with
+// "*." over https for every subdomain of the rest, as frame-ancestors reads
+// it. It returns the origin lowercased, as a browser serialises it.
 func parseRedirectOrigin(raw string) (string, error) {
 	u, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") {
 		return "", fmt.Errorf("%w: %q is not an origin (scheme://host[:port])", ErrInvalidInput, raw)
 	}
-	if !validHost(u.Hostname()) {
+	host, wildcard := strings.CutPrefix(u.Hostname(), wildcardPrefix)
+	if !validHost(host) || (wildcard && !wildcardBase(host)) {
 		return "", fmt.Errorf("%w: %q is not an origin (scheme://host[:port])", ErrInvalidInput, raw)
 	}
 	origin := strings.ToLower(u.Scheme + "://" + u.Host)
-	if u.Scheme != "https" && (u.Scheme != "http" || !slices.Contains(loopbackHosts, strings.ToLower(u.Hostname()))) {
+	if u.Scheme != "https" && (wildcard || u.Scheme != "http" || !slices.Contains(loopbackHosts, strings.ToLower(u.Hostname()))) {
 		return "", fmt.Errorf("%w: %q must use https", ErrInvalidInput, raw)
 	}
 	return origin, nil
 }
 
+// wildcardPrefix starts an origin's host that stands for each of its
+// subdomains.
+const wildcardPrefix = "*."
+
+// minWildcardLabels keeps a wildcard under a registered name, so "*.nl" or
+// "*.com" is refused.
+const minWildcardLabels = 2
+
+// wildcardBase reports whether host may follow "*.": a DNS name, not an
+// address, of at least minWildcardLabels labels.
+func wildcardBase(host string) bool {
+	if _, err := netip.ParseAddr(host); err == nil {
+		return false
+	}
+	return strings.Count(host, ".")+1 >= minWildcardLabels
+}
+
+// originAllowed reports whether origin, lowercased, is one of allowed: equal
+// to one, or a subdomain at any depth of a "*." one with the same scheme
+// and port, as frame-ancestors matches it.
+func originAllowed(origin string, allowed []string) bool {
+	for _, a := range allowed {
+		if a == origin {
+			return true
+		}
+		scheme, host, ok := strings.Cut(a, "://"+wildcardPrefix)
+		if !ok {
+			continue
+		}
+		rest, found := strings.CutPrefix(origin, scheme+"://")
+		if found && strings.HasSuffix(rest, "."+host) {
+			return true
+		}
+	}
+	return false
+}
+
 // validHost reports whether host, a URL's hostname, is an IP address or a DNS
 // name: dot-separated labels of letters, digits and inner hyphens. Anything
-// else, a * wildcard, a quote or a ;, would mean something else in the
-// frame-ancestors list the origin is written into. An internationalised name
+// else, a * past the leading "*." parseRedirectOrigin takes off, a quote or
+// a ;, would mean something else in the frame-ancestors list the origin is
+// written into. An internationalised name
 // is entered in its xn-- form, as a browser serialises the origin.
 func validHost(host string) bool {
 	if _, err := netip.ParseAddr(host); err == nil {
@@ -556,7 +596,7 @@ func checkRedirect(raw string, settings Settings) error {
 	if err != nil || u.Host == "" || u.User != nil {
 		return fmt.Errorf("%w: redirectUrl must be an absolute URL", ErrInvalidInput)
 	}
-	if !slices.Contains(settings.RedirectOrigins, strings.ToLower(u.Scheme+"://"+u.Host)) {
+	if !originAllowed(strings.ToLower(u.Scheme+"://"+u.Host), settings.RedirectOrigins) {
 		return ErrRedirectNotAllowed
 	}
 	return nil

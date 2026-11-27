@@ -133,13 +133,11 @@ func assertVerifiedHookMatchesAPI(t *testing.T, verified receivedHook, sessionID
 	if err := json.Unmarshal(apiResult, &fromAPI); err != nil {
 		t.Fatalf("API result: %v", err)
 	}
-	for _, field := range []string{"id", "status", "identity", "evidence", "photo"} {
+	// The selfie is the one the engine released (the stub's always is).
+	for _, field := range []string{"id", "status", "identity", "evidence", "photo", "selfie"} {
 		if fromHook[field] == nil || !sameJSON(fromHook[field], fromAPI[field]) {
 			t.Errorf("result %s: webhook %v, API %v; want the same, set", field, fromHook[field], fromAPI[field])
 		}
-	}
-	if fromHook["selfie"] != nil || fromAPI["selfie"] != nil {
-		t.Error("a result carries the selfie")
 	}
 }
 

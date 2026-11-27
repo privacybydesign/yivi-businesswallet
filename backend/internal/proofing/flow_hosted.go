@@ -40,6 +40,9 @@ type FlowHosted struct {
 	Locales    []email.Locale
 	Completion Completion
 	ReturnURL  string
+	// FollowUp is a flow that follows another for the same person: its
+	// consent screen leaves out what the first one already said.
+	FollowUp bool
 }
 
 // DefaultFlowHosted is a flow's hosted page before an admin set it.
@@ -55,6 +58,7 @@ func (f FlowHosted) Offers(locale email.Locale) bool {
 func (f FlowHosted) auditFields() map[string]any {
 	return map[string]any{
 		"enabled": f.Enabled, "locales": f.Locales, "completion": string(f.Completion), "returnUrl": f.ReturnURL,
+		"followUp": f.FollowUp,
 	}
 }
 
@@ -76,9 +80,9 @@ func (s *FlowHostedStore) Get(ctx context.Context, orgID uuid.UUID, flowID strin
 func getFlowHosted(ctx context.Context, q database.Querier, orgID uuid.UUID, flowID string) (FlowHosted, error) {
 	var f FlowHosted
 	var completion string
-	err := q.QueryRow(ctx, `SELECT hosted_enabled, hosted_locales, hosted_completion, hosted_return_url
+	err := q.QueryRow(ctx, `SELECT hosted_enabled, hosted_locales, hosted_completion, hosted_return_url, hosted_follow_up
 		FROM identity_proofing_flow_settings WHERE organization_id = $1 AND flow_id = $2`,
-		orgID, flowID).Scan(&f.Enabled, &f.Locales, &completion, &f.ReturnURL)
+		orgID, flowID).Scan(&f.Enabled, &f.Locales, &completion, &f.ReturnURL, &f.FollowUp)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return DefaultFlowHosted(), nil
 	}
@@ -132,17 +136,17 @@ func (s *FlowHostedStore) Save(ctx context.Context, orgID uuid.UUID, flowID stri
 			return err
 		}
 		if before.Enabled == f.Enabled && before.Completion == f.Completion && before.ReturnURL == f.ReturnURL &&
-			slices.Equal(before.Locales, f.Locales) {
+			before.FollowUp == f.FollowUp && slices.Equal(before.Locales, f.Locales) {
 			return nil
 		}
 		if _, err := q.Exec(ctx, `INSERT INTO identity_proofing_flow_settings
-				(organization_id, flow_id, hosted_enabled, hosted_locales, hosted_completion, hosted_return_url)
-			VALUES ($1, $2, $3, $4, $5, $6)
+				(organization_id, flow_id, hosted_enabled, hosted_locales, hosted_completion, hosted_return_url, hosted_follow_up)
+			VALUES ($1, $2, $3, $4, $5, $6, $7)
 			ON CONFLICT (organization_id, flow_id) DO UPDATE SET
 				hosted_enabled = EXCLUDED.hosted_enabled, hosted_locales = EXCLUDED.hosted_locales,
 				hosted_completion = EXCLUDED.hosted_completion, hosted_return_url = EXCLUDED.hosted_return_url,
-				updated_at = now()`,
-			orgID, flowID, f.Enabled, f.Locales, string(f.Completion), f.ReturnURL); err != nil {
+				hosted_follow_up = EXCLUDED.hosted_follow_up, updated_at = now()`,
+			orgID, flowID, f.Enabled, f.Locales, string(f.Completion), f.ReturnURL, f.FollowUp); err != nil {
 			return fmt.Errorf("proofing: save hosted settings flow %s: %w", flowID, err)
 		}
 		return s.audit.Record(ctx, q, audit.IdentityProofingFlowHostedConfigured,
@@ -215,15 +219,9 @@ func (s *Service) SaveFlowHosted(ctx context.Context, org Org, flowID string, f 
 			return FlowHosted{}, err
 		}
 	}
-	locales := make([]email.Locale, 0, len(f.Locales))
-	for _, raw := range f.Locales {
-		locale, ok := email.ParseLocale(string(raw))
-		if !ok {
-			return FlowHosted{}, fmt.Errorf("%w: unsupported language %q", ErrInvalidInput, raw)
-		}
-		if !slices.Contains(locales, locale) {
-			locales = append(locales, locale)
-		}
+	locales, err := hostedLocales(f.Locales)
+	if err != nil {
+		return FlowHosted{}, err
 	}
 	f.Locales = locales
 	flow, err := s.orgFlow(ctx, org, flowID)
@@ -237,6 +235,21 @@ func (s *Service) SaveFlowHosted(ctx context.Context, org Org, flowID string, f 
 		return FlowHosted{}, err
 	}
 	return s.flowHostedSettings.Save(ctx, org.ID, flowID, f)
+}
+
+// hostedLocales keeps each supported language once, in the order given.
+func hostedLocales(raws []email.Locale) ([]email.Locale, error) {
+	locales := make([]email.Locale, 0, len(raws))
+	for _, raw := range raws {
+		locale, ok := email.ParseLocale(string(raw))
+		if !ok {
+			return nil, fmt.Errorf("%w: unsupported language %q", ErrInvalidInput, raw)
+		}
+		if !slices.Contains(locales, locale) {
+			locales = append(locales, locale)
+		}
+	}
+	return locales, nil
 }
 
 // orgHasFlow is ErrFlowNotFound for a flow that is not one of the org's.

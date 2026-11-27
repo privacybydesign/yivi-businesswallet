@@ -1098,8 +1098,10 @@ func TestProofingAPIKeyScopesFlow(t *testing.T) {
 	if result.ID != approved.ID || result.Status != "approved" || result.Identity == nil || result.Identity.FamilyName == "" {
 		t.Errorf("result = %+v; want the approved identity", result)
 	}
-	if result.Photo == nil || result.Photo.Data == "" || result.Selfie != nil {
-		t.Errorf("result images = photo %+v, selfie %+v; want the document's portrait and no selfie", result.Photo, result.Selfie)
+	// The engine releases the selfie of a flow keeping and requesting it; the
+	// stub's approval always has one.
+	if result.Photo == nil || result.Photo.Data == "" || result.Selfie == nil || result.Selfie.Data == "" {
+		t.Errorf("result images = photo %+v, selfie %+v; want the document's portrait and the released selfie", result.Photo, result.Selfie)
 	}
 	if n := env.auditCount(orgID, audit.IdentityProofingResultRead); n != 1 {
 		t.Errorf("result_read audits = %d, want 1", n)

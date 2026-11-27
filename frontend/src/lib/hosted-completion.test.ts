@@ -9,6 +9,7 @@ import {
   hostedTheme,
   originLines,
   postCompletion,
+  postTargets,
   type MessageTarget,
 } from "./hosted-completion";
 
@@ -168,6 +169,40 @@ describe("postCompletion", () => {
       completedMessage("ps_abc", "approved"),
     );
     expect(posted).toEqual([]);
+  });
+});
+
+describe("postTargets", () => {
+  const origins = [
+    "https://portal.example",
+    "https://*.acme.example",
+    "https://*.shop.example:8443",
+  ];
+
+  it("posts to the exact origins, and to an embedder a wildcard covers", () => {
+    expect(postTargets(origins, "https://a.b.acme.example")).toEqual([
+      "https://portal.example",
+      "https://a.b.acme.example",
+    ]);
+    expect(postTargets(origins, "https://www.shop.example:8443")).toEqual([
+      "https://portal.example",
+      "https://www.shop.example:8443",
+    ]);
+  });
+
+  it("never posts to an embedder no wildcard covers, nor to a pattern", () => {
+    for (const embedder of [
+      undefined,
+      "https://acme.example",
+      "http://portal.acme.example",
+      "https://evilacme.example",
+      "https://www.shop.example",
+      "https://portal.example",
+    ]) {
+      expect(postTargets(origins, embedder)).toEqual([
+        "https://portal.example",
+      ]);
+    }
   });
 });
 

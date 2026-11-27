@@ -66,6 +66,21 @@ func TestEmploymentReviewResult(t *testing.T) {
 	}
 }
 
+// The API carries the selfie the engine released (a flow keeping the face
+// photos and requesting it) for an approval only.
+func TestAPIResultSelfie(t *testing.T) {
+	req := Request{ID: uuid.New(), Status: StatusApproved}
+	selfie := &proofingprovider.Image{MimeType: "image/png", Base64: "c2VsZmll"}
+	identity := proofingprovider.Identity{Result: proofingprovider.Result{Status: proofingprovider.StatusApproved}, Selfie: selfie}
+	if out := newAPIResultResponse(req, identity, time.Now()); out.Selfie == nil || out.Selfie.Data != selfie.Base64 {
+		t.Errorf("approved selfie = %+v, want the released one", out.Selfie)
+	}
+	identity.Status = proofingprovider.StatusNeedsReview
+	if out := newAPIResultResponse(req, identity, time.Now()); out.Selfie != nil {
+		t.Errorf("selfie in review = %+v, want none", out.Selfie)
+	}
+}
+
 // An age_over flow's approval carries the age answer in the identity, and a
 // rejection carries no identity at all.
 func TestAPIResultAgeOver(t *testing.T) {

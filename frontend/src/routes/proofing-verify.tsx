@@ -37,7 +37,7 @@ import {
   scanDocuments,
   stepAsked,
 } from "../lib/identity-proofing";
-import { consentBasisOf } from "../lib/consent";
+import { consentBasisOf, keepsBsn } from "../lib/consent";
 import { blockingError } from "../lib/query-state";
 import { Button, Card, Stepper, TopBar } from "../ui";
 import { BrandMark } from "./proofing-ui";
@@ -282,6 +282,7 @@ function VerifyFlow({
           methods={methods}
           yiviPersonalData={acceptsPersonalData(flow)}
           scanDocuments={scanDocuments(flow)}
+          passportBack={keepsBsn(flow.bsnPolicy)}
           onStage={setSessionStage}
           onMethod={setMethod}
           diplomaMode={sent.diplomaMode}

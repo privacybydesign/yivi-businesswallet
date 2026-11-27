@@ -25,7 +25,9 @@ import {
   hostedHandBack,
   hostedLanguage,
   hostedTheme,
+  embedderOrigin,
   postCompletion,
+  postTargets,
 } from "../lib/hosted-completion";
 import type { CheckEndReason } from "../lib/hosted-completion";
 import { applyOrgTheme, clearOrgTheme } from "../lib/theme";
@@ -229,7 +231,11 @@ function HostedFlow({
       }
       handedBack.current = true;
       if (handBack.post) {
-        postCompletion(window.parent, page.embedOrigins, handBack.message);
+        postCompletion(
+          window.parent,
+          postTargets(page.embedOrigins, embedderOrigin()),
+          handBack.message,
+        );
       }
       if (handBack.redirectTo) {
         setRedirecting(true);
@@ -326,6 +332,7 @@ function HostedFlow({
               starting={start.isPending}
               error={actionError}
               embedded={framed}
+              followUp={flow.followUp}
               consent={hostedConsentBasis(flow)}
               cancel={
                 <Button
@@ -359,6 +366,7 @@ function HostedFlow({
               methods={methods}
               yiviPersonalData={flow.yiviPersonalData}
               scanDocuments={flow.scanDocuments}
+              passportBack={flow.bsn}
               onStage={setSessionStage}
               onMethod={setMethod}
               diplomaMode={flow.diplomaMode}

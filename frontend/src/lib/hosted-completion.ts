@@ -137,6 +137,42 @@ export function postCompletion(
   }
 }
 
+const WILDCARD = "://*.";
+
+// The origins to post to: the org's exact ones, and the embedding page's own
+// when a "*." one covers it, since postMessage takes no pattern.
+export function postTargets(
+  origins: readonly string[],
+  embedder: string | undefined,
+): string[] {
+  const exact = origins.filter((origin) => !origin.includes(WILDCARD));
+  if (embedder === undefined || exact.includes(embedder)) return exact;
+  const covered = origins.some((origin) => {
+    const [scheme, host] = origin.split(WILDCARD);
+    return (
+      host !== undefined &&
+      embedder.startsWith(`${scheme}://`) &&
+      embedder.endsWith(`.${host}`)
+    );
+  });
+  return covered ? [...exact, embedder] : exact;
+}
+
+// The origin of the page this one is framed on, when the browser tells:
+// Firefox has no ancestorOrigins, so the referrer then.
+export function embedderOrigin(): string | undefined {
+  const ancestors = (window.location as Partial<Location>).ancestorOrigins;
+  const parent = ancestors?.item(0) ?? null;
+  if (parent !== null) return parent;
+  try {
+    return document.referrer === ""
+      ? undefined
+      : new URL(document.referrer).origin;
+  } catch {
+    return undefined;
+  }
+}
+
 // The origins an admin typed, one per line: trimmed, blank lines dropped. The
 // backend checks each one and normalises it.
 export function originLines(text: string): string[] {

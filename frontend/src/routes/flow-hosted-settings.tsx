@@ -72,7 +72,11 @@ export function FlowHostedSettings({
         saved={settings.data}
         onOpenCheck={onOpenCheck}
       />
-      <HostedPreview slug={slug} flow={flow} />
+      <HostedPreview
+        slug={slug}
+        flow={flow}
+        followUp={settings.data.followUp}
+      />
     </div>
   );
 }
@@ -159,6 +163,32 @@ function HostedForm({
                 className="text-ink-soft text-[13px]"
               >
                 {t("identityProofingFlows.hosted.enabledHint")}
+              </span>
+            </span>
+          </label>
+          <label className="flex items-start gap-3">
+            <input
+              type="checkbox"
+              className={CONTROL}
+              checked={draft.followUp}
+              aria-labelledby={`${idBase}-follow-up`}
+              aria-describedby={`${idBase}-follow-up-hint`}
+              onChange={(event) =>
+                setDraft({ ...draft, followUp: event.target.checked })
+              }
+            />
+            <span className="flex flex-col gap-0.5">
+              <span
+                id={`${idBase}-follow-up`}
+                className="text-[14px] font-semibold"
+              >
+                {t("identityProofingFlows.hosted.followUp")}
+              </span>
+              <span
+                id={`${idBase}-follow-up-hint`}
+                className="text-ink-soft text-[13px]"
+              >
+                {t("identityProofingFlows.hosted.followUpHint")}
               </span>
             </span>
           </label>
@@ -315,9 +345,11 @@ function HostedForm({
 function HostedPreview({
   slug,
   flow,
+  followUp,
 }: Readonly<{
   slug: string;
   flow: ProofingFlow;
+  followUp: boolean;
 }>): React.JSX.Element {
   const { t } = useTranslation();
   const org = useOrganizationQuery(slug);
@@ -362,6 +394,7 @@ function HostedPreview({
           }}
           onlyApp={onlyApp}
           consent={consentBasisOf(flow)}
+          followUp={followUp}
           onContinue={() => undefined}
         />
       </Card>

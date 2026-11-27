@@ -99,6 +99,7 @@ import {
   withIdentity,
   editedFlowSelection,
   emptyFlowDraft,
+  keepsSelfieUnreleased,
   FACE_MATCH_RECOMMENDED,
   faceMatchFloor,
   faceMatchValue,
@@ -176,6 +177,25 @@ const EVERY_ATTRIBUTE: ReadonlySet<string> = new Set(
     (value) => value !== ATTRIBUTE_AGE_OVER,
   ),
 );
+
+describe("keepsSelfieUnreleased", () => {
+  it("is a draft keeping face photos without the selfie ticked", () => {
+    const keeps = draft({ faceVerification: true, keepFacePhotos: true });
+    expect(keepsSelfieUnreleased(keeps)).toBe(true);
+    expect(
+      keepsSelfieUnreleased({
+        ...keeps,
+        requestedAttributes: new Set(["selfie"]),
+      }),
+    ).toBe(false);
+    expect(keepsSelfieUnreleased({ ...keeps, keepFacePhotos: false })).toBe(
+      false,
+    );
+    expect(keepsSelfieUnreleased({ ...keeps, faceVerification: false })).toBe(
+      false,
+    );
+  });
+});
 
 describe("flowSpecFromDraft", () => {
   it("sends one app only when one is ticked", () => {
@@ -3397,6 +3417,7 @@ describe("hosted page form", () => {
     locales: [],
     completion: "redirect",
     returnUrl: "",
+    followUp: false,
   };
 
   it("starts from what is saved, every language ticked for none", () => {
@@ -3417,6 +3438,9 @@ describe("hosted page form", () => {
         { ...hostedDraft(saved), completion: "done" as const },
         saved,
       ),
+    ).toBe(true);
+    expect(
+      hostedDraftDirty({ ...hostedDraft(saved), followUp: true }, saved),
     ).toBe(true);
   });
 

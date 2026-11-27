@@ -857,6 +857,8 @@ export const en = {
       overview: {
         heading: "{{name}} wants to verify your identity",
         headingEmbedded: "Confirm your identity",
+        headingFollowUp: "One more step",
+        introFollowUp: "Now with {{sources}}. {{name}} also receives:",
         intro: "You check your identity with {{sources}}. {{name}} receives:",
         noData: "Only the outcome: whether your identity was verified.",
         why: "Why:",
@@ -931,6 +933,9 @@ export const en = {
           sides: "Photos of the front and back of your {{documents}}.",
           sidesWithPassport:
             "Photos of the front and back of your {{documents}}. A passport's back is the page with your BSN.",
+          sidesPassportFront:
+            "Photos of the front and back of your {{documents}}. Of a passport, the front only.",
+          passportFront: "A photo of the front of your passport.",
         },
       },
       attributeDetails: {
@@ -973,6 +978,7 @@ export const en = {
           drivers_license: "the front and back of your driving licence",
         },
         passportHint: "A passport's back is the page with your BSN.",
+        passportFront: "the front of your passport",
         frameTitle: "ID scan",
         start: "Photograph the document",
         finishing: "Adding the photos…",
@@ -1128,6 +1134,19 @@ export const en = {
         },
         documentFields: "Printed data",
         documentZones: "MRZ matches printed text",
+        zonesDiffer: "differs in: {{fields}}",
+        zoneValues: "MRZ: {{mrz}} · printed: {{printed}}",
+        zoneFields: {
+          surname: "surname",
+          given_names: "given names",
+          document_number: "document number",
+          date_of_birth: "date of birth",
+          date_of_expiry: "expiry date",
+          sex: "sex",
+          nationality_code: "nationality",
+          issuing_state_code: "issuing country",
+          personal_number: "BSN",
+        },
         checks: {
           valid: "Valid",
           invalid: "Invalid",
@@ -1408,7 +1427,7 @@ export const en = {
     },
     redirectOrigins: {
       title: "Redirect origins",
-      hint: "One per line, such as https://portal.example.com. A hosted page may send its subject back to these origins and be embedded on them.",
+      hint: "One per line, such as https://portal.example.com, or https://*.example.com for every subdomain. A hosted page may send its subject back to these origins and be embedded on them.",
       save: "Save",
     },
     reviews: {
@@ -1886,6 +1905,9 @@ export const en = {
       enabled: "Allow sending this flow as a link",
       enabledHint:
         "Members can then pick “Copy a link” or e-mail when they verify a person.",
+      followUp: "Follows another flow",
+      followUpHint:
+        "For a second flow for the same person, right after a first. Its consent screen is then called “One more step”, skips the introduction and the contact, and lists only what this flow collects.",
       locales: "Languages",
       localesHint:
         "The page opens in the language of the request, otherwise in the person's browser language.",
@@ -1964,7 +1986,7 @@ export const en = {
       dg2: "The holder's passport photo stored on the chip, shown next to the selfie.",
       chip_checks: "Whether the chip proved genuine and not copied.",
       document_image:
-        "The front and back of an ID card or driving licence, or of a passport, whose back is the page with the BSN.",
+        "The front and back of an ID card or driving licence, and of a passport the front, plus the page with the BSN when the flow keeps the BSN.",
       selfie: "The photo of the person's face taken during the face check.",
       biometrics:
         "How closely the face matched the document photo, and whether it was a live person.",
@@ -2052,7 +2074,7 @@ export const en = {
         addressHint:
           "After the identity check, in the browser rather than the Idem app: the person enters their postal address. A Dutch address is checked against the Dutch address register (BAG); any other is kept as they declare it. Such a flow is shown on screen or sent as a hosted link, never mailed.",
         photoHint:
-          "The front and back of an ID card or driving licence, or of a passport, whose back is the page with the BSN, taken in the browser with the ID scan. Shown on screen or sent as a hosted link, never by mail.",
+          "The front and back of an ID card or driving licence, and of a passport the front, plus the page with the BSN when the flow keeps the BSN. Taken in the browser with the ID scan. Shown on screen or sent as a hosted link, never by mail.",
         faceHint:
           "A selfie, checked to be a live person and compared with the photo on the chip.",
         faceInScan: "Check the face in the ID scan",
@@ -2175,6 +2197,8 @@ export const en = {
         keepFacePhotos: "Keep face photos after the match",
         keepFacePhotosHint:
           "Off: the portrait, selfie and the sender's photo are dropped once the face match is done; its verdicts stay. Turn it on only for an organisation that must keep them.",
+        selfieNotReceived:
+          "You only receive the selfie itself when you also tick Selfie under What you receive.",
       },
       footer:
         "Saving creates version {{version}}. Requests already sent keep their version.",

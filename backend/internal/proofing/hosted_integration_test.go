@@ -54,14 +54,14 @@ func TestFlowHostedStore(t *testing.T) {
 	if got, err := store.Get(ctx, orgID, "flow-1"); err != nil || !got.Enabled || got.Completion != CompletionRedirect || len(got.Locales) != 0 {
 		t.Fatalf("never set = %+v, %v; want the defaults", got, err)
 	}
-	want := FlowHosted{Enabled: false, Locales: []email.Locale{email.LocaleNL}, Completion: CompletionDone}
+	want := FlowHosted{Enabled: false, Locales: []email.Locale{email.LocaleNL}, Completion: CompletionDone, FollowUp: true}
 	for range 2 {
 		if _, err := store.Save(ctx, orgID, "flow-1", want); err != nil {
 			t.Fatalf("Save: %v", err)
 		}
 	}
 	got, err := store.Get(ctx, orgID, "flow-1")
-	if err != nil || got.Enabled || got.Completion != CompletionDone || !slices.Equal(got.Locales, want.Locales) {
+	if err != nil || got.Enabled || got.Completion != CompletionDone || !got.FollowUp || !slices.Equal(got.Locales, want.Locales) {
 		t.Errorf("Get = %+v, %v; want %+v", got, err, want)
 	}
 	var audited int
