@@ -219,15 +219,9 @@ func (s *Service) SaveFlowHosted(ctx context.Context, org Org, flowID string, f 
 			return FlowHosted{}, err
 		}
 	}
-	locales := make([]email.Locale, 0, len(f.Locales))
-	for _, raw := range f.Locales {
-		locale, ok := email.ParseLocale(string(raw))
-		if !ok {
-			return FlowHosted{}, fmt.Errorf("%w: unsupported language %q", ErrInvalidInput, raw)
-		}
-		if !slices.Contains(locales, locale) {
-			locales = append(locales, locale)
-		}
+	locales, err := hostedLocales(f.Locales)
+	if err != nil {
+		return FlowHosted{}, err
 	}
 	f.Locales = locales
 	flow, err := s.orgFlow(ctx, org, flowID)
@@ -241,6 +235,21 @@ func (s *Service) SaveFlowHosted(ctx context.Context, org Org, flowID string, f 
 		return FlowHosted{}, err
 	}
 	return s.flowHostedSettings.Save(ctx, org.ID, flowID, f)
+}
+
+// hostedLocales keeps each supported language once, in the order given.
+func hostedLocales(raws []email.Locale) ([]email.Locale, error) {
+	locales := make([]email.Locale, 0, len(raws))
+	for _, raw := range raws {
+		locale, ok := email.ParseLocale(string(raw))
+		if !ok {
+			return nil, fmt.Errorf("%w: unsupported language %q", ErrInvalidInput, raw)
+		}
+		if !slices.Contains(locales, locale) {
+			locales = append(locales, locale)
+		}
+	}
+	return locales, nil
 }
 
 // orgHasFlow is ErrFlowNotFound for a flow that is not one of the org's.

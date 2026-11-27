@@ -336,6 +336,34 @@ type file struct {
 	URL      string `json:"url"`
 }
 
+type scanTasks struct {
+	completed    bool
+	files        []file
+	fields       []resultField
+	authenticity Authenticity
+	score        *float64
+}
+
+// readScan collects the document scan tasks' fields and document photos, and
+// whether every task completed.
+func readScan(out resultResponse) scanTasks {
+	scan := scanTasks{completed: out.State == stateCompleted}
+	for _, task := range out.Tasks {
+		scan.completed = scan.completed && task.State == stateCompleted
+		if task.Type != taskDocumentScan {
+			continue
+		}
+		scan.authenticity, scan.score = authenticity(task.Score), task.Score
+		scan.fields = append(scan.fields, task.Result...)
+		for _, f := range task.Files {
+			if f.Category == fileCategoryDocument && f.Type != fileTypeRaw {
+				scan.files = append(scan.files, f)
+			}
+		}
+	}
+	return scan
+}
+
 // Result reads transactionID's result resultID, the ids the page's return URL
 // carries, and downloads the document's photos, and the liveness check's
 // still when the face was checked, once every task completed.
@@ -345,24 +373,9 @@ func (c *Client) Result(ctx context.Context, transactionID, resultID string) (Re
 	if err := c.call(ctx, http.MethodGet, target, nil, http.StatusOK, &out); err != nil {
 		return Result{}, fmt.Errorf("idscan: result %s of transaction %s: %w", resultID, transactionID, err)
 	}
-	var files []file
-	var fields []resultField
-	completed, scanned := out.State == stateCompleted, Authenticity("")
-	var score *float64
-	for _, task := range out.Tasks {
-		completed = completed && task.State == stateCompleted
-		if task.Type != taskDocumentScan {
-			continue
-		}
-		scanned, score = authenticity(task.Score), task.Score
-		fields = append(fields, task.Result...)
-		for _, f := range task.Files {
-			if f.Category == fileCategoryDocument && f.Type != fileTypeRaw {
-				files = append(files, f)
-			}
-		}
-	}
-	if !completed {
+	scan := readScan(out)
+	files, fields, scanned, score := scan.files, scan.fields, scan.authenticity, scan.score
+	if !scan.completed {
 		return Result{}, nil
 	}
 	face, selfie := readFace(out.Tasks)

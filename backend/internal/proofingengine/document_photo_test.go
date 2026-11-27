@@ -275,6 +275,22 @@ func authenticScan() pp.DocumentCheck {
 	}
 }
 
+// submitPhotoOnly submits a browser document photo with scan to a photo-only
+// flow's session and returns the stored session.
+func submitPhotoOnly(t *testing.T, photoOnly flow.FlowDefinition, scan pp.DocumentCheck) session.Session {
+	t.Helper()
+	photo := pp.DocumentPhoto{Front: pp.Image{Base64: checkerboardPNG(t), MimeType: "image/png"}, BSNRedacted: true, Check: scan}
+	sess := inProgress("ps_1")
+	sess.Method = session.MethodBrowser
+	sess.Flow, sess.FlowVersion, sess.ExpiresAt = "flow", 1, time.Now().UTC().Add(time.Hour)
+	s, store := documentPhotoServer(sess, photoOnly)
+	if err := s.SubmitDocumentPhoto(context.Background(), pp.Tenant{ID: "org"}, sess.ID, sess.Token, photo); err != nil {
+		t.Fatalf("SubmitDocumentPhoto = %v", err)
+	}
+	stored, _ := store.Get("org", sess.ID)
+	return stored
+}
+
 // A flow of the document photo alone has no app to submit it: the scan
 // decides the session. A fake document or a field that failed its check
 // rejects it, as does an expired one (what it read is the session's
@@ -303,15 +319,7 @@ func TestDocumentPhotoOnlyFlowDecidedByPhoto(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			scan := authenticScan()
 			tc.scan(&scan)
-			photo := pp.DocumentPhoto{Front: pp.Image{Base64: checkerboardPNG(t), MimeType: "image/png"}, BSNRedacted: true, Check: scan}
-			sess := inProgress("ps_1")
-			sess.Method = session.MethodBrowser
-			sess.Flow, sess.FlowVersion, sess.ExpiresAt = "flow", 1, time.Now().UTC().Add(time.Hour)
-			s, store := documentPhotoServer(sess, photoOnly)
-			if err := s.SubmitDocumentPhoto(ctx, tenant, sess.ID, sess.Token, photo); err != nil {
-				t.Fatalf("SubmitDocumentPhoto = %v", err)
-			}
-			stored, _ := store.Get("org", sess.ID)
+			stored := submitPhotoOnly(t, photoOnly, scan)
 			if stored.Status != tc.status || stored.ErrorCode != tc.errorCode {
 				t.Errorf("status %q, error %q; want %q, %q", stored.Status, stored.ErrorCode, tc.status, tc.errorCode)
 			}
