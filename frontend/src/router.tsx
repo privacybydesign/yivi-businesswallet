@@ -139,6 +139,9 @@ const heldCredentialCrumb: RouteHandle = {
       : t("attestations.held.detail.title");
   },
 };
+const verificationsCrumb: RouteHandle = {
+  crumb: ({ t }) => t("verifications.title"),
+};
 const postguardCrumb: RouteHandle = { crumb: ({ t }) => t("postguard.title") };
 const postguardSendCrumb: RouteHandle = {
   crumb: ({ t }) => t("postguard.send.title"),
@@ -384,6 +387,11 @@ export const router = createBrowserRouter([
                         handle: heldCredentialCrumb,
                       },
                     ],
+                  },
+                  {
+                    path: "verifications",
+                    lazy: page(() => import("./routes/verifications")),
+                    handle: verificationsCrumb,
                   },
                   {
                     path: "postguard",

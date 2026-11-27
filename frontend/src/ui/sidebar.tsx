@@ -28,6 +28,7 @@ type NavLabelKey =
   | "nav.developers"
   | "nav.qerds"
   | "nav.attestations"
+  | "nav.verifications"
   | "nav.postguard"
   | "nav.signing"
   | "nav.credentialRequests"
@@ -119,6 +120,11 @@ function orgNavItems(slug: string, visible: OrgNavVisibility): NavItem[] {
       labelKey: "nav.attestations",
       icon: "valid",
       count: visible.waitingOffers,
+    },
+    {
+      to: `/${slug}/verifications`,
+      labelKey: "nav.verifications",
+      icon: "scan_qrcode",
     },
     { to: `/${slug}/postguard`, labelKey: "nav.postguard", icon: "lock" },
   );
